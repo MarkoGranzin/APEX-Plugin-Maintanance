@@ -27,7 +27,17 @@ describe('T-11 CLI-Backend', () => {
     const be = createBackend({ kind: 'cli', command: 'fehlt' }, { spawn });
     const r = await be.testConnection();
     expect(r.ok).toBe(false);
-    expect(r.error).toMatch(/nicht aufrufbar/);
+    expect(r.error).toMatch(/not callable/);
+  });
+
+  it('claude → Print-Modus (-p) als Default-Args, sonst keine', async () => {
+    let argsClaude = null, argsOther = null;
+    const be1 = createBackend({ kind: 'cli', command: 'claude' }, { spawn: async (_c, a) => { argsClaude = a; return { stdout: 'x' }; } });
+    await be1.complete('hi');
+    const be2 = createBackend({ kind: 'cli', command: 'mycli' }, { spawn: async (_c, a) => { argsOther = a; return { stdout: 'x' }; } });
+    await be2.complete('hi');
+    expect(argsClaude).toEqual(['-p']);
+    expect(argsOther).toEqual([]);
   });
 });
 

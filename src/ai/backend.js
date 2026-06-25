@@ -62,14 +62,25 @@ export function createBackend(config = {}, deps = {}) {
   }
 }
 
+/**
+ * Sinnvolle Default-Argumente je CLI. Claude Code ist OHNE Flag interaktiv und kehrt nie zurück —
+ * der Print-Modus `-p` liest den Prompt von stdin und gibt die Antwort auf stdout aus.
+ */
+export function cliArgsFor(command) {
+  const base = String(command || '').replace(/\\/g, '/').split('/').pop().replace(/\.(cmd|exe|bat|ps1)$/i, '');
+  if (/^claude/i.test(base)) return ['-p'];
+  return [];
+}
+
 /** Lokale CLI: kein API-Key nötig; Prompt geht an den Befehl, Antwort kommt aus stdout. */
 export function cliBackend(config, deps = {}) {
   const run = deps.spawn ?? defaultSpawn;
+  const args = config.args ?? cliArgsFor(config.command); // z.B. claude → ['-p'] (Print-Modus)
   return {
     kind: 'cli',
     requiresApiKey: false,
     async complete(prompt, opts = {}) {
-      const { stdout } = await run(config.command, config.args ?? [], { input: prompt });
+      const { stdout } = await run(config.command, args, { input: prompt });
       return String(stdout).trim();
     },
     async testConnection() {
@@ -77,7 +88,8 @@ export function cliBackend(config, deps = {}) {
         await run(config.command, ['--version'], {});
         return { ok: true };
       } catch (err) {
-        return { ok: false, error: `CLI "${config.command}" nicht aufrufbar: ${err?.message ?? err}` };
+        const hint = /ENOENT/i.test(String(err?.message ?? err)) ? ' — not found on PATH (install it or set the full path in settings)' : '';
+        return { ok: false, error: `CLI "${config.command}" not callable: ${err?.message ?? err}${hint}` };
       }
     },
   };
@@ -122,7 +134,9 @@ export function providerBackend(config, deps = {}) {
 async function defaultSpawn(command, args, { input } = {}) {
   const { spawn } = await import('node:child_process');
   return new Promise((resolve, reject) => {
-    const p = spawn(command, args, { stdio: ['pipe', 'pipe', 'pipe'] });
+    // Windows: shell:true, sonst findet spawn npm-/CLI-Shims wie claude.cmd/.ps1 nicht (ENOENT).
+    // Sicher, weil command/args kontrollierte Konstanten sind; der Prompt geht über stdin, nicht als Arg.
+    const p = spawn(command, args, { stdio: ['pipe', 'pipe', 'pipe'], shell: process.platform === 'win32' });
     let stdout = '';
     let stderr = '';
     p.stdout.on('data', (d) => (stdout += d));
