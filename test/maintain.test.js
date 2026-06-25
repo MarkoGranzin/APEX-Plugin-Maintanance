@@ -70,6 +70,31 @@ describe('T-66 Vollautomatische Pflege = manuelle Pflege', () => {
     expect(uploaded).toBe(false);
   });
 
+  it('Breaking-Lib-Update: ohne KI meldet die Software „KI-Backend erforderlich" (kein manuell)', async () => {
+    const store = setup();
+    const applyVendoredUpdates = async () => ({ results: [{ name: 'jquery', from: '1.12.4', to: '4.0.0', applied: false, breaking: true, reason: 'breaking (Major) — Migration durch KI-Agent der Software' }], backups: new Map() });
+    const r = await maintainComponent(store, store.get('c1'), { ...baseDeps({}), applyVendoredUpdates, ai: { kind: 'stub' } });
+    const mig = r.steps.find((s) => s.step === 'migrate' && s.skipped);
+    expect(mig).toBeTruthy();
+    expect(mig.reason).toMatch(/KI-Backend erforderlich/);
+  });
+
+  it('Regression nach sicherem Update → Rollback', async () => {
+    const store = setup();
+    const applyVendoredUpdates = async () => ({ results: [{ name: 'jsonpath', from: '0.8.0', to: '0.9.0', applied: true, file: 'lib/jsonpath.js' }], backups: new Map([['/x/lib/jsonpath.js', 'old']]) });
+    let calls = 0;
+    const scan = () => { calls++; const clarify = calls >= 2; return { log: [], testPlan: 'X', coverage: null, codedTests: [], libs: [{ name: 'jsonpath', version: '0.8.0', status: 'aktuell' }], artifacts: [{ status: clarify ? 'clarify' : 'ok' }], outdated: [], risks: [], failures: [] }; };
+    const r = await maintainComponent(store, store.get('c1'), { ...baseDeps({}), scan, applyVendoredUpdates });
+    expect(r.steps.some((s) => s.step === 'lib-update' && s.rolledBack)).toBe(true);
+  });
+
+  it('Sicheres Lib-Update wird von der Software eingespielt (applied)', async () => {
+    const store = setup();
+    const applyVendoredUpdates = async () => ({ results: [{ name: 'jsonpath', from: '0.8.0', to: '0.9.0', applied: true, file: 'lib/jsonpath.js' }], backups: new Map() });
+    const r = await maintainComponent(store, store.get('c1'), { ...baseDeps({}), applyVendoredUpdates });
+    expect(r.steps.some((s) => s.step === 'lib-update' && s.applied)).toBe(true);
+  });
+
   it('zeichnet einen Lauf auf (recordRun)', async () => {
     const store = setup();
     const runs = [];

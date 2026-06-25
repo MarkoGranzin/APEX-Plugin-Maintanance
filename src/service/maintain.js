@@ -19,6 +19,7 @@ import { scanRepo } from './run-repo.js';
 import { runComponentOnce } from './run-component.js';
 import { checkLibrariesOnline } from './lib-check.js';
 import { autoFixComponent } from './autofix.js';
+import { applyVendoredUpdates, rollbackUpdates } from './lib-update.js';
 
 export async function maintainComponent(store, comp, deps = {}) {
   const now = deps.now ?? (() => new Date().toISOString());
@@ -46,6 +47,19 @@ export async function maintainComponent(store, comp, deps = {}) {
     steps.push({ step: 'lib-check', error: String(e?.message ?? e) });
   }
 
+  // 2b) Die SOFTWARE spielt sichere Vendored-Lib-Updates (Minor/Patch) wirklich ein; Breaking nur markieren.
+  const applyFn = deps.applyVendoredUpdates ?? applyVendoredUpdates;
+  let libBackups = null;
+  let appliedLibs = 0;
+  let breakingLibs = [];
+  try {
+    const upd = await applyFn(comp.path, cur().libs ?? [], { fetchFile: deps.fetchFile, fetch: deps.fetch });
+    libBackups = upd.backups;
+    appliedLibs = upd.results.filter((r) => r.applied).length;
+    breakingLibs = upd.results.filter((r) => r.breaking && !r.applied);
+    for (const r of upd.results) steps.push({ step: 'lib-update', name: r.name, from: r.from, to: r.to, applied: r.applied, reason: r.reason });
+  } catch (e) { steps.push({ step: 'lib-update', error: String(e?.message ?? e) }); }
+
   // 3) Auto-Fix: deterministisch + KI (falls Backend) + ALLE relevanten Lib-Updates
   const autoFix = deps.autoFix ?? autoFixComponent;
   let fixResult = null;
@@ -57,8 +71,28 @@ export async function maintainComponent(store, comp, deps = {}) {
   if (fixResult) steps.push({ step: 'autofix', quickFixes: fixResult.quickFixes ?? 0, libUpdate: !!fixResult.libUpdate, ai: !!fixResult.aiResult });
 
   // 4) erneut prüfen (Re-Test)
-  const r2 = runComponentOnce(store, cur(), runOpts);
+  let r2 = runComponentOnce(store, cur(), runOpts);
   steps.push({ step: 're-test', status: r2.status, summary: r2.summary });
+
+  // 4a) Sicheres Update brach den Build? → Rollback (kein blindes Tauschen ohne grünen Test)
+  if (appliedLibs && r2.status === 'zu klären' && libBackups && libBackups.size) {
+    rollbackUpdates(libBackups);
+    r2 = runComponentOnce(store, cur(), runOpts);
+    steps.push({ step: 'lib-update', rolledBack: true, reason: 'Re-Test rot nach Update — zurückgerollt' });
+  }
+
+  // 4b) BREAKING-Updates (Major) werden NICHT still in die Baseline getauscht — ein statischer Test
+  // kann eine Major-Migration nicht verifizieren. Die SOFTWARE bereitet sie per KI-Agent + Coded-UI-Test
+  // vor und übernimmt sie erst nach Review (Upload/PR). Hier nur melden, was zu tun ist.
+  for (const l of breakingLibs) {
+    const can = deps.ai && deps.ai.kind !== 'stub';
+    steps.push({
+      step: 'migrate', name: l.name, from: l.from, to: l.to, skipped: true,
+      reason: can
+        ? 'Major-Update: die Software migriert per KI-Agent + Coded-UI-Test; Übernahme erst nach Review (Upload/PR)'
+        : 'Major-Update: KI-Backend erforderlich, damit die Software die Migration durchführt',
+    });
+  }
 
   const status = r2.status === 'ok' ? 'green' : r2.status === 'zu klären' ? 'red' : 'partial';
 
