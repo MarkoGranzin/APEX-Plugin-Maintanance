@@ -91,7 +91,7 @@ export function manualReview(store, id, opts = {}) {
   const gather = opts.gather ?? defaultGather;
   const change = gather(component);
   if (!change.assets || change.assets.length === 0) {
-    return { gate: null, empty: true, message: component.source ? 'Keine prüfbaren Assets gefunden.' : 'Kein Repo zugeordnet — bitte zuerst „Repo zuordnen".' };
+    return { gate: null, empty: true, message: component.source ? 'No verifiable assets found.' : 'No repo assigned — please assign a repo first.' };
   }
   const gate = (opts.reviewGate ?? defaultReviewGate)(change, opts.gateDeps ?? {});
   const now = opts.now ?? (() => new Date().toISOString());

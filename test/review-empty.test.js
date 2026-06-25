@@ -15,7 +15,7 @@ describe('B-1 Robustheit ohne zugeordnetes Repo', () => {
     const r = manualReview(store, id, {});
     expect(r.gate).toBeNull();
     expect(r.empty).toBe(true);
-    expect(r.message).toMatch(/Repo/);
+    expect(r.message).toMatch(/repo/i);
   });
 
   it('scanRepo auf leerem/ungültigem Pfad → valides leeres Ergebnis', () => {

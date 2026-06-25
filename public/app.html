@@ -31,6 +31,8 @@
   .badge.export{color:var(--accent);border-color:rgba(76,194,255,.4)}
   .badge.tc{color:#c9a3ff;border-color:#5a4a7a}
   .dot{display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:6px;background:var(--muted)}
+  .spin{display:inline-block;width:12px;height:12px;margin-right:6px;border:2px solid var(--line);border-top-color:var(--accent);border-radius:50%;animation:spin .7s linear infinite;vertical-align:-1px}
+  @keyframes spin{to{transform:rotate(360deg)}}
   .dot.ok{background:var(--green)} .dot.warn{background:var(--yellow)} .dot.err{background:var(--red)}
   .muted{color:var(--muted)} .small{font-size:.85rem}
   .actions{display:flex;gap:6px;justify-content:flex-end}
@@ -140,7 +142,7 @@
 <div class="drawer-bg" id="drawerBg" onclick="closeDrawer()"></div>
 <div class="drawer" id="drawer">
   <div class="dh">
-    <h2 id="dName">—</h2><span class="sp" style="flex:1"></span>
+    <h2 id="dName" style="display:flex;align-items:center"><span class="spin" id="dSpin" hidden></span><span id="dNameTxt">—</span></h2><span class="sp" style="flex:1"></span>
     <button class="ghost" onclick="closeDrawer()">✕</button>
   </div>
   <div class="body" id="dBody"></div>
@@ -259,6 +261,19 @@ function libWarnBadge(w){
 
 let current = null;
 
+// Laufende Aktionen je Komponente → Spinner vor dem Plugin (Liste) + im Drawer-Titel
+const BUSY = new Set();
+function setBusy(id, on){
+  if(on) BUSY.add(id); else BUSY.delete(id);
+  document.querySelectorAll(`.spin[data-cid="${id}"]`).forEach(s=>s.hidden=!on);
+  const d=$('dSpin'); if(d && current && current.id===id) d.hidden=!on;
+}
+// Hüllt eine Aktion der aktuell offenen Komponente in den Busy-Zustand (Spinner an/aus, auch bei Fehler).
+async function withBusy(fn){
+  if(!current) return; const id=current.id; setBusy(id,true);
+  try{ return await fn(id); } finally { setBusy(id,false); }
+}
+
 async function load(){
   const list = await api('GET','/api/components');
   const rows = $('rows'); rows.innerHTML='';
@@ -269,7 +284,7 @@ async function load(){
     const badgeCls = c.formatBadge==='APEX-SQL-Export'?'export':'';
     const typeBadge = c.type==='template_component'?'<span class="badge tc">Template Component</span>':'<span class="badge">Plugin</span>';
     tr.innerHTML = `
-      <td><b>${esc(c.name)}</b>${libWarnBadge(c.libWarning)}</td>
+      <td><span class="spin" data-cid="${c.id}"${BUSY.has(c.id)?'':' hidden'}></span><b>${esc(c.name)}</b>${libWarnBadge(c.libWarning)}</td>
       <td class="small muted">${esc(c.repo||'—')}</td>
       <td>${typeBadge}</td>
       <td><span class="badge ${badgeCls}">${esc(c.formatBadge)}</span></td>
@@ -288,7 +303,7 @@ async function load(){
 
 async function openDetail(id){
   current = await api('GET','/api/components/'+id);
-  $('dName').textContent = current.name;
+  $('dNameTxt').textContent = current.name;
   const c = current;
   const libDot = c.libWarning ? ` <span style="color:${c.libWarning.vulnerable?'#f85149':'#d29922'}">●</span>` : '';
   $('dBody').innerHTML = `
@@ -300,18 +315,22 @@ async function openDetail(id){
         <span class="badge ${c.formatBadge==='APEX-SQL-Export'?'export':''}">${esc(c.formatBadge)}</span>
       </div>
       <div class="inline" style="margin-top:10px;gap:6px">
-        <button class="primary" onclick="runMaintain()">🧰 Full maintenance now</button>
-        <button onclick="runOne()">▶ Check</button>
+        <button class="primary" onclick="runMaintain()" title="Full cycle: check → web lib check → apply SAFE lib updates → auto-fix → re-test. Writes files in the workspace. Pushes only if “allow push” is ON.">🧰 Full maintenance now</button>
+        <button onclick="runOne()" title="Read-only analysis (status, libraries, protocol). With auto-repair ON this runs Full maintenance instead.">▶ Check</button>
         <details class="moreact"><summary>⋯ More actions</summary>
-          <div class="inline" style="margin-top:8px;gap:6px">
-            <button onclick="openAssign()">🔗 Assign repo</button>
-            <button onclick="openGit()">🌐 Open Git</button>
-            <button onclick="openDir()">📂 Open locally</button>
-            <button onclick="runReview()">🔍 Manual review</button>
-            <button onclick="runAutoReview()">🤖 Autonomous review &amp; fix</button>
-            <button onclick="runAutoFix()">🛠 Fix everything automatically</button>
-            <button onclick="runUpdate()">⬆ Auto-update</button>
-            <button onclick="runUpload()">📤 Upload (branch + PR)</button>
+          <div class="small muted" style="margin-top:8px">Read-only / local</div>
+          <div class="inline" style="margin-top:4px;gap:6px">
+            <button onclick="openAssign()" title="Connect/clone the Git repo so check, tests and library detection work.">🔗 Assign repo</button>
+            <button onclick="openGit()" title="Open the repo URL in the browser. No changes.">🌐 Open Git</button>
+            <button onclick="openDir()" title="Open the local working copy in the OS file manager. No changes.">📂 Open locally</button>
+            <button onclick="runReview()" title="Security + quality gate. Read-only — reports findings, changes nothing.">🔍 Manual review</button>
+          </div>
+          <div class="small muted" style="margin-top:10px">Writes files / Git — single steps of “Full maintenance”</div>
+          <div class="inline" style="margin-top:4px;gap:6px">
+            <button onclick="runAutoFix()" title="Quick-fixes (remove console/debugger) + safe lib updates + AI review-fix. Writes files. Needs an AI backend for code fixes.">🛠 Fix everything automatically</button>
+            <button onclick="runAutoReview()" title="Only the AI review-fix step of “Fix everything automatically”. Writes files via AI, rolls back if not green. Needs an AI backend.">🤖 AI review &amp; fix</button>
+            <button onclick="runUpdate()" title="Create lib update branches. Pushes to the remote only if “allow push” is ON.">⬆ Auto-update libs</button>
+            <button onclick="runUpload()" title="Commit current changes on a NEW branch and (if “allow push” is ON) push it + show PR link. Never touches your current branch.">📤 Upload (branch + PR)</button>
           </div>
         </details>
       </div>
@@ -495,9 +514,12 @@ function renderProtocol(entries){
 }
 // Eine Bibliotheks-Zeile inkl. Web-Aktualität (neueste Version, Alter, outdated)
 function libLine(l){
-  const cls = (l.status==='verwundbar'||l.outdated)?'error':(l.status==='nicht gepflegt'||l.webStatus==='veraltet')?'warn':'';
+  const unknownVer = !l.version || l.version==='unbekannt' || l.status==='unbekannt';
+  const cls = (l.status==='verwundbar')?'error':(l.status==='nicht gepflegt'||l.status==='veraltet'||l.outdated||unknownVer)?'warn':'';
+  // Verdict konsistent zum Status: veraltet > unbekannte installierte Version > aktuell (nie „current" bei unbekannter Version!)
+  const verdict = (l.outdated||l.status==='veraltet') ? '⬆ outdated' : unknownVer ? '⚠ installed version unknown' : '✓ current';
   const web = l.latest
-    ? ` · latest ${esc(l.latest)} ${l.outdated?'⬆ outdated':'✓ current'}${l.ageDays!=null?` (released ${l.ageDays} days ago)`:''}`
+    ? ` · latest ${esc(l.latest)} ${verdict}${l.ageDays!=null?` (released ${l.ageDays} days ago)`:''}`
     : (l.webStatus==='unbekannt' ? ' · web: unknown' : '');
   const inst = l.installedAgeDays!=null ? ` · installed version ${l.installedAgeDays} days old` : '';
   const link = l.source||l.homepage||l.npm;
@@ -509,16 +531,20 @@ function libLine(l){
 function sbomViz(libs){
   libs = libs||[];
   if(!libs.length) return '';
-  const vuln=libs.filter(l=>l.status==='verwundbar').length;
-  const unmaint=libs.filter(l=>l.status==='nicht gepflegt').length;
-  const outdated=libs.filter(l=>l.outdated && l.status!=='verwundbar' && l.status!=='nicht gepflegt').length;
-  const ok=libs.length-vuln-unmaint-outdated;
-  const seg=(n,col,lbl)=> n?`<div title="${lbl}: ${n}" style="flex:${n};background:${col}"></div>`:'';
-  const bar=`<div style="display:flex;height:8px;gap:2px;border-radius:6px;overflow:hidden;background:var(--line);margin:6px 0">${seg(ok,'#3fb950','current')}${seg(outdated,'#d29922','outdated')}${seg(unmaint,'#ff8a3d','unmaintained')}${seg(vuln,'#f85149','vulnerable')}</div>`;
-  const chip=(n,col,lbl)=> n?`<span class="badge" style="color:${col};border-color:${col}66">${lbl}: ${n}</span>`:'';
-  const summary = (!vuln&&!unmaint&&!outdated)
+  // Jede Lib in genau EINE Kategorie (konsistent zum Backend-libStatus). Unbekannte Version ist NICHT „current".
+  const cat = l => l.status==='verwundbar' ? 'vuln'
+    : l.status==='nicht gepflegt' ? 'unmaint'
+    : (l.outdated||l.status==='veraltet') ? 'outdated'
+    : (!l.version||l.version==='unbekannt'||l.status==='unbekannt') ? 'unknown'
+    : 'current';
+  const n={vuln:0,unmaint:0,outdated:0,unknown:0,current:0};
+  for(const l of libs) n[cat(l)]++;
+  const seg=(c,col,lbl)=> c?`<div title="${lbl}: ${c}" style="flex:${c};background:${col}"></div>`:'';
+  const bar=`<div style="display:flex;height:8px;gap:2px;border-radius:6px;overflow:hidden;background:var(--line);margin:6px 0">${seg(n.current,'#3fb950','current')}${seg(n.outdated,'#d29922','outdated')}${seg(n.unmaint,'#ff8a3d','unmaintained')}${seg(n.unknown,'#6e7681','unknown')}${seg(n.vuln,'#f85149','vulnerable')}</div>`;
+  const chip=(c,col,lbl)=> c?`<span class="badge" style="color:${col};border-color:${col}66">${lbl}: ${c}</span>`:'';
+  const summary = (n.current===libs.length)
     ? `<span class="badge" style="color:#3fb950;border-color:#3fb95066">✓ all ${libs.length} current</span>`
-    : `${chip(vuln,'#f85149','⛔ vulnerable')}${chip(unmaint,'#ff8a3d','⚠ unmaintained')}${chip(outdated,'#d29922','outdated')}${chip(ok,'#3fb950','current')}`;
+    : `${chip(n.vuln,'#f85149','⛔ vulnerable')}${chip(n.unmaint,'#ff8a3d','⚠ unmaintained')}${chip(n.outdated,'#d29922','outdated')}${chip(n.unknown,'#6e7681','? unknown')}${chip(n.current,'#3fb950','current')}`;
   return `<div class="small muted">${libs.length} component(s) in SBOM</div>${bar}<div class="inline" style="gap:6px;margin-bottom:6px">${summary}</div>`;
 }
 async function downloadSbom(){
@@ -532,7 +558,7 @@ async function downloadSbom(){
 async function runUpload(){
   if(!current) return;
   if(!confirm('Commit changes as a NEW branch and (if remote/token available) push?\n\nNothing on the current branch is changed; the PR/review link is shown afterwards.')) return;
-  const id=current.id; $('reviewOut').innerHTML='<div class="muted small">Upload running (branch + commit + push)…</div>';
+  const id=current.id; setBusy(id,true); $('reviewOut').innerHTML='<div class="muted small">Upload running (branch + commit + push)…</div>';
   try{
     const r=await api('POST',`/api/components/${id}/upload`,{});
     if(!r.ok){ $('reviewOut').innerHTML=`<div class="finding medium">${esc(r.reason||r.error||'not run')}</div>`; return; }
@@ -540,6 +566,7 @@ async function runUpload(){
     const link = r.prUrl?`<a href="${esc(r.prUrl)}" target="_blank" rel="noopener" style="color:var(--accent)">Open PR/review ↗</a>`:'(no PR link)';
     $('reviewOut').innerHTML=`<div class="note"><b>📤 ${r.pushed?'Pushed':'Committed locally'}</b> on branch <code>${esc(r.branch)}</code> — ${link}${r.pushError?` <span class="muted small">(push: ${esc(r.pushError)})</span>`:''}</div>`;
   }catch(e){ $('reviewOut').innerHTML=`<div class="finding">${esc(e.message)}</div>`; }
+  finally{ setBusy(id,false); }
 }
 async function runPwTests(){
   if(!current) return;
@@ -561,7 +588,7 @@ async function addLib(){
 }
 async function runMaintain(){
   if(!current) return;
-  const id=current.id; $('reviewOut').innerHTML='<div class="muted small">Full maintenance running (check → review → fix → updates → re-test)…</div>';
+  const id=current.id; setBusy(id,true); $('reviewOut').innerHTML='<div class="muted small">Full maintenance running (check → review → fix → updates → re-test)…</div>';
   try{
     const r = await api('POST',`/api/components/${id}/maintain`,{});
     if(r.error){ $('reviewOut').innerHTML=`<div class="finding">${esc(r.error)}</div>`; return; }
@@ -571,16 +598,18 @@ async function runMaintain(){
       + (r.steps||[]).map(s=>`<div class="finding low"><b>${esc(s.step)}</b> ${esc(s.summary||s.status||(s.error?('Error: '+s.error):JSON.stringify(s)))}</div>`).join('');
     toast('Full maintenance done');
   }catch(e){ $('reviewOut').innerHTML=`<div class="finding">${esc(e.message)}</div>`; toast('Error: '+e.message); }
+  finally{ setBusy(id,false); }
 }
 async function checkLibs(){
-  if(!current) return;
-  toast('Checking libraries online…');
-  try{ await api('POST',`/api/components/${current.id}/libraries/check`,{}); await openDetail(current.id); toast('Libraries checked'); }
+  if(!current) return; const id=current.id;
+  toast('Checking libraries online…'); setBusy(id,true);
+  try{ await api('POST',`/api/components/${id}/libraries/check`,{}); await openDetail(id); toast('Libraries checked'); }
   catch(e){ toast('Error: '+e.message); }
+  finally{ setBusy(id,false); }
 }
 async function runAutoFix(){
   if(!current) return;
-  const id=current.id; $('reviewOut').innerHTML='<div class="muted small">Automatic fixes running…</div>';
+  const id=current.id; setBusy(id,true); $('reviewOut').innerHTML='<div class="muted small">Automatic fixes running…</div>';
   try{
     const r = await api('POST',`/api/components/${id}/autofix`,{});
     if(r.error){ $('reviewOut').innerHTML=`<div class="finding">${esc(r.error)}</div>`; return; }
@@ -589,6 +618,7 @@ async function runAutoFix(){
       + (r.protocol||[]).map(p=>`<div class="finding ${p.severity==='error'?'':'low'}"><b>${esc(p.agent||'')}</b> ${esc(p.file||'')} — ${esc(p.result||'')}</div>`).join('');
     toast('Auto-fix done');
   }catch(e){ $('reviewOut').innerHTML=`<div class="finding">${esc(e.message)}</div>`; toast('Error: '+e.message); }
+  finally{ setBusy(id,false); }
 }
 function renderReviews(){
   $('reviews').innerHTML = (current.reviews||[]).map(r=>`<div class="note"><div class="meta">${fmtDate(r.at)} · ${esc(r.kind)} · ${r.pass?'✅ passed':'⛔ '+esc(r.stage)}</div>${r.findingsCount||0} Finding(s)</div>`).join('') || '<div class="muted small">No reviews yet.</div>';
@@ -614,6 +644,7 @@ function openGit(){
 }
 async function runReview(){
   if(!current) return;
+  const id=current.id; setBusy(id,true);
   $('reviewOut').innerHTML='<div class="muted small">Review running…</div>';
   try{
     const r = await api('POST',`/api/components/${current.id}/review`,{save:true});
@@ -623,6 +654,7 @@ async function runReview(){
       + (f.length ? f.map(x=>`<div class="finding ${esc(x.severity)}"><b>${esc(x.severity)}</b> ${esc(x.rule||'')} — ${esc(x.message||'')} ${x.asset?'<span class="muted">('+esc(x.asset)+')</span>':''}</div>`).join('') : '<div class="muted small">No findings.</div>');
     current = await api('GET','/api/components/'+current.id); renderReviews();
   }catch(e){ $('reviewOut').innerHTML='<div class="finding">Error: '+esc(e.message)+'</div>'; }
+  finally{ setBusy(id,false); }
 }
 
 function downloadLog(){
@@ -637,7 +669,7 @@ function downloadLog(){
 
 async function runAutoReview(){
   if(!current) return;
-  const id=current.id; $('reviewOut').innerHTML='<div class="muted small">Autonomous review & fix running…</div>';
+  const id=current.id; setBusy(id,true); $('reviewOut').innerHTML='<div class="muted small">Autonomous review & fix running…</div>';
   try{
     const r = await api('POST',`/api/components/${id}/autoreview`,{});
     await openDetail(id); load();
@@ -645,6 +677,7 @@ async function runAutoReview(){
       + (r.protocol||[]).map(p=>`<div class="finding ${p.result&&/Fehler|nicht/.test(p.result)?'medium':'low'}"><b>${esc(p.agent||'')}</b> ${esc(p.file||'')} — ${esc(p.result||'')}</div>`).join('');
     toast(r.pass?'Autonomously fixed':'No green gate');
   }catch(e){ $('reviewOut').innerHTML=`<div class="finding">${esc(e.message)}</div>`; toast('Error: '+e.message); }
+  finally{ setBusy(id,false); }
 }
 function downloadTestPlan(){
   if(!current||!current.testPlan) return;
@@ -767,7 +800,9 @@ async function saveAssign(){
 }
 async function runUpdate(){
   if(!current) return;
-  const id=current.id; toast('Auto-update running…');
+  // Auto-update kann (bei aktiviertem „allow push") einen Branch zum Remote pushen → bestätigen
+  if(settingsCache.allowPush && !confirm('Auto-update creates update branches and — because “allow push” is ON — may push them to the remote.\n\nContinue?')) return;
+  const id=current.id; setBusy(id,true); toast('Auto-update running…');
   try{
     const r = await api('POST',`/api/components/${id}/update`,{});
     await openDetail(id); load();
@@ -775,6 +810,7 @@ async function runUpdate(){
     $('reviewOut').innerHTML = `<div class="note"><b>Auto-update:</b> ${esc(r.summary)}</div>` + out;
     toast(r.summary);
   }catch(e){ toast('Error: '+e.message); }
+  finally{ setBusy(id,false); }
 }
 async function runAll(){
   try{
@@ -793,10 +829,11 @@ async function runOne(){
   if(!current) return;
   // Auto-repair: ein Check stößt direkt die volle (sichere) Pflege an
   if(settingsCache.autoRepair) return runMaintain();
-  const id = current.id;
+  const id = current.id; setBusy(id,true);
   toast('Checking…');
   try{ const r = await api('POST',`/api/components/${id}/run`,{}); await openDetail(id); load(); toast(`Checked: ${r.summary}`); }
   catch(e){ toast('Error: '+e.message); }
+  finally{ setBusy(id,false); }
 }
 async function rescan(){
   toast('Rescanning…');
@@ -835,7 +872,7 @@ async function loadLibraries(){
 }
 
 // Build-Marker: muss mit BUILD in start.js übereinstimmen. Erkennt einen veralteten Backend-Prozess.
-const APP_BUILD = '2026-06-25.6';
+const APP_BUILD = '2026-06-25.7';
 async function checkBackend(){
   const b = $('staleBanner');
   try{

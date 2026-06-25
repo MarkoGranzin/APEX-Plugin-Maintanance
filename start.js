@@ -49,7 +49,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const DATA_DIR = process.env.AISPP_DATA_DIR || path.join(__dirname, 'data');
 // Build-Marker: muss mit APP_BUILD in public/app.html übereinstimmen. Bei Backend-Änderungen erhöhen.
 // Das Frontend vergleicht beide und warnt, wenn der laufende Dienst veraltet ist (Neustart nötig).
-const BUILD = '2026-06-25.6';
+const BUILD = '2026-06-25.7';
 const C = { reset: '\x1b[0m', bold: '\x1b[1m', dim: '\x1b[2m', green: '\x1b[32m', yellow: '\x1b[33m', red: '\x1b[31m', cyan: '\x1b[36m' };
 const c = (col, s) => `${C[col]}${s}${C.reset}`;
 
@@ -311,7 +311,8 @@ function cmdServe(portArg) {
       const c = store.get(id);
       if (!c) return json(res, { error: 'not found' }, 404);
       try {
-        const r = await autoUpdateComponent(store, c, { push: localGitPush(c.path), registry: prRegistry, recordRun: record });
+        // SICHERHEIT: Push nur bei settings.allowPush; sonst No-op-Default (Branch lokal, kein Remote-Push) — wie /upload, /maintain (T-76)
+        const r = await autoUpdateComponent(store, c, { push: settings.allowPush ? localGitPush(c.path) : undefined, registry: prRegistry, recordRun: record });
         const { branchRegistry, ...out } = r;
         return json(res, out);
       } catch (err) {
