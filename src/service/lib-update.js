@@ -14,9 +14,9 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { detectVendoredLibraries } from '../sbom/vendored.js';
 import { npmPackageName } from '../sbom/registry.js';
+import { cmpSemver as cmp } from '../util/version.js';
 
 const major = (v) => { const m = String(v ?? '').match(/(\d+)/); return m ? Number(m[1]) : null; };
-const cmp = (a, b) => { const pa = String(a).split('.').map(Number); const pb = String(b).split('.').map(Number); for (let i = 0; i < Math.max(pa.length, pb.length); i++) { const d = (pa[i] || 0) - (pb[i] || 0); if (d) return d; } return 0; };
 
 /** 'none' | 'safe' | 'breaking' — safe = gleiche Major, neuere Version. */
 export function classifyUpdate(current, latest) {

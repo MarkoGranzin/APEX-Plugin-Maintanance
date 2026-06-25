@@ -11,6 +11,7 @@
 
 import crypto from 'node:crypto';
 import { versionFromUrl } from '../extract/extract.js';
+import { cmpSemver as cmp } from '../util/version.js';
 
 const sha256 = (s) => crypto.createHash('sha256').update(s).digest('hex');
 
@@ -74,16 +75,6 @@ export function buildSbom(artifactName, components) {
     })),
   };
 }
-
-const cmp = (a, b) => {
-  const pa = String(a).split('.').map(Number);
-  const pb = String(b).split('.').map(Number);
-  for (let i = 0; i < Math.max(pa.length, pb.length); i++) {
-    const d = (pa[i] ?? 0) - (pb[i] ?? 0);
-    if (d) return d;
-  }
-  return 0;
-};
 
 /**
  * Prüft erkannte Komponenten gegen aktuelle Versionen.
