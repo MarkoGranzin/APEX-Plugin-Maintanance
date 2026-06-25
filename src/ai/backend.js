@@ -83,7 +83,15 @@ export function cliArgsFor(command) {
  */
 export function findBundledClaude(env = process.env) {
   if (process.platform !== 'win32') return null;
-  const roots = [env.APPDATA, env.LOCALAPPDATA].filter(Boolean).map((r) => path.join(r, 'Claude', 'claude-code'));
+  // %APPDATA%/%LOCALAPPDATA% sind in manchen Start-Umgebungen (Dienst/Task) NICHT gesetzt →
+  // zusätzlich aus %USERPROFILE% bzw. HOMEDRIVE+HOMEPATH ableiten, damit die Erkennung trotzdem greift.
+  const profile = env.USERPROFILE || ((env.HOMEDRIVE && env.HOMEPATH) ? env.HOMEDRIVE + env.HOMEPATH : null);
+  const roots = [...new Set([
+    env.APPDATA && path.join(env.APPDATA, 'Claude', 'claude-code'),
+    env.LOCALAPPDATA && path.join(env.LOCALAPPDATA, 'Claude', 'claude-code'),
+    profile && path.join(profile, 'AppData', 'Roaming', 'Claude', 'claude-code'),
+    profile && path.join(profile, 'AppData', 'Local', 'Claude', 'claude-code'),
+  ].filter(Boolean))];
   const cmp = (a, b) => { for (let i = 0; i < Math.max(a.length, b.length); i++) { const d = (a[i] || 0) - (b[i] || 0); if (d) return d; } return 0; };
   let best = null, bestV = null;
   for (const root of roots) {
