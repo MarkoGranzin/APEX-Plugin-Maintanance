@@ -42,7 +42,10 @@ export function renderReport(run, opts = {}) {
   }
 
   lines.push(`✅ Aktualisierte Artefakte (${updated.length})`);
-  for (const u of updated) lines.push(`- ${u.artifact}: ${u.change} — ${u.testResult} — ${u.gitLink}`);
+  for (const u of updated) {
+    lines.push(`- ${u.artifact}: ${u.change} — ${u.testResult}${u.gitLink ? ` — ${u.gitLink}` : ''}`);
+    if (u.reviewUrl) lines.push(`    → Review/PR öffnen: ${u.reviewUrl}`);
+  }
 
   if (failures.length) {
     lines.push('');

@@ -59,6 +59,8 @@ export function createComponentStore(opts = {}) {
         codedTests: data.codedTests ?? [], // generierte Coded-UI/Unit-Tests [{name,content}] (T-64)
         libsCheckedAt: data.libsCheckedAt ?? null, // letzter Web-Lib-Check (T-59)
         uiTestUrl: data.uiTestUrl ?? null, // Test-URL für Coded-UI-Tests (T-73)
+        reviewUrl: data.reviewUrl ?? null, // PR/Review-Link nach Upload (T-76)
+        reviewBranch: data.reviewBranch ?? null,
         libs: data.libs ?? [], // verwendete Bibliotheken [{name,version,status,...}]
         libWarning: data.libWarning ?? null, // { vulnerable, unmaintained } (F-23)
         notes: [],
@@ -73,7 +75,7 @@ export function createComponentStore(opts = {}) {
     update: (id, patch = {}) => {
       const c = find(id);
       if (!c) return null;
-      for (const k of ['name', 'type', 'repo', 'source', 'visibility', 'secretRef', 'path', 'critical', 'format', 'status', 'lastChange', 'lastLog', 'testPlan', 'coverage', 'codedTests', 'libs', 'libWarning', 'libsCheckedAt', 'uiTestUrl']) {
+      for (const k of ['name', 'type', 'repo', 'source', 'visibility', 'secretRef', 'path', 'critical', 'format', 'status', 'lastChange', 'lastLog', 'testPlan', 'coverage', 'codedTests', 'libs', 'libWarning', 'libsCheckedAt', 'uiTestUrl', 'reviewUrl', 'reviewBranch']) {
         if (k in patch) c[k] = patch[k];
       }
       persist();

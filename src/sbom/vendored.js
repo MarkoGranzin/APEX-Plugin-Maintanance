@@ -28,6 +28,7 @@ const KNOWN = [
   { re: /(^|\/)chart(\.min)?\.js$/i, name: 'chart.js' },
   { re: /(^|\/)select2(\.min)?\.(js|css)$/i, name: 'select2' },
   { re: /(^|\/)jsonpath[-.]?/i, name: 'jsonpath' },
+  { re: /(^|\/)three(\.module)?(\.min)?\.js$/i, name: 'three' },
 ];
 
 // Eigene Plugin-/APEX-Core-Dateien NICHT als Fremd-Lib zählen.
@@ -37,8 +38,10 @@ const APEX_CORE = /(^|\/)font-apex/i;
 const VERSION_RES = [
   /jquery[^\n]{0,40}?v(\d+\.\d+\.\d+)/i,
   /mxClient\.VERSION\s*=\s*['"]([\d.]+)['"]/,
+  /font\s*awesome[^\n]{0,40}?(\d+\.\d+(?:\.\d+)?)/i, // „Font Awesome 4.7.0 by @davegandy"
   /@version\s+v?(\d+\.\d+(?:\.\d+)?)/i,
   /\bVERSION\s*[:=]\s*['"]v?(\d+\.\d+(?:\.\d+)?)['"]/i,
+  /\bversion['"]?\s*[:=]\s*['"]v?(\d+\.\d+(?:\.\d+)?)['"]/i,
   /\bv(\d+\.\d+\.\d+)\b/,
 ];
 
@@ -75,6 +78,8 @@ export function detectVendoredLibraries(dir, opts = {}) {
     if (!version) {
       const head = readFile(f);
       for (const re of VERSION_RES) { const m = head.match(re); if (m) { version = m[1]; break; } }
+      // three.js führt nur eine REVISION (z.B. 150) → npm-Version 0.<rev>.0
+      if (!version && name === 'three') { const m = head.match(/REVISION\s*[=:]\s*['"]?(\d{2,3})\b/i); if (m) version = `0.${m[1]}.0`; }
     }
     const cand = { name, version: version ?? 'unbekannt', detectedBy: 'vendored', evidence: f };
     const prev = byName.get(name);

@@ -32,6 +32,7 @@ import { buildSbom } from './src/sbom/sbom.js';
 import { autoFixComponent } from './src/service/autofix.js';
 import { maintainComponent } from './src/service/maintain.js';
 import { runUiTests } from './src/test/run-ui.js';
+import { uploadFix } from './src/service/upload.js';
 import { resolveAiBackend, aiBackendView } from './src/ai/configure.js';
 import { createPrRegistry } from './src/run/dedup.js';
 import { SecretStore } from './src/config/secrets.js';
@@ -48,7 +49,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const DATA_DIR = process.env.AISPP_DATA_DIR || path.join(__dirname, 'data');
 // Build-Marker: muss mit APP_BUILD in public/app.html übereinstimmen. Bei Backend-Änderungen erhöhen.
 // Das Frontend vergleicht beide und warnt, wenn der laufende Dienst veraltet ist (Neustart nötig).
-const BUILD = '2026-06-25.3';
+const BUILD = '2026-06-25.4';
 const C = { reset: '\x1b[0m', bold: '\x1b[1m', dim: '\x1b[2m', green: '\x1b[32m', yellow: '\x1b[33m', red: '\x1b[31m', cyan: '\x1b[36m' };
 const c = (col, s) => `${C[col]}${s}${C.reset}`;
 
@@ -114,10 +115,15 @@ function cmdServe(portArg) {
   const onTestPlan = (component, text) => {
     try { fs.mkdirSync(testplanDir, { recursive: true }); fs.writeFileSync(path.join(testplanDir, `${slugify(component.name)}.feature`), text); } catch {}
   };
+  // SBOM (CycloneDX) je Plugin persistent ablegen — auch headless verfügbar (T-75)
+  const sbomDir = path.join(DATA_DIR, 'sbom');
+  const onSbom = (component, sbom) => {
+    try { fs.mkdirSync(sbomDir, { recursive: true }); fs.writeFileSync(path.join(sbomDir, `${slugify(component.name)}.cdx.json`), JSON.stringify(sbom, null, 2)); } catch {}
+  };
   // Report aus dem aktuellen Stand aller Komponenten bauen
   const buildReport = () => {
     const comps = store.list();
-    const updated = comps.filter((x) => x.lastChange).map((x) => ({ artifact: x.name, change: x.lastChange.summary, testResult: x.status, gitLink: x.source || '' }));
+    const updated = comps.filter((x) => x.lastChange).map((x) => ({ artifact: x.name, change: x.lastChange.summary, testResult: x.status, gitLink: x.source || '', reviewUrl: x.reviewUrl || null }));
     const risks = comps.filter((x) => x.libWarning).map((x) => ({ name: x.name, label: '⚠ Libs', reasons: [`${x.libWarning.vulnerable || 0} verwundbar, ${x.libWarning.unmaintained || 0} nicht gepflegt`] }));
     const failures = comps.filter((x) => ['zu klären', 'review-blockiert'].includes(x.status)).map((x) => ({ artifact: x.name, reason: x.status }));
     return renderReport({ updated, risks, failures });
@@ -138,7 +144,8 @@ function cmdServe(portArg) {
       const ai = resolveAiBackend(settings, secretStore);
       for (const c of store.list().filter((x) => x.repo === repo)) {
         try {
-          await maintainComponent(store, c, { ai, updateDeps: { push: localGitPush(c.path), registry: prRegistry, recordRun: record }, logSink: writeLog, onTestPlan, recordRun: record });
+          // Job: automatisch committen/pushen, ABER nur wenn der Lauf grün ist (in maintainComponent gegated)
+          await maintainComponent(store, c, { ai, updateDeps: { push: localGitPush(c.path), registry: prRegistry, recordRun: record }, logSink: writeLog, onTestPlan, onSbom, recordRun: record, autoUpload: true, upload: uploadFor(true) });
         } catch (err) {
           record({ id: `maint-${repo}-${history.runs.length + 1}`, status: 'red', failures: [{ artifact: c.name, reason: String(err?.message ?? err) }], repo });
         }
@@ -167,8 +174,26 @@ function cmdServe(portArg) {
     return { branch };
   };
 
+  // Upload (T-76): neuer Branch + Commit + optional Push; PR-Link aus der Quelle.
+  const gitFor = (dir) => {
+    const git = simpleGit({ baseDir: dir });
+    return {
+      status: async () => { try { return (await git.status()).files.map((f) => f.path); } catch { return []; } },
+      branchCommit: async (b, m) => {
+        try { await git.addConfig('user.email', 'aisp@local'); await git.addConfig('user.name', 'Plugin Maintenance'); } catch {}
+        try { await git.checkoutLocalBranch(b); } catch { try { await git.checkout(b); } catch {} }
+        await git.add('.'); await git.commit(m);
+      },
+      push: async (b) => { await git.push(['-u', 'origin', b]); }, // braucht Remote + Token; sonst Fehler → pushed:false
+    };
+  };
+  const stampNow = () => new Date().toISOString().replace(/[-:T.]/g, '').slice(0, 14);
+  // SICHERHEIT (T-76): tatsächlich gepusht wird NUR, wenn der Nutzer es in den Einstellungen erlaubt hat.
+  // Ohne Erlaubnis bleibt es bei einem lokalen Branch+Commit (pushed:false).
+  const uploadFor = (push) => async (comp) => uploadFix(comp, { git: gitFor(comp.path), push: !!(push && settings.allowPush), stamp: stampNow() });
+
   // API-Kontexte (T-32/T-34, F-18, F-19)
-  const apiCtx = { store, gather: defaultGather, opener: {}, scan: scanRepo, logSink: writeLog, onTestPlan };
+  const apiCtx = { store, gather: defaultGather, opener: {}, scan: scanRepo, logSink: writeLog, onTestPlan, onSbom };
   const metaCtx = {
     settings,
     store,
@@ -176,6 +201,7 @@ function cmdServe(portArg) {
     recordRun: record,
     logSink: writeLog,
     onTestPlan,
+    onSbom,
     syncRepo: (repoConfig) => syncRepo(repoConfig, { workDir: settings.workDir, store }),
   };
 
@@ -188,7 +214,7 @@ function cmdServe(portArg) {
     if (p === '/readme.html') return serveFile(res, path.join(__dirname, 'readme.html'), 'text/html');
 
     // Health/Build-Marker: das Frontend vergleicht ihn mit seinem APP_BUILD und warnt bei Abweichung
-    if (p === '/api/health') return json(res, { ok: true, build: BUILD, features: ['vendored-libs', 'sbom', 'deep-tests', 'maintain', 'web-libcheck', 'ui-tests'] });
+    if (p === '/api/health') return json(res, { ok: true, build: BUILD, features: ['vendored-libs', 'sbom', 'deep-tests', 'maintain', 'web-libcheck', 'ui-tests', 'pr-upload'] });
 
     // KI-Backend: Verbindung testen / Key hinterlegen
     if (p === '/api/ai/test' && req.method === 'POST') {
@@ -260,7 +286,7 @@ function cmdServe(portArg) {
     if (p.startsWith('/api/components/') && p.endsWith('/testplan') && req.method === 'POST') {
       const id = p.split('/')[3]; const cc = store.get(id);
       if (!cc) return json(res, { error: 'not found' }, 404);
-      try { const r = runComponentOnce(store, cc, { scan: scanRepo, logSink: writeLog, onTestPlan, regenerateTestPlan: true }); return json(res, { ok: true, testPlanChanged: r.testPlanChanged }); }
+      try { const r = runComponentOnce(store, cc, { scan: scanRepo, logSink: writeLog, onTestPlan, onSbom, regenerateTestPlan: true }); return json(res, { ok: true, testPlanChanged: r.testPlanChanged }); }
       catch (err) { return json(res, { error: String(err?.message ?? err) }, 500); }
     }
 
@@ -302,6 +328,18 @@ function cmdServe(portArg) {
         const enriched = await checkLibrariesOnline(c.libs || []);
         store.update(id, { libs: enriched });
         return json(res, { ok: true, libs: enriched });
+      } catch (err) { return json(res, { error: String(err?.message ?? err) }, 500); }
+    }
+
+    // Upload: Änderungen als neuer Branch + Commit + (optional) Push, PR-Link zurück (T-76) → async
+    if (p.startsWith('/api/components/') && p.endsWith('/upload') && req.method === 'POST') {
+      const id = p.split('/')[3];
+      const c = store.get(id);
+      if (!c) return json(res, { error: 'not found' }, 404);
+      try {
+        const r = await uploadFor(true)(store.get(id)); // push nur, wenn settings.allowPush
+        if (r.ok) store.update(id, { reviewUrl: r.prUrl ?? null, reviewBranch: r.branch ?? null });
+        return json(res, { ...r, pushAllowed: !!settings.allowPush });
       } catch (err) { return json(res, { error: String(err?.message ?? err) }, 500); }
     }
 
@@ -358,7 +396,7 @@ function cmdServe(portArg) {
       if (!c) return json(res, { error: 'not found' }, 404);
       try {
         const ai = resolveAiBackend(settings, secretStore);
-        const r = await maintainComponent(store, c, { ai, updateDeps: { push: localGitPush(c.path), registry: prRegistry, recordRun: record }, logSink: writeLog, onTestPlan, recordRun: record });
+        const r = await maintainComponent(store, c, { ai, updateDeps: { push: localGitPush(c.path), registry: prRegistry, recordRun: record }, logSink: writeLog, onTestPlan, onSbom, recordRun: record });
         return json(res, r, r?.error ? 400 : 200);
       } catch (err) { return json(res, { error: String(err?.message ?? err) }, 500); }
     }
@@ -432,7 +470,7 @@ function cmdServe(portArg) {
       if (stamp === lastTick || !cronMatches(settings.schedule, now)) return;
       lastTick = stamp;
       console.log(c('dim', `  [${now.toLocaleString('de-DE')}] geplanter Check läuft …`));
-      runManaged({ store, scan: scanRepo, recordRun: record, logSink: writeLog, onTestPlan });
+      runManaged({ store, scan: scanRepo, recordRun: record, logSink: writeLog, onTestPlan, onSbom });
       if (settings.recipients?.length && settings.smtp?.host) {
         let pass; try { pass = secretStore.get('smtp-pass'); } catch {}
         sendReportMail(buildReport(), { smtp: settings.smtp, pass, recipients: settings.recipients }).catch(() => {});

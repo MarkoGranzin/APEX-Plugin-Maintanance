@@ -15,6 +15,7 @@ export function createSettings(initial = {}) {
     recipients: initial.recipients ?? [], // E-Mail-Empfänger für Report (E-4)
     schedule: initial.schedule ?? '0 3 * * 1', // wann der automatische Check läuft (Cron, Default Mo 03:00)
     scheduleEnabled: initial.scheduleEnabled ?? false, // automatischer Lauf an/aus
+    allowPush: initial.allowPush ?? false, // SICHERHEIT: Push zum Remote nur, wenn explizit erlaubt (T-76)
     smtp: initial.smtp ?? { host: '', port: 587, secure: false, user: '', from: '' }, // Mailversand
     aiBackend: initial.aiBackend ?? { kind: 'cli', command: 'claude' },
   };

@@ -61,7 +61,7 @@ export function apiHandler(method, pathname, body, ctx) {
   if (sub === 'run' && method === 'POST') {
     const c = store.get(id);
     if (!c) return notFound;
-    return { status: 200, body: runComponentOnce(store, c, { scan: ctx.scan, logSink: ctx.logSink, onTestPlan: ctx.onTestPlan }) };
+    return { status: 200, body: runComponentOnce(store, c, { scan: ctx.scan, logSink: ctx.logSink, onTestPlan: ctx.onTestPlan, onSbom: ctx.onSbom }) };
   }
 
   return notFound;
@@ -84,6 +84,7 @@ export async function metaApiHandler(method, pathname, body, ctx) {
       recipients: settings.recipients,
       schedule: settings.schedule,
       scheduleEnabled: !!settings.scheduleEnabled,
+      allowPush: !!settings.allowPush,
       smtp: settings.smtp,
       aiBackend: aiBackendView(settings),
     });
@@ -96,6 +97,7 @@ export async function metaApiHandler(method, pathname, body, ctx) {
         if (body?.recipients) setRecipients(settings, body.recipients);
         if (body?.schedule != null) setSchedule(settings, body.schedule);
         if (body?.scheduleEnabled != null) settings.scheduleEnabled = !!body.scheduleEnabled;
+        if (body?.allowPush != null) settings.allowPush = !!body.allowPush;
         return { status: 200, body: view() };
       } catch (err) {
         return { status: 400, body: { error: String(err?.message ?? err) } };
@@ -122,7 +124,7 @@ export async function metaApiHandler(method, pathname, body, ctx) {
     const results = [];
     for (const r of targets) results.push(await ctx.syncRepo(r));
     // nach dem Fetch/Detect direkt analysieren, damit lastChange/Status frisch sind
-    if (ctx.store) runManaged({ store: ctx.store, scan: ctx.scan, recordRun: ctx.recordRun, logSink: ctx.logSink, onTestPlan: ctx.onTestPlan });
+    if (ctx.store) runManaged({ store: ctx.store, scan: ctx.scan, recordRun: ctx.recordRun, logSink: ctx.logSink, onTestPlan: ctx.onTestPlan, onSbom: ctx.onSbom });
     return { status: 200, body: results };
   }
 
@@ -135,7 +137,7 @@ export async function metaApiHandler(method, pathname, body, ctx) {
   // Manueller Lauf über alle Komponenten (analysieren + lastChange/Status aktualisieren)
   if (p === 'api/run' && method === 'POST') {
     if (!ctx.store) return { status: 500, body: { error: 'kein Store' } };
-    const res = runManaged({ store: ctx.store, scan: ctx.scan, recordRun: ctx.recordRun, repo: body?.repo, logSink: ctx.logSink, onTestPlan: ctx.onTestPlan });
+    const res = runManaged({ store: ctx.store, scan: ctx.scan, recordRun: ctx.recordRun, repo: body?.repo, logSink: ctx.logSink, onTestPlan: ctx.onTestPlan, onSbom: ctx.onSbom });
     return { status: 200, body: res };
   }
 

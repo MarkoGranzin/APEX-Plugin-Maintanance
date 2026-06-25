@@ -10,6 +10,7 @@
 
 import { scanRepo } from './run-repo.js';
 import { libStatus } from './lib-check.js';
+import { buildSbom } from '../sbom/sbom.js';
 
 /** Verdichtet ein Scan-Ergebnis zu einer Kurz-Zusammenfassung. */
 export function summarize(result) {
@@ -85,6 +86,12 @@ export function runComponentOnce(store, component, opts = {}) {
   if (testPlan && testPlan !== cur?.testPlan && opts.onTestPlan) {
     try { opts.onTestPlan(component, testPlan); } catch { /* Datei-Fehler nicht eskalieren */ }
   }
+  if (opts.onSbom) {
+    try {
+      const sbom = buildSbom(component.name, mergedLibs.map((l) => ({ name: l.name, version: l.version, detectedBy: l.detectedBy || 'erkannt', evidence: l.source || l.evidence || '' })));
+      opts.onSbom(component, sbom);
+    } catch { /* Datei-Fehler nicht eskalieren */ }
+  }
   return { component: component.name, summary, status, counts, log: lastLog, testPlanChanged: testPlan !== cur?.testPlan };
 }
 
@@ -101,7 +108,7 @@ export function runManaged(args) {
   const failures = [];
   for (const c of comps) {
     try {
-      const r = runComponentOnce(store, c, { scan, now: args.now, logSink: args.logSink, onTestPlan: args.onTestPlan });
+      const r = runComponentOnce(store, c, { scan, now: args.now, logSink: args.logSink, onTestPlan: args.onTestPlan, onSbom: args.onSbom });
       updated.push({ artifact: c.name, change: r.summary, status: r.status });
     } catch (err) {
       failures.push({ artifact: c.name, reason: String(err?.message ?? err) });

@@ -31,7 +31,7 @@ export async function maintainComponent(store, comp, deps = {}) {
   }
 
   const scan = deps.scan ?? scanRepo;
-  const runOpts = { scan, logSink: deps.logSink, onTestPlan: deps.onTestPlan, now };
+  const runOpts = { scan, logSink: deps.logSink, onTestPlan: deps.onTestPlan, onSbom: deps.onSbom, now };
 
   // 1) prüfen
   const r1 = runComponentOnce(store, cur(), runOpts);
@@ -61,6 +61,15 @@ export async function maintainComponent(store, comp, deps = {}) {
   steps.push({ step: 're-test', status: r2.status, summary: r2.summary });
 
   const status = r2.status === 'ok' ? 'green' : r2.status === 'zu klären' ? 'red' : 'partial';
+
+  // 5) Auto-Upload NUR im Job und NUR bei grün (alle Tests/Review bestanden) — UI lädt separat per Bestätigung hoch
+  if (deps.autoUpload && status === 'green' && deps.upload) {
+    try {
+      const up = await deps.upload(cur());
+      if (up?.ok) { store.update(comp.id, { reviewUrl: up.prUrl ?? null, reviewBranch: up.branch ?? null }); steps.push({ step: 'upload', branch: up.branch, pushed: up.pushed, prUrl: up.prUrl }); }
+      else steps.push({ step: 'upload', skipped: true, reason: up?.reason });
+    } catch (e) { steps.push({ step: 'upload', error: String(e?.message ?? e) }); }
+  }
   if (deps.recordRun) {
     deps.recordRun({
       id: deps.idGen ? deps.idGen() : `maint-${comp.repo ?? comp.name}`,

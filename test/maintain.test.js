@@ -49,6 +49,27 @@ describe('T-66 Vollautomatische Pflege = manuelle Pflege', () => {
     expect(results.every((x) => x.steps?.length === 4)).toBe(true);
   });
 
+  it('Job-Auto-Upload nur bei grün: grün → Upload ausgeführt, reviewUrl gesetzt', async () => {
+    const store = setup();
+    let uploaded = null;
+    const upload = async (c) => { uploaded = c.name; return { ok: true, branch: 'aisp/x', pushed: true, prUrl: 'https://github.com/o/r/compare/aisp%2Fx?expand=1' }; };
+    const r = await maintainComponent(store, store.get('c1'), { ...baseDeps({}), autoUpload: true, upload });
+    expect(r.status).toBe('green');
+    expect(uploaded).toBe('P');
+    expect(store.get('c1').reviewUrl).toMatch(/compare/);
+    expect(r.steps.some((s) => s.step === 'upload' && s.pushed)).toBe(true);
+  });
+
+  it('Job-Auto-Upload bei rot NICHT', async () => {
+    const store = setup();
+    let uploaded = false;
+    const scanRed = () => ({ ...scanStub(), libWarning: { vulnerable: 1, unmaintained: 0 } });
+    const upload = async () => { uploaded = true; return { ok: true }; };
+    const r = await maintainComponent(store, store.get('c1'), { ...baseDeps({}), scan: scanRed, autoUpload: true, upload });
+    expect(r.status).not.toBe('green');
+    expect(uploaded).toBe(false);
+  });
+
   it('zeichnet einen Lauf auf (recordRun)', async () => {
     const store = setup();
     const runs = [];

@@ -202,6 +202,9 @@
     </div>
     <div class="inline" style="margin-top:8px"><button onclick="testAi()">🔌 Verbindung testen</button><span id="aiTestOut" class="muted small"></span></div>
 
+    <h3 style="margin:18px 0 4px;font-size:1rem">Upload &amp; Sicherheit</h3>
+    <div class="chk"><input type="checkbox" id="allowPush"><span><b>Push zum Remote erlauben</b> — ohne Haken bleibt es bei lokalem Branch+Commit (kein Upload, auch nicht im Job)</span></div>
+
     <h3 style="margin:18px 0 4px;font-size:1rem">Automatischer Check (Zeitplan)</h3>
     <div class="chk"><input type="checkbox" id="schedEnabled"><span>automatischen Check aktivieren</span></div>
     <label>Cron-Ausdruck (Min Std Tag Monat Wochentag) <span class="muted small" id="schedHint"></span></label>
@@ -296,9 +299,11 @@ async function openDetail(id){
             <button onclick="runAutoReview()">🤖 Autonom reviewen &amp; fixen</button>
             <button onclick="runAutoFix()">🛠 Alles automatisch beheben</button>
             <button onclick="runUpdate()">⬆ Auto-Update</button>
+            <button onclick="runUpload()">📤 Upload (Branch + PR)</button>
           </div>
         </details>
       </div>
+      ${c.reviewUrl?`<div class="finding low" style="margin-top:8px">📤 Offener Review: <a href="${esc(c.reviewUrl)}" target="_blank" rel="noopener" style="color:var(--accent)">Branch ${esc(c.reviewBranch||'')} → PR öffnen ↗</a></div>`:''}
       <div id="reviewOut" style="margin-top:8px"></div>
     </div>
 
@@ -504,6 +509,18 @@ async function downloadSbom(){
     const url=URL.createObjectURL(blob); const a=document.createElement('a'); a.href=url; a.download=`${current.name}.cdx.json`; a.click(); URL.revokeObjectURL(url);
   }catch(e){ toast('Fehler: '+e.message); }
 }
+async function runUpload(){
+  if(!current) return;
+  if(!confirm('Änderungen als NEUEN Branch committen und (falls Remote/Token vorhanden) pushen?\n\nEs wird nichts auf dem aktuellen Branch verändert; der PR/Review-Link wird danach angezeigt.')) return;
+  const id=current.id; $('reviewOut').innerHTML='<div class="muted small">Upload läuft (Branch + Commit + Push)…</div>';
+  try{
+    const r=await api('POST',`/api/components/${id}/upload`,{});
+    if(!r.ok){ $('reviewOut').innerHTML=`<div class="finding medium">${esc(r.reason||r.error||'nicht ausgeführt')}</div>`; return; }
+    await openDetail(id); load();
+    const link = r.prUrl?`<a href="${esc(r.prUrl)}" target="_blank" rel="noopener" style="color:var(--accent)">PR/Review öffnen ↗</a>`:'(kein PR-Link)';
+    $('reviewOut').innerHTML=`<div class="note"><b>📤 ${r.pushed?'Gepusht':'Lokal committet'}</b> auf Branch <code>${esc(r.branch)}</code> — ${link}${r.pushError?` <span class="muted small">(Push: ${esc(r.pushError)})</span>`:''}</div>`;
+  }catch(e){ $('reviewOut').innerHTML=`<div class="finding">${esc(e.message)}</div>`; }
+}
 async function runPwTests(){
   if(!current) return;
   const url=$('uiUrl').value.trim();
@@ -680,6 +697,7 @@ function openSettings(){
   $('workDir').value = s.workDir||'';
   $('aiKind').value = ai.kind||'stub'; $('aiCommand').value=ai.command||''; $('aiEndpoint').value=ai.endpoint||''; $('aiModel').value=ai.model||''; $('aiKey').value=''; $('aiKeyState').textContent=ai.hasKey?'(Key hinterlegt)':''; $('aiTestOut').textContent='';
   $('schedEnabled').checked=!!s.scheduleEnabled; $('schedule').value=s.schedule||''; updateSchedHint();
+  $('allowPush').checked=!!s.allowPush;
   $('smtpHost').value=sm.host||''; $('smtpPort').value=sm.port||587; $('smtpSecure').checked=!!sm.secure; $('smtpUser').value=sm.user||''; $('smtpFrom').value=sm.from||''; $('smtpPass').value=''; $('reportOut').textContent='';
   $('recipients').value=(s.recipients||[]).join(', ');
   toggleAi(); $('settingsBg').classList.add('open');
@@ -702,7 +720,7 @@ async function saveSettingsAll(){
     const ai = { kind:$('aiKind').value, command:$('aiCommand').value.trim()||undefined, endpoint:$('aiEndpoint').value.trim()||undefined, model:$('aiModel').value.trim()||undefined };
     const smtp = { host:$('smtpHost').value.trim(), port:Number($('smtpPort').value)||587, secure:$('smtpSecure').checked, user:$('smtpUser').value.trim(), from:$('smtpFrom').value.trim() };
     const recipients = $('recipients').value.split(',').map(x=>x.trim()).filter(Boolean);
-    await api('PUT','/api/settings',{ workDir:$('workDir').value.trim(), aiBackend:ai, smtp, recipients, schedule:$('schedule').value.trim(), scheduleEnabled:$('schedEnabled').checked });
+    await api('PUT','/api/settings',{ workDir:$('workDir').value.trim(), aiBackend:ai, smtp, recipients, schedule:$('schedule').value.trim(), scheduleEnabled:$('schedEnabled').checked, allowPush:$('allowPush').checked });
     if($('aiKey').value) await api('POST','/api/ai/key',{key:$('aiKey').value});
     if($('smtpPass').value) await api('POST','/api/smtp/pass',{pass:$('smtpPass').value});
     await loadSettings(); closeSettings(); toast('Einstellungen gespeichert');
@@ -788,7 +806,7 @@ async function loadLibraries(){
 }
 
 // Build-Marker: muss mit BUILD in start.js übereinstimmen. Erkennt einen veralteten Backend-Prozess.
-const APP_BUILD = '2026-06-25.3';
+const APP_BUILD = '2026-06-25.4';
 async function checkBackend(){
   const b = $('staleBanner');
   try{
