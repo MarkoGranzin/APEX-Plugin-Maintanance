@@ -40,14 +40,14 @@ describe('T-61 Auto-Fix', () => {
 
     // Protokoll enthält alle drei Stufen
     const log = store.get(id).lastLog.entries;
-    expect(log.some((e) => e.agent === 'Quick-Fix' && /entfernt/.test(e.result))).toBe(true);
-    expect(log.some((e) => e.agent === 'Lib-Update' && /Update ausgelöst/.test(e.result))).toBe(true);
-    expect(log.some((e) => e.agent === 'Auto-Fix' && /KI-Backend/.test(e.result))).toBe(true);
+    expect(log.some((e) => e.agent === 'Quick-Fix' && /removed/.test(e.result))).toBe(true);
+    expect(log.some((e) => e.agent === 'Lib-Update' && /Update triggered/.test(e.result))).toBe(true);
+    expect(log.some((e) => e.agent === 'Auto-Fix' && /AI backend/.test(e.result))).toBe(true);
   });
 
   it('ohne Repo → klarer Fehler', async () => {
     store.update(id, { path: '' });
     const r = await autoFixComponent(store, store.get(id), { ai: { kind: 'stub' } });
-    expect(r.error).toMatch(/Repo/);
+    expect(r.error).toMatch(/repo/i);
   });
 });

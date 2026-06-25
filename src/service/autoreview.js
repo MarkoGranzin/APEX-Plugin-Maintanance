@@ -31,9 +31,9 @@ function inspect(dir) {
 
 export async function autoReviewFix(store, comp, deps = {}) {
   const dir = comp.path;
-  if (!dir || !fs.existsSync(dir)) return { error: 'Kein Repo zugeordnet — bitte zuerst „Repo zuordnen".' };
+  if (!dir || !fs.existsSync(dir)) return { error: 'No repo assigned — please assign a repo first.' };
   const ai = deps.ai;
-  if (!ai || ai.kind === 'stub') return { error: 'Kein KI-Backend konfiguriert — bitte in den Einstellungen ein echtes Backend (CLI/Provider) hinterlegen.' };
+  if (!ai || ai.kind === 'stub') return { error: 'No AI backend configured — please set a real backend (CLI/provider) in the settings.' };
   const gateFn = deps.reviewGate ?? defaultReviewGate;
   const now = deps.now ?? (() => new Date().toISOString());
   const limit = deps.limit ?? 5;
@@ -50,20 +50,20 @@ export async function autoReviewFix(store, comp, deps = {}) {
     if (!blocking.length) break;
     const f = blocking[0];
     const asset = assets.find((a) => a.name === f.asset) ?? assets[0];
-    if (!asset?.origin) { protocol.push({ agent: 'Web-Dev', file: f.asset || comp.name, result: 'nicht schreibbar (keine sourceMap-Herkunft)' }); break; }
+    if (!asset?.origin) { protocol.push({ agent: 'Web-Dev', file: f.asset || comp.name, result: 'not writable (no sourceMap origin)' }); break; }
 
     let fixed = '';
     try {
-      fixed = await ai.complete(`Du bist ein sehr guter, sicherheitsbewusster Web-Entwickler. Behebe NUR dieses Finding minimal und idiomatisch. Gib AUSSCHLIESSLICH den vollständigen, korrigierten Inhalt der Datei zurück (kein Markdown, keine Erklärung).\nFinding: ${f.rule} — ${f.message}\nDatei ${asset.name}:\n${asset.code}`, {});
-    } catch (e) { protocol.push({ agent: 'Web-Dev', file: asset.name, result: 'KI-Fehler: ' + (e?.message ?? e) }); break; }
+      fixed = await ai.complete(`You are an excellent, security-conscious web developer. Fix ONLY this finding, minimally and idiomatically. Return EXCLUSIVELY the full, corrected file content (no Markdown, no explanation).\nFinding: ${f.rule} — ${f.message}\nFile ${asset.name}:\n${asset.code}`, {});
+    } catch (e) { protocol.push({ agent: 'Web-Dev', file: asset.name, result: 'AI error: ' + (e?.message ?? e) }); break; }
 
     fixed = String(fixed).replace(/^```[a-z]*\n?|```$/g, '').trim();
-    if (!fixed || !parseOk(fixed) || fixed === asset.code.trim()) { protocol.push({ agent: 'Web-Dev', file: asset.name, result: 'kein verwertbarer Fix (ungültig/leer)' }); break; }
+    if (!fixed || !parseOk(fixed) || fixed === asset.code.trim()) { protocol.push({ agent: 'Web-Dev', file: asset.name, result: 'no usable fix (invalid/empty)' }); break; }
 
     const target = asset.origin.type === 'file' ? path.join(dir, asset.origin.path) : path.join(dir, asset.origin.sqlFile);
     if (!backups.has(target) && fs.existsSync(target)) backups.set(target, fs.readFileSync(target, 'utf8'));
     reinjectAsset(asset.origin, fixed, { rootDir: dir });
-    protocol.push({ agent: 'Web-Dev', file: asset.name, result: `Fix für ${f.rule} angewandt` });
+    protocol.push({ agent: 'Web-Dev', file: asset.name, result: `Applied fix for ${f.rule}` });
 
     ({ assets, gate } = review());
   }
@@ -75,9 +75,9 @@ export async function autoReviewFix(store, comp, deps = {}) {
   entries.push(...protocol);
   if (!gate.pass) {
     for (const [target, content] of backups) fs.writeFileSync(target, content); // Rollback
-    entries.push({ agent: 'Auto-Review', file: comp.name, result: `nicht grün nach ${attempts} Versuch(en) — Änderungen zurückgerollt`, severity: 'error' });
+    entries.push({ agent: 'Auto-Review', file: comp.name, result: `not green after ${attempts} attempt(s) — changes rolled back`, severity: 'error' });
   } else {
-    entries.push({ agent: 'Auto-Review', file: comp.name, result: `grün nach ${attempts} Fix-Versuch(en)` });
+    entries.push({ agent: 'Auto-Review', file: comp.name, result: `green after ${attempts} fix attempt(s)` });
   }
 
   const keepers = (store.get(comp.id).lastLog?.entries ?? []).filter((e) => !['Security', 'Code-Review', 'Web-Dev', 'Auto-Review'].includes(e.agent));

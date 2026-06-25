@@ -44,7 +44,7 @@ function inspect(dir) {
 
 export async function autoFixComponent(store, comp, deps = {}) {
   const dir = comp.path;
-  if (!dir || !fs.existsSync(dir)) return { error: 'Kein Repo zugeordnet — bitte zuerst „Repo zuordnen".' };
+  if (!dir || !fs.existsSync(dir)) return { error: 'No repo assigned — please assign a repo first.' };
   const now = deps.now ?? (() => new Date().toISOString());
   const protocol = [];
 
@@ -56,10 +56,10 @@ export async function autoFixComponent(store, comp, deps = {}) {
     if (fixed !== asset.code && parseOk(fixed)) {
       reinjectAsset(asset.origin, fixed, { rootDir: dir });
       quickFixes++;
-      protocol.push({ agent: 'Quick-Fix', file: asset.name, result: 'console.log/debugger entfernt' });
+      protocol.push({ agent: 'Quick-Fix', file: asset.name, result: 'removed console.log/debugger' });
     }
   }
-  if (quickFixes === 0) protocol.push({ agent: 'Quick-Fix', file: comp.name, result: 'keine deterministisch behebbaren Befunde' });
+  if (quickFixes === 0) protocol.push({ agent: 'Quick-Fix', file: comp.name, result: 'no deterministically fixable findings' });
 
   // 2) veraltete/verwundbare Bibliotheken aktualisieren
   const libs = store.get(comp.id)?.libs ?? comp.libs ?? [];
@@ -69,12 +69,12 @@ export async function autoFixComponent(store, comp, deps = {}) {
     const update = deps.update ?? defaultAutoUpdate;
     try {
       libUpdate = await update(store, store.get(comp.id) ?? comp, deps.updateDeps ?? {});
-      protocol.push({ agent: 'Lib-Update', file: comp.name, result: `Update ausgelöst für ${stale.map((l) => `${l.name}@${l.version}`).join(', ')} — ${libUpdate?.summary ?? 'ausgeführt'}` });
+      protocol.push({ agent: 'Lib-Update', file: comp.name, result: `Update triggered for ${stale.map((l) => `${l.name}@${l.version}`).join(', ')} — ${libUpdate?.summary ?? 'done'}` });
     } catch (e) {
-      protocol.push({ agent: 'Lib-Update', file: comp.name, result: 'Update-Fehler: ' + (e?.message ?? e), severity: 'error' });
+      protocol.push({ agent: 'Lib-Update', file: comp.name, result: 'Update error: ' + (e?.message ?? e), severity: 'error' });
     }
   } else {
-    protocol.push({ agent: 'Lib-Update', file: comp.name, result: 'keine veralteten/verwundbaren Bibliotheken' });
+    protocol.push({ agent: 'Lib-Update', file: comp.name, result: 'no outdated/vulnerable libraries' });
   }
 
   // 3) restliche Findings über KI (nur mit echtem Backend)
@@ -83,9 +83,9 @@ export async function autoFixComponent(store, comp, deps = {}) {
   if (ai && ai.kind !== 'stub') {
     const autoReview = deps.autoReviewFix ?? defaultAutoReviewFix;
     aiResult = await autoReview(store, store.get(comp.id) ?? comp, { ai });
-    protocol.push({ agent: 'Auto-Fix', file: comp.name, result: aiResult?.pass ? `KI-Fixes grün nach ${aiResult.attempts} Versuch(en)` : `KI-Review nicht grün (${aiResult?.attempts ?? 0} Versuch(e))`, severity: aiResult?.pass ? undefined : 'medium' });
+    protocol.push({ agent: 'Auto-Fix', file: comp.name, result: aiResult?.pass ? `AI fixes green after ${aiResult.attempts} attempt(s)` : `AI review not green (${aiResult?.attempts ?? 0} attempt(s))`, severity: aiResult?.pass ? undefined : 'medium' });
   } else {
-    protocol.push({ agent: 'Auto-Fix', file: comp.name, result: 'restliche Security/Quality-Findings benötigen ein KI-Backend (Einstellungen → KI)', severity: 'medium' });
+    protocol.push({ agent: 'Auto-Fix', file: comp.name, result: 'remaining security/quality findings need an AI backend (Settings → AI)', severity: 'medium' });
   }
 
   // Protokoll persistieren (eigene Agenten ersetzen, übrige Einträge behalten)

@@ -50,7 +50,7 @@ describe('Autonomes Review & Fix', () => {
 
   it('ohne echtes Backend (Stub) → klare Meldung, kein Fix', async () => {
     const r = await autoReviewFix(store, store.get(id), { ai: { kind: 'stub' } });
-    expect(r.error).toMatch(/KI-Backend/);
+    expect(r.error).toMatch(/AI backend/);
   });
 
   it('mit Backend, das einen sicheren Fix liefert → grün, Datei gepatcht', async () => {
@@ -60,7 +60,7 @@ describe('Autonomes Review & Fix', () => {
     expect(fs.readFileSync(path.join(dir, 'plugin', 'widget.js'), 'utf8')).toContain('textContent');
     const entries = store.get(id).lastLog.entries;
     expect(entries.some((e) => e.agent === 'Web-Dev')).toBe(true);
-    expect(entries.some((e) => e.agent === 'Auto-Review' && /grün/.test(e.result))).toBe(true);
+    expect(entries.some((e) => e.agent === 'Auto-Review' && /green/.test(e.result))).toBe(true);
   });
 
   it('Backend ohne brauchbaren Fix → Rollback, nicht grün', async () => {

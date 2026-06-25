@@ -337,6 +337,8 @@ async function openDetail(id){
         <span class="muted">Path</span><span class="small" style="font-family:var(--mono)">${esc(c.path)||'—'}</span>
         <span class="muted">Last change</span><span>${fmtDate(c.lastChange&&c.lastChange.at)} — ${esc(c.lastChange&&c.lastChange.summary||'—')}</span>
       </div>
+      <h4 class="muted small" style="margin:14px 0 4px">🤖 AI &amp; automatic changes <span class="muted">(last run)</span></h4>
+      ${renderAiChanges(c)}
     </div>
 
     <div class="tabpanel" data-panel="libs" hidden>
@@ -449,6 +451,12 @@ async function loadTestHistory(){
 }
 // Protokoll als Agenten-Chat (chronologisch, Bubbles je Agent).
 const AGENT_LABEL={Erkennung:'🔎 Detection',Extraktion:'📦 Extraction',Lint:'🧹 Lint',AST:'🌳 AST',Test:'🧪 Test',Security:'🛡 Security','Code-Review':'🔍 Code review','Review-Gate':'⚖ Review gate','Web-Dev':'🛠 Web dev','Auto-Review':'🤖 Auto review','Quick-Fix':'🛠 Quick fix','Lib-Update':'⬆ Lib update','Auto-Fix':'🤖 Auto fix','retire.js':'⚠ retire.js',Snapshot:'📸 Snapshot'};
+// Eigener, prominenter Block: nur die KI-/Auto-Fix-Schritte des letzten Laufs (Tab Übersicht).
+function renderAiChanges(c){
+  const FIX=['Quick-Fix','Lib-Update','Web-Dev','Auto-Review','Auto-Fix'];
+  const entries=((c.lastLog&&c.lastLog.entries)||[]).filter(e=>FIX.includes(e.agent));
+  return entries.length ? renderProtocolChat(entries) : '<div class="muted small">No automatic/AI changes in the last run — run “🛠 Fix everything automatically” or “🧰 Full maintenance” (needs a working AI backend for code fixes).</div>';
+}
 function renderProtocolChat(entries){
   return `<div class="chat">${entries.map(e=>{
     const bad=e.severity==='error'||e.severity==='high'||e.severity==='critical';
