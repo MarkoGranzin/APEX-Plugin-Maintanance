@@ -11,8 +11,7 @@
 
 import { addRepo, cloneOrFetch } from '../repo/repository.js';
 import { repoComponent, repoCheckoutDir } from './workspace.js';
-
-const slug = (s) => String(s).toLowerCase().replace(/[^a-z0-9.-]+/g, '-').replace(/^-|-$/g, '') || 'plugin';
+import { slug } from '../util/slug.js';
 
 /**
  * @param {object} store

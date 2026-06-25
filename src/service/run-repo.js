@@ -18,7 +18,7 @@ import { analyzeBundle } from '../extract/analyze.js';
 import { scanArtifact } from '../sbom/sbom.js';
 import { lint, retireCheck, makeSnapshot, unmaintainedReason, vulnerabilityFor } from '../test/static.js';
 import { detectVendoredLibraries } from '../sbom/vendored.js';
-import { libStatus } from './lib-check.js';
+import { libStatus, libWarningFrom } from './lib-check.js';
 import { securityReview, qualityReview } from '../run/review.js';
 import { triageViewModel } from '../gui/triage.js';
 import { renderReport } from '../report/mail.js';
@@ -206,11 +206,8 @@ export function scanRepo(repoDir, opts = {}) {
   for (const l of libsArr.filter((x) => x.unmaintained && !x.vulnerable)) {
     log.push({ artifact: '(SBOM)', agent: 'Security', file: `${l.name}@${l.version}`, result: `nicht gepflegt: ${l.reason}`, severity: 'medium' });
   }
-  const libVulnCount = libsArr.filter((l) => l.vulnerable).length;
-  const libUnmaintCount = libsArr.filter((l) => l.unmaintained && !l.vulnerable).length;
-  // Unbekannte Version = nicht bewertbar → Unsicherheit (darf nicht still „OK" sein) (B-4)
-  const libUnknownCount = libsArr.filter((l) => !l.vulnerable && !l.unmaintained && (!l.version || l.version === 'unbekannt')).length;
-  const libWarning = libVulnCount || libUnmaintCount || libUnknownCount ? { vulnerable: libVulnCount, unmaintained: libUnmaintCount, unknown: libUnknownCount } : null;
+  // libWarning aus EINER Quelle (lib-check.js) — zaehlt verwundbar/nicht gepflegt/veraltet/unbekannt einheitlich (B-4)
+  const libWarning = libWarningFrom(libsArr);
 
   const active = allRisks; // immer leer — Risk-Bewertung entfernt
   const report = renderReport(

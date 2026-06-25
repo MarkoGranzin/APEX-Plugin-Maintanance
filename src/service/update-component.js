@@ -14,7 +14,7 @@ import path from 'node:path';
 import { referencedUrlsFrom } from '../extract/extract.js';
 import { DEFAULT_VULN_DB } from '../test/static.js';
 import { reviewGate as defaultReviewGate } from '../run/review.js';
-import { branchKey, createPrRegistry, idempotentPush } from '../run/dedup.js';
+import { createPrRegistry, idempotentPush } from '../run/dedup.js';
 import { detectArtifacts } from '../inventory/inventory.js';
 
 const cmp = (a, b) => {
@@ -118,5 +118,3 @@ export async function autoUpdateComponent(store, component, deps = {}) {
 
   return { component: component.name, plans: plans.length, results, summary, branchRegistry: registry };
 }
-
-export { branchKey };

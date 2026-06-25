@@ -40,14 +40,3 @@ export function cronMatches(expr, date = new Date()) {
     fieldMatches(dow, date.getDay(), 0, 6)
   );
 }
-
-/** Menschenlesbare Kurzbeschreibung gängiger Ausdrücke (Fallback: roher Ausdruck). */
-export function describeCron(expr) {
-  const map = {
-    '0 3 * * 1': 'wöchentlich montags 03:00',
-    '0 3 * * *': 'täglich 03:00',
-    '0 * * * *': 'stündlich',
-    '*/15 * * * *': 'alle 15 Minuten',
-  };
-  return map[String(expr).trim()] ?? `Cron: ${expr}`;
-}

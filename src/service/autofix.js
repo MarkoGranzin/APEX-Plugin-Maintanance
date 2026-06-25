@@ -14,14 +14,10 @@
  */
 
 import fs from 'node:fs';
-import * as acorn from 'acorn';
-import { detectArtifacts } from '../inventory/inventory.js';
-import { extractArtifact } from '../extract/extract.js';
 import { reinjectAsset } from '../extract/reinject.js';
+import { inspectAssets, parseOk } from '../extract/assets.js';
 import { autoReviewFix as defaultAutoReviewFix } from './autoreview.js';
 import { autoUpdateComponent as defaultAutoUpdate } from './update-component.js';
-
-const parseOk = (code) => { try { acorn.parse(code, { ecmaVersion: 'latest', sourceType: 'script', allowReturnOutsideFunction: true }); return true; } catch { return false; } };
 
 /** Deterministische, sichere Quick-Fixes: console.log/debug & debugger entfernen. */
 export function quickFix(code) {
@@ -33,15 +29,6 @@ export function quickFix(code) {
   return out;
 }
 
-function inspect(dir) {
-  const assets = [];
-  for (const art of detectArtifacts(dir)) {
-    const bundle = extractArtifact(art, { rootDir: dir });
-    for (const a of [...bundle.js, ...bundle.inlineCode]) assets.push({ name: a.name, code: a.code, origin: bundle.sourceMap[a.name] });
-  }
-  return assets;
-}
-
 export async function autoFixComponent(store, comp, deps = {}) {
   const dir = comp.path;
   if (!dir || !fs.existsSync(dir)) return { error: 'No repo assigned — please assign a repo first.' };
@@ -50,7 +37,7 @@ export async function autoFixComponent(store, comp, deps = {}) {
 
   // 1) deterministische Quick-Fixes (ohne KI)
   let quickFixes = 0;
-  for (const asset of inspect(dir)) {
+  for (const asset of inspectAssets(dir)) {
     if (!asset.origin) continue;
     const fixed = quickFix(asset.code);
     if (fixed !== asset.code && parseOk(fixed)) {

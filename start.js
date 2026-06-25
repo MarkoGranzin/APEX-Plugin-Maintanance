@@ -33,6 +33,7 @@ import { autoFixComponent } from './src/service/autofix.js';
 import { maintainComponent } from './src/service/maintain.js';
 import { runUiTests } from './src/test/run-ui.js';
 import { uploadFix } from './src/service/upload.js';
+import { slug as slugify } from './src/util/slug.js';
 import { resolveAiBackend, aiBackendView } from './src/ai/configure.js';
 import { createPrRegistry } from './src/run/dedup.js';
 import { SecretStore } from './src/config/secrets.js';
@@ -104,7 +105,6 @@ function cmdServe(portArg) {
   const record = (entry) => recordRun(history, entry);
 
   // Prüfprotokoll-Archiv je Komponente (F-22) — bleibt auch erhalten, wenn die GUI zu war
-  const slugify = (s) => String(s).toLowerCase().replace(/[^a-z0-9.-]+/g, '-').replace(/^-|-$/g, '') || 'plugin';
   const logDir = path.join(DATA_DIR, 'logs');
   const compLogDir = (component) => path.join(logDir, slugify(component.name));
   const writeLog = (component, text) => {

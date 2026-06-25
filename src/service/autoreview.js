@@ -12,22 +12,9 @@
 
 import fs from 'node:fs';
 import path from 'node:path';
-import * as acorn from 'acorn';
-import { detectArtifacts } from '../inventory/inventory.js';
-import { extractArtifact } from '../extract/extract.js';
 import { reinjectAsset } from '../extract/reinject.js';
+import { inspectAssets, parseOk } from '../extract/assets.js';
 import { reviewGate as defaultReviewGate } from '../run/review.js';
-
-const parseOk = (code) => { try { acorn.parse(code, { ecmaVersion: 'latest', sourceType: 'script', allowReturnOutsideFunction: true }); return true; } catch { return false; } };
-
-function inspect(dir) {
-  const assets = [];
-  for (const art of detectArtifacts(dir)) {
-    const bundle = extractArtifact(art, { rootDir: dir });
-    for (const a of [...bundle.js, ...bundle.inlineCode]) assets.push({ name: a.name, code: a.code, origin: bundle.sourceMap[a.name], status: bundle.status });
-  }
-  return assets;
-}
 
 export async function autoReviewFix(store, comp, deps = {}) {
   const dir = comp.path;
@@ -40,7 +27,7 @@ export async function autoReviewFix(store, comp, deps = {}) {
 
   const backups = new Map();
   const protocol = [];
-  const review = () => { const assets = inspect(dir); return { assets, gate: gateFn({ assets: assets.map((a) => ({ name: a.name, code: a.code })) }) }; };
+  const review = () => { const assets = inspectAssets(dir); return { assets, gate: gateFn({ assets: assets.map((a) => ({ name: a.name, code: a.code })) }) }; };
 
   let { assets, gate } = review();
   let attempts = 0;

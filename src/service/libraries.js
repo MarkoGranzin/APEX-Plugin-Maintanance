@@ -11,7 +11,7 @@
 
 import { scanRepo } from './run-repo.js';
 import { unmaintainedReason } from '../test/static.js';
-import { libStatus as STATUS } from './lib-check.js';
+import { libStatus as STATUS, libWarningFrom } from './lib-check.js';
 
 /**
  * @param {object} store
@@ -39,27 +39,26 @@ export function collectLibraries(store, opts = {}) {
       continue;
     }
 
-    let vulnerable = 0;
-    let unmaintained = 0;
-
     // Bevorzugt die bereits ermittelten, web-angereicherten Libs der Komponente (inkl. vendored +
     // Outdated aus dem Web-Check). Nur wenn noch keine vorliegen, als Fallback frisch scannen.
+    // libWarning IMMER über libWarningFrom (eine Quelle) — sonst Drift (outdated/unknown fehlen).
     const stored = comp.libs ?? [];
     if (stored.length) {
       for (const lib of stored) {
         const e = upsert(lib.name, lib.version);
         e.usedBy.add(comp.name);
-        if (lib.vulnerable || lib.status === 'verwundbar') { e.vulnerable = true; if (lib.vuln) e.vuln = lib.vuln; if (lib.fixedFrom) e.fixedFrom = lib.fixedFrom; vulnerable++; }
-        if (lib.unmaintained || lib.status === 'nicht gepflegt') { e.unmaintained = true; if (lib.reason) e.reason = lib.reason; unmaintained++; }
+        if (lib.vulnerable || lib.status === 'verwundbar') { e.vulnerable = true; if (lib.vuln) e.vuln = lib.vuln; if (lib.fixedFrom) e.fixedFrom = lib.fixedFrom; }
+        if (lib.unmaintained || lib.status === 'nicht gepflegt') { e.unmaintained = true; if (lib.reason) e.reason = lib.reason; }
         if (lib.outdated || lib.webStatus === 'veraltet') { e.outdated = true; if (lib.latest) e.latest = lib.latest; }
         if (lib.source && !e.source) e.source = lib.source;
         if (lib.npm && !e.npm) e.npm = lib.npm;
         if (lib.ageDays != null && e.ageDays == null) e.ageDays = lib.ageDays;
       }
-      if (persist) store.update(comp.id, { libWarning: vulnerable || unmaintained ? { vulnerable, unmaintained } : null });
+      if (persist) store.update(comp.id, { libWarning: libWarningFrom(stored) });
       continue;
     }
 
+    const compLibs = []; // diese Komponente, für eine konsistente libWarning-Ableitung
     let res;
     try {
       res = scan(comp.path);
@@ -71,26 +70,26 @@ export function collectLibraries(store, opts = {}) {
         const e = upsert(lib.name, lib.version);
         e.usedBy.add(comp.name);
         const reason = unmaintainedReason(lib.name);
-        if (reason) { e.unmaintained = true; e.reason = reason; unmaintained++; }
+        if (reason) { e.unmaintained = true; e.reason = reason; }
+        compLibs.push({ name: lib.name, version: lib.version, unmaintained: !!reason });
       }
       for (const f of art.static?.retire?.findings ?? []) {
         const e = upsert(f.lib, f.version);
         e.usedBy.add(comp.name);
         e.vulnerable = true; e.vuln = f.vuln; e.fixedFrom = f.fixedFrom;
-        vulnerable++;
+        compLibs.push({ name: f.lib, version: f.version, vulnerable: true });
       }
       for (const u of art.updates ?? []) {
         if (u.outdated) {
           const e = upsert(u.name, u.current);
           e.usedBy.add(comp.name);
           e.outdated = true; e.latest = u.latest;
+          compLibs.push({ name: u.name, version: u.current, outdated: true });
         }
       }
     }
 
-    if (persist) {
-      store.update(comp.id, { libWarning: vulnerable || unmaintained ? { vulnerable, unmaintained } : null });
-    }
+    if (persist) store.update(comp.id, { libWarning: libWarningFrom(compLibs) });
   }
 
   const libraries = [...libs.values()]
