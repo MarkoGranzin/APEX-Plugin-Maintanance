@@ -269,10 +269,11 @@ function setBusy(id, on){
   document.querySelectorAll(`.spin[data-cid="${id}"]`).forEach(s=>s.hidden=!on);
   const d=$('dSpin'); if(d && current && current.id===id) d.hidden=!on;
 }
-// Hüllt eine Aktion der aktuell offenen Komponente in den Busy-Zustand (Spinner an/aus, auch bei Fehler).
-async function withBusy(fn){
-  if(!current) return; const id=current.id; setBusy(id,true);
-  try{ return await fn(id); } finally { setBusy(id,false); }
+// Datei-Download aus In-Memory-Inhalt (vorher 4× dupliziert: SBOM/Log/Testplan/Coded-Test)
+function saveBlob(name, content, type){
+  const url = URL.createObjectURL(new Blob([content], { type }));
+  const a = document.createElement('a'); a.href = url; a.download = name; a.click();
+  URL.revokeObjectURL(url);
 }
 
 async function load(){
@@ -552,8 +553,7 @@ async function downloadSbom(){
   if(!current) return;
   try{
     const r=await fetch(`/api/components/${current.id}/sbom`); const sbom=await r.json();
-    const blob=new Blob([JSON.stringify(sbom,null,2)],{type:'application/json'});
-    const url=URL.createObjectURL(blob); const a=document.createElement('a'); a.href=url; a.download=`${current.name}.cdx.json`; a.click(); URL.revokeObjectURL(url);
+    saveBlob(`${current.name}.cdx.json`, JSON.stringify(sbom,null,2), 'application/json');
   }catch(e){ toast('Error: '+e.message); }
 }
 async function runUpload(){
@@ -662,10 +662,7 @@ function downloadLog(){
   if(!current||!current.lastLog) return;
   const t = `Plugin Maintenance — Check protocol\nComponent: ${current.name}\nTime: ${current.lastLog.at}\n\n`
     + (current.lastLog.entries||[]).map(e=>`[${e.agent}] ${e.file} → ${e.result}${e.severity?(' ('+e.severity+')'):''}`).join('\n') + '\n';
-  const blob = new Blob([t], {type:'text/plain;charset=utf-8'});
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a'); a.href=url; a.download=`${current.name}-check-protocol.log`; a.click();
-  URL.revokeObjectURL(url);
+  saveBlob(`${current.name}-check-protocol.log`, t, 'text/plain;charset=utf-8');
 }
 
 async function runAutoReview(){
@@ -682,13 +679,11 @@ async function runAutoReview(){
 }
 function downloadTestPlan(){
   if(!current||!current.testPlan) return;
-  const blob=new Blob([current.testPlan],{type:'text/plain;charset=utf-8'});
-  const url=URL.createObjectURL(blob); const a=document.createElement('a'); a.href=url; a.download=`${current.name}.feature`; a.click(); URL.revokeObjectURL(url);
+  saveBlob(`${current.name}.feature`, current.testPlan, 'text/plain;charset=utf-8');
 }
 function downloadCoded(i){
   const t=(current&&current.codedTests||[])[i]; if(!t) return;
-  const blob=new Blob([t.content],{type:'text/javascript;charset=utf-8'});
-  const url=URL.createObjectURL(blob); const a=document.createElement('a'); a.href=url; a.download=t.name; a.click(); URL.revokeObjectURL(url);
+  saveBlob(t.name, t.content, 'text/javascript;charset=utf-8');
 }
 async function regenTestPlan(){
   if(!current) return; const id=current.id; toast('Regenerating test plan…');
@@ -836,14 +831,6 @@ async function runOne(){
   catch(e){ toast('Error: '+e.message); }
   finally{ setBusy(id,false); }
 }
-async function rescan(){
-  toast('Rescanning…');
-  try{ const r = await api('POST','/api/repos/rescan',{}); await load();
-    const sum = (r||[]).reduce((a,x)=>({added:a.added+x.added,updated:a.updated+x.updated}),{added:0,updated:0});
-    toast(`Done: ${sum.added} new, ${sum.updated} updated`);
-  }catch(e){ toast('Error: '+e.message); }
-}
-
 function switchView(v){
   const plugins = v !== 'libs';
   $('pluginsView').style.display = plugins ? '' : 'none';
@@ -858,7 +845,7 @@ async function loadLibraries(){
     const libs = r.libraries || [];
     const rows = $('libRows'); rows.innerHTML='';
     $('libsEmpty').style.display = libs.length ? 'none' : 'block';
-    const cls = { 'verwundbar':'err', 'nicht gepflegt':'warn', 'veraltet':'warn', 'aktuell':'ok' };
+    const cls = { 'verwundbar':'err', 'nicht gepflegt':'warn', 'veraltet':'warn', 'unbekannt':'warn', 'aktuell':'ok' };
     for(const l of libs){
       const tr = document.createElement('tr');
       tr.innerHTML = `<td><b>${esc(l.name)}</b></td><td class="small">${esc(l.version)}</td>`

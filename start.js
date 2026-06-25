@@ -209,6 +209,15 @@ function cmdServe(portArg) {
     const url = new URL(req.url, `http://localhost:${port}`);
     const p = url.pathname;
 
+    // Helfer fuer /api/components/:id/<action>-Routen: id parsen, Komponente holen, 404 + try/catch→500 zentral.
+    const withComponent = async (fn) => {
+      const id = p.split('/')[3];
+      const c = store.get(id);
+      if (!c) return json(res, { error: 'not found' }, 404);
+      try { return await fn(c, id); }
+      catch (err) { return json(res, { error: String(err?.message ?? err) }, 500); }
+    };
+
     // Web-GUI + Doku
     if (p === '/' || p === '/app.html') return serveFile(res, path.join(__dirname, 'public', 'app.html'), 'text/html');
     if (p === '/readme.html') return serveFile(res, path.join(__dirname, 'readme.html'), 'text/html');
@@ -254,16 +263,11 @@ function cmdServe(portArg) {
     }
 
     // Autonomes Review & Fix (nutzt konfiguriertes KI-Backend)
-    if (p.startsWith('/api/components/') && p.endsWith('/autoreview') && req.method === 'POST') {
-      const id = p.split('/')[3];
-      const c = store.get(id);
-      if (!c) return json(res, { error: 'not found' }, 404);
-      try {
-        const ai = resolveAiBackend(settings, secretStore);
-        const r = await autoReviewFix(store, c, { ai });
-        return json(res, r, r?.error ? 400 : 200);
-      } catch (err) { return json(res, { error: String(err?.message ?? err) }, 500); }
-    }
+    if (p.startsWith('/api/components/') && p.endsWith('/autoreview') && req.method === 'POST') return withComponent(async (c) => {
+      const ai = resolveAiBackend(settings, secretStore);
+      const r = await autoReviewFix(store, c, { ai });
+      return json(res, r, r?.error ? 400 : 200);
+    });
 
     // Protokoll-Archiv: Liste bzw. einzelne Logdatei (auch von Läufen ohne offene GUI)
     if (p.startsWith('/api/components/') && /\/logs(\/|$)/.test(p) && req.method === 'GET') {
@@ -283,88 +287,53 @@ function cmdServe(portArg) {
     }
 
     // Testplan neu erzeugen (Baseline überschreiben — „erst wenn ich erweitere")
-    if (p.startsWith('/api/components/') && p.endsWith('/testplan') && req.method === 'POST') {
-      const id = p.split('/')[3]; const cc = store.get(id);
-      if (!cc) return json(res, { error: 'not found' }, 404);
-      try { const r = runComponentOnce(store, cc, { scan: scanRepo, logSink: writeLog, onTestPlan, onSbom, regenerateTestPlan: true }); return json(res, { ok: true, testPlanChanged: r.testPlanChanged }); }
-      catch (err) { return json(res, { error: String(err?.message ?? err) }, 500); }
-    }
+    if (p.startsWith('/api/components/') && p.endsWith('/testplan') && req.method === 'POST') return withComponent(async (cc) => {
+      const r = runComponentOnce(store, cc, { scan: scanRepo, logSink: writeLog, onTestPlan, onSbom, regenerateTestPlan: true });
+      return json(res, { ok: true, testPlanChanged: r.testPlanChanged });
+    });
 
     // Repo einem Plugin zuordnen (F-21) → async
-    if (p.startsWith('/api/components/') && p.endsWith('/assign-repo') && req.method === 'POST') {
-      const id = p.split('/')[3];
-      const c = store.get(id);
-      if (!c) return json(res, { error: 'not found' }, 404);
+    if (p.startsWith('/api/components/') && p.endsWith('/assign-repo') && req.method === 'POST') return withComponent(async (c, id) => {
       const body = await readBody(req);
-      try {
-        const r = await assignRepoToComponent(store, id, body || {}, { workDir: settings.workDir, secretStore });
-        saveSecrets(); // ggf. neu hinterlegtes Token verschlüsselt persistieren
-        return json(res, r, r?.error ? 400 : 200);
-      } catch (err) {
-        return json(res, { error: String(err?.message ?? err) }, 500);
-      }
-    }
+      const r = await assignRepoToComponent(store, id, body || {}, { workDir: settings.workDir, secretStore });
+      saveSecrets(); // ggf. neu hinterlegtes Token verschlüsselt persistieren
+      return json(res, r, r?.error ? 400 : 200);
+    });
 
     // Auto-Update je Komponente (F-20) → async, vor dem synchronen Handler
-    if (p.startsWith('/api/components/') && p.endsWith('/update') && req.method === 'POST') {
-      const id = p.split('/')[3];
-      const c = store.get(id);
-      if (!c) return json(res, { error: 'not found' }, 404);
-      try {
-        // SICHERHEIT: Push nur bei settings.allowPush; sonst No-op-Default (Branch lokal, kein Remote-Push) — wie /upload, /maintain (T-76)
-        const r = await autoUpdateComponent(store, c, { push: settings.allowPush ? localGitPush(c.path) : undefined, registry: prRegistry, recordRun: record });
-        const { branchRegistry, ...out } = r;
-        return json(res, out);
-      } catch (err) {
-        return json(res, { error: String(err?.message ?? err) }, 500);
-      }
-    }
+    if (p.startsWith('/api/components/') && p.endsWith('/update') && req.method === 'POST') return withComponent(async (c) => {
+      // SICHERHEIT: Push nur bei settings.allowPush; sonst No-op-Default (Branch lokal, kein Remote-Push) — wie /upload, /maintain (T-76)
+      const r = await autoUpdateComponent(store, c, { push: settings.allowPush ? localGitPush(c.path) : undefined, registry: prRegistry, recordRun: record });
+      const { branchRegistry, ...out } = r;
+      return json(res, out);
+    });
 
     // Bibliotheks-Aktualität aus dem Web prüfen (T-59) → async
-    if (p.startsWith('/api/components/') && p.endsWith('/libraries/check') && req.method === 'POST') {
-      const id = p.split('/')[3];
-      const c = store.get(id);
-      if (!c) return json(res, { error: 'not found' }, 404);
-      try {
-        const enriched = await checkLibrariesOnline(c.libs || []);
-        store.update(id, { libs: enriched });
-        return json(res, { ok: true, libs: enriched });
-      } catch (err) { return json(res, { error: String(err?.message ?? err) }, 500); }
-    }
+    if (p.startsWith('/api/components/') && p.endsWith('/libraries/check') && req.method === 'POST') return withComponent(async (c, id) => {
+      const enriched = await checkLibrariesOnline(c.libs || []);
+      store.update(id, { libs: enriched });
+      return json(res, { ok: true, libs: enriched });
+    });
 
     // Upload: Änderungen als neuer Branch + Commit + (optional) Push, PR-Link zurück (T-76) → async
-    if (p.startsWith('/api/components/') && p.endsWith('/upload') && req.method === 'POST') {
-      const id = p.split('/')[3];
-      const c = store.get(id);
-      if (!c) return json(res, { error: 'not found' }, 404);
-      try {
-        const r = await uploadFor(true)(store.get(id)); // push nur, wenn settings.allowPush
-        if (r.ok) store.update(id, { reviewUrl: r.prUrl ?? null, reviewBranch: r.branch ?? null });
-        return json(res, { ...r, pushAllowed: !!settings.allowPush });
-      } catch (err) { return json(res, { error: String(err?.message ?? err) }, 500); }
-    }
+    if (p.startsWith('/api/components/') && p.endsWith('/upload') && req.method === 'POST') return withComponent(async (c, id) => {
+      const r = await uploadFor(true)(c); // push nur, wenn settings.allowPush
+      if (r.ok) store.update(id, { reviewUrl: r.prUrl ?? null, reviewBranch: r.branch ?? null });
+      return json(res, { ...r, pushAllowed: !!settings.allowPush });
+    });
 
     // Coded-UI-Tests (Playwright) live ausführen (T-73) — nur GUI-getriggert, NICHT im Job → async
-    if (p.startsWith('/api/components/') && p.endsWith('/ui-tests') && req.method === 'POST') {
-      const id = p.split('/')[3];
-      const c = store.get(id);
-      if (!c) return json(res, { error: 'not found' }, 404);
+    if (p.startsWith('/api/components/') && p.endsWith('/ui-tests') && req.method === 'POST') return withComponent(async (c, id) => {
       const body = await readBody(req);
       const url = (body?.url || c.uiTestUrl || '').trim();
       if (url && url !== c.uiTestUrl) store.update(id, { uiTestUrl: url });
-      const slug = slugify(c.name);
       const hasPlaywright = fs.existsSync(path.join(__dirname, 'node_modules', '@playwright', 'test'));
-      try {
-        const r = await runUiTests(store.get(id), { pluginUrl: url, specsDir: path.join(DATA_DIR, 'ui-tests', slug), hasPlaywright });
-        return json(res, r);
-      } catch (err) { return json(res, { error: String(err?.message ?? err) }, 500); }
-    }
+      const r = await runUiTests(store.get(id), { pluginUrl: url, specsDir: path.join(DATA_DIR, 'ui-tests', slugify(c.name)), hasPlaywright });
+      return json(res, r);
+    });
 
     // SBOM (CycloneDX) der Komponente — für Review/Visualisierung (T-69) → GET
-    if (p.startsWith('/api/components/') && p.endsWith('/sbom') && req.method === 'GET') {
-      const id = p.split('/')[3];
-      const c = store.get(id);
-      if (!c) return json(res, { error: 'not found' }, 404);
+    if (p.startsWith('/api/components/') && p.endsWith('/sbom') && req.method === 'GET') return withComponent(async (c) => {
       const sbom = buildSbom(c.name, (c.libs || []).map((l) => ({ name: l.name, version: l.version, detectedBy: l.detectedBy || 'erkannt', evidence: l.source || l.evidence || '' })));
       // Status/Quelle als zusätzliche Properties anreichern (für Review-Auswertung)
       sbom.components.forEach((comp, i) => {
@@ -372,48 +341,35 @@ function cmdServe(portArg) {
         if (l) comp.properties.push({ name: 'status', value: l.status || 'unbekannt' }, ...(l.source ? [{ name: 'source', value: l.source }] : []), ...(l.latest ? [{ name: 'latest', value: l.latest }] : []));
       });
       return json(res, sbom);
-    }
+    });
 
     // Alles automatisch beheben (T-61) → async
-    if (p.startsWith('/api/components/') && p.endsWith('/autofix') && req.method === 'POST') {
-      const id = p.split('/')[3];
-      const c = store.get(id);
-      if (!c) return json(res, { error: 'not found' }, 404);
-      try {
-        const ai = resolveAiBackend(settings, secretStore);
-        const r = await autoFixComponent(store, c, {
-          ai,
-          updateDeps: { push: localGitPush(c.path), registry: prRegistry, recordRun: record },
-          logSink: writeLog,
-        });
-        return json(res, r, r?.error ? 400 : 200);
-      } catch (err) { return json(res, { error: String(err?.message ?? err) }, 500); }
-    }
+    if (p.startsWith('/api/components/') && p.endsWith('/autofix') && req.method === 'POST') return withComponent(async (c) => {
+      const ai = resolveAiBackend(settings, secretStore);
+      const r = await autoFixComponent(store, c, {
+        ai,
+        updateDeps: { push: localGitPush(c.path), registry: prRegistry, recordRun: record },
+        logSink: writeLog,
+      });
+      return json(res, r, r?.error ? 400 : 200);
+    });
 
     // Vollständige Pflege (manuell = automatisch) — eine Orchestrierung (T-66) → async
-    if (p.startsWith('/api/components/') && p.endsWith('/maintain') && req.method === 'POST') {
-      const id = p.split('/')[3];
-      const c = store.get(id);
-      if (!c) return json(res, { error: 'not found' }, 404);
-      try {
-        const ai = resolveAiBackend(settings, secretStore);
-        const r = await maintainComponent(store, c, { ai, updateDeps: { push: localGitPush(c.path), registry: prRegistry, recordRun: record }, logSink: writeLog, onTestPlan, onSbom, recordRun: record });
-        return json(res, r, r?.error ? 400 : 200);
-      } catch (err) { return json(res, { error: String(err?.message ?? err) }, 500); }
-    }
+    if (p.startsWith('/api/components/') && p.endsWith('/maintain') && req.method === 'POST') return withComponent(async (c) => {
+      const ai = resolveAiBackend(settings, secretStore);
+      const r = await maintainComponent(store, c, { ai, updateDeps: { push: localGitPush(c.path), registry: prRegistry, recordRun: record }, logSink: writeLog, onTestPlan, onSbom, recordRun: record });
+      return json(res, r, r?.error ? 400 : 200);
+    });
 
     // Bibliothek manuell hinzufügen (T-67) → async
-    if (p.startsWith('/api/components/') && p.endsWith('/libraries') && req.method === 'POST') {
-      const id = p.split('/')[3];
-      const c = store.get(id);
-      if (!c) return json(res, { error: 'not found' }, 404);
+    if (p.startsWith('/api/components/') && p.endsWith('/libraries') && req.method === 'POST') return withComponent(async (c, id) => {
       const body = await readBody(req);
       if (!body?.name) return json(res, { error: 'Name fehlt' }, 400);
       const lib = { name: String(body.name), version: String(body.version || ''), status: 'unbekannt', detectedBy: 'manuell', source: body.source || null };
       const libs = [...(c.libs || []), lib];
       store.update(id, { libs });
       return json(res, { ok: true, libs });
-    }
+    });
 
     // Komponenten-Verwaltung (T-34) → synchroner REST-Handler
     if (p.startsWith('/api/components')) {
