@@ -42,6 +42,19 @@ describe('T-46 collectLibraries', () => {
     expect(store.get('c2').libWarning).toMatchObject({ vulnerable: 1, unmaintained: 1 });
   });
 
+  it('libWarning aus gespeicherten Libs enthält outdated UND unknown (kein Drift, T-87)', () => {
+    const store = mkStore();
+    const id = store.add({ name: 'C', path: '/c' }).id;
+    // gespeicherte, web-angereicherte Libs → collectLibraries nutzt den stored-Zweig (kein Scan)
+    store.update(id, { libs: [
+      { name: 'three', version: 'unbekannt', status: 'unbekannt' },
+      { name: 'd3', version: '5.0.0', outdated: true, latest: '7.0.0' },
+    ] });
+    collectLibraries(store, { scan });
+    // Vor dem Fix fehlten outdated/unknown im libWarning (nur vulnerable/unmaintained gezählt)
+    expect(store.get(id).libWarning).toMatchObject({ vulnerable: 0, unmaintained: 0, outdated: 1, unknown: 1 });
+  });
+
   it('Komponente ohne Pfad → libWarning null', () => {
     const store = mkStore();
     store.add({ name: 'X' });
