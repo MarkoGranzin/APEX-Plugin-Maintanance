@@ -16,7 +16,6 @@ import { enrichWithFormat, componentMeta } from '../inventory/format.js';
 import { extractArtifact } from '../extract/extract.js';
 import { analyzeBundle } from '../extract/analyze.js';
 import { scanArtifact } from '../sbom/sbom.js';
-import { assessRisks, activeRisks as filterActiveRisks, createAck } from '../sbom/risk.js';
 import { lint, retireCheck, makeSnapshot, unmaintainedReason, vulnerabilityFor } from '../test/static.js';
 import { detectVendoredLibraries } from '../sbom/vendored.js';
 import { libStatus } from './lib-check.js';
@@ -35,7 +34,6 @@ import { generateCodedTests } from '../test/codegen-ui.js';
  * @param {object} [opts] hashDb / latestVersions / signalsByLib / ack / secrets
  */
 export function scanRepo(repoDir, opts = {}) {
-  const ack = opts.ack ?? createAck();
   if (!repoDir || !fs.existsSync(repoDir)) {
     // kein/ungültiger Checkout (z.B. Repo noch nicht zugeordnet) → leeres, valides Ergebnis
     return { repoDir: repoDir ?? null, artifacts: [], outdated: [], risks: [], failures: [], report: { subject: '', body: '' }, triage: { triageList: [], cards: [], inconsistency: { total: 0, testable: 0, toClarify: 0, noConvention: 0, tone: 'calm', text: '0' }, red: [] }, log: [], testPlan: '', coverage: null, codedTests: [], libs: [], libWarning: null, type: null, format: null };
@@ -62,7 +60,7 @@ export function scanRepo(repoDir, opts = {}) {
     const bundle = extractArtifact(art, { rootDir: repoDir });
     const analysis = analyzeBundle(bundle);
     const scan = scanArtifact(bundle, { hashDb: opts.hashDb, latestVersions: opts.latestVersions });
-    const risks = assessRisks(scan.components, opts.signalsByLib ?? {});
+    const risks = []; // SBOM-Risk-Bewertung entfernt (lieferte produktiv immer leer — kein signalsByLib)
     const staticRes = {
       lint: lint(bundle),
       retire: retireCheck(bundle),
@@ -214,7 +212,7 @@ export function scanRepo(repoDir, opts = {}) {
   const libUnknownCount = libsArr.filter((l) => !l.vulnerable && !l.unmaintained && (!l.version || l.version === 'unbekannt')).length;
   const libWarning = libVulnCount || libUnmaintCount || libUnknownCount ? { vulnerable: libVulnCount, unmaintained: libUnmaintCount, unknown: libUnknownCount } : null;
 
-  const active = filterActiveRisks(allRisks, ack);
+  const active = allRisks; // immer leer — Risk-Bewertung entfernt
   const report = renderReport(
     {
       updated: [], // Scan ist read-only — Updates werden hier nur GEMELDET, nicht ausgeführt

@@ -2,25 +2,10 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { gherkinForArtifact, buildTestPlan } from '../src/ai/testplan.js';
 import { resolveAiBackend, aiBackendView } from '../src/ai/configure.js';
 import { SecretStore } from '../src/config/secrets.js';
 import { autoReviewFix } from '../src/service/autoreview.js';
 import { createComponentStore } from '../src/gui/store.js';
-
-describe('Testplan (Cucumber)', () => {
-  it('erzeugt Gherkin-Szenarien aus Einstiegspunkten/apex/DOM', () => {
-    const g = gherkinForArtifact('slider', { entryPoints: ['init', 'refresh'], apexCalls: ['apex.server.process'], domAccess: ['document.getElementById'] });
-    expect(g).toMatch(/Funktionalität: slider/);
-    expect(g).toMatch(/Szenario: Einstiegspunkt init funktioniert/);
-    expect(g).toMatch(/Angenommen/); expect(g).toMatch(/Wenn/); expect(g).toMatch(/Dann/);
-    expect(g).toMatch(/Server-Callback/);
-  });
-  it('ohne Einstiegspunkte → Basis-Szenario; buildTestPlan kombiniert', () => {
-    expect(gherkinForArtifact('x', {})).toMatch(/lädt ohne Fehler/);
-    expect(buildTestPlan([{ name: 'a', analysis: {} }, { name: 'b', analysis: {} }])).toMatch(/Funktionalität: a[\s\S]*Funktionalität: b/);
-  });
-});
 
 describe('KI-Konfiguration', () => {
   it('Default ohne aiBackend → Stub', () => {

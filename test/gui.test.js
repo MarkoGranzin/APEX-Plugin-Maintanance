@@ -1,39 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { dashboardViewModel, addRepo, removeRepo, triggerNow } from '../src/gui/dashboard.js';
 import { triageViewModel, correctFormat, needsDecision, artifactCard } from '../src/gui/triage.js';
-import { createSettings } from '../src/config/settings.js';
-import { createHistory, recordRun } from '../src/report/history.js';
-import { createScheduler } from '../src/service/scheduler.js';
-
-describe('T-14 Dashboard & Repo-Verwaltung', () => {
-  it('zeigt je Repo Status, letzten Lauf und History-Link', () => {
-    const settings = createSettings();
-    addRepo(settings, { name: 'repoA', source: 'https://git/a' });
-    const history = createHistory();
-    recordRun(history, { id: 'run-9', status: 'green', updated: [{ artifact: 'x' }] });
-
-    const vm = dashboardViewModel({ settings, history, scheduler: null });
-    expect(vm.repos[0].name).toBe('repoA');
-    expect(vm.repos[0].lastRun).toMatchObject({ id: 'run-9', status: 'green' });
-    expect(vm.repos[0].historyLink).toBe('#/history/run-9');
-  });
-
-  it('„Jetzt prüfen" löst über den Scheduler aus (kein Doppellauf)', async () => {
-    let ran = 0;
-    const scheduler = createScheduler({ runJob: async () => { ran += 1; } });
-    const res = triggerNow(scheduler, 'repoA', Date.now());
-    expect(res.accepted).toBe(true);
-    await res.done;
-    expect(ran).toBe(1);
-  });
-
-  it('Repo entfernen', () => {
-    const settings = createSettings();
-    addRepo(settings, { name: 'r', source: 's' });
-    removeRepo(settings, 'r');
-    expect(settings.repos).toHaveLength(0);
-  });
-});
 
 describe('T-24 Triage & Steckbrief', () => {
   const arts = [

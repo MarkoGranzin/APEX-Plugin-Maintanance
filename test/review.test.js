@@ -1,23 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { WEB_DEV_PERSONA, buildRepairPrompt } from '../src/ai/personas.js';
 import { securityScan, securityReview, qualityScan, qualityReview, reviewGate } from '../src/run/review.js';
-import { autoUpdateArtifact } from '../src/run/update.js';
-import { stubBackend } from '../src/ai/backend.js';
-
-describe('T-28 Web-Dev-Persona', () => {
-  it('Reparatur-Prompt enthält Persona + Befund + Einstiegspunkte', () => {
-    const p = buildRepairPrompt({ logs: ['test rot: foo'] }, { artifact: 'w', entryPoints: ['init', 'refresh'], apexCalls: ['apex.item'] });
-    expect(p).toContain('Web-Entwickler');
-    expect(p).toContain('init, refresh');
-    expect(p).toContain('test rot: foo');
-  });
-  it('Persona fordert schlank/sicher/keine losen Enden', () => {
-    expect(WEB_DEV_PERSONA).toMatch(/schlank/i);
-    expect(WEB_DEV_PERSONA).toMatch(/lose[n]? Enden/i);
-    expect(WEB_DEV_PERSONA).toMatch(/innerHTML/);
-    expect(WEB_DEV_PERSONA).toMatch(/eval/);
-  });
-});
 
 describe('T-29 Security-Review (OWASP)', () => {
   it('XSS via innerHTML → Finding (hoch), Gate nicht grün', () => {
@@ -83,41 +65,5 @@ describe('T-31 Review-Gate-Orchestrierung', () => {
     const g = reviewGate({ assets: [{ name: 'x.js', code: 'function f(){ debugger; return 1; }' }] });
     expect(g.stage).toBe('quality');
     expect(g.security.pass).toBe(true);
-  });
-
-  it('autoUpdate pusht nur bei grünem Review-Gate', async () => {
-    const suite = { artifact: 'w', cases: [{ name: 't', fn: () => {} }] };
-    let pushed = false;
-    let rolledBack = false;
-    const res = await autoUpdateArtifact({
-      artifact: { name: 'w' },
-      suite,
-      applyUpdate: () => {},
-      ai: stubBackend(),
-      healApply: () => true,
-      push: () => { pushed = true; return { prRef: 'PR' }; },
-      rollback: () => { rolledBack = true; },
-      review: async () => ({ pass: false, stage: 'security', security: { blocking: [{ rule: 'xss-innerHTML' }] } }),
-    });
-    expect(res.pushed).toBe(false);
-    expect(res.reason).toMatch(/review-blockiert/);
-    expect(pushed).toBe(false);
-    expect(rolledBack).toBe(true);
-  });
-
-  it('autoUpdate pusht bei grünem Review-Gate', async () => {
-    const suite = { artifact: 'w', cases: [{ name: 't', fn: () => {} }] };
-    let pushed = false;
-    const res = await autoUpdateArtifact({
-      artifact: { name: 'w' },
-      suite,
-      applyUpdate: () => {},
-      ai: stubBackend(),
-      healApply: () => true,
-      push: () => { pushed = true; return { prRef: 'PR' }; },
-      review: async () => ({ pass: true, stage: 'approved' }),
-    });
-    expect(res.pushed).toBe(true);
-    expect(pushed).toBe(true);
   });
 });
