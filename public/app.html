@@ -389,7 +389,7 @@ async function openDetail(id){
       <div id="uiTestOut"></div>
       <h4 class="muted small" style="margin:14px 0 4px">📌 Characterization baseline <span class="muted">— pin the working behavior (“works as before”)</span></h4>
       ${renderBaseline(c)}
-      <div class="inline" style="gap:6px"><button onclick="captureBaselineNow()" title="Run the UI tests against the current (working) build and pin the result as the as-before baseline. Migrations/rebuilds are then only adopted if green as before.">📌 Capture baseline (now-working state)</button></div>
+      <div class="inline" style="gap:6px"><button onclick="captureBaselineNow()" title="Run the UI tests against the current (working) build and pin the result as the as-before baseline. Migrations/rebuilds are then only adopted if green as before.">📌 Capture baseline (now-working state)</button><button onclick="runRedev()" title="AI migrates/rebuilds the plugin onto the latest stable library, then re-runs the UI tests against the baseline. Adopted ONLY if green as before (else rolled back). Needs an AI backend + a UI test URL + a captured baseline.">🚀 Migrate to latest (verified vs baseline)</button></div>
       <div id="baselineOut"></div>
       <h4 class="muted small" style="margin:14px 0 4px">📋 Test plan (Cucumber)</h4>
       ${renderGherkin(c.testPlan)}
@@ -696,6 +696,26 @@ function renderBaseline(c){
   const ok=(b.scenarios||[]).filter(s=>s.status==='passed').length, tot=(b.scenarios||[]).length;
   const modeBadge = b.mode==='ui' ? '🎭 UI' : '📄 static (degraded)';
   return `<div class="finding ${b.mode==='ui'?'low':'medium'}" style="margin:4px 0"><b>Baseline</b> · ${fmtDate(b.at)} · ${modeBadge} · ${ok}/${tot} green${b.note?` · <span class="muted">${esc(b.note)}</span>`:''}</div>`;
+}
+async function runRedev(){
+  if(!current) return; const id=current.id; setBusy(id,true);
+  if(!confirm('AI migrates/rebuilds this plugin onto the latest stable library and verifies it against the captured baseline.\n\nChanges are only kept if the UI tests are green as before (otherwise rolled back). Continue?')){ setBusy(id,false); return; }
+  $('baselineOut').innerHTML='<div class="muted small">Migrating + verifying against baseline…</div>';
+  try{
+    const r=await api('POST',`/api/components/${id}/redevelop`,{});
+    if(r.error){ $('baselineOut').innerHTML=`<div class="finding">${esc(r.error)}</div>`; return; }
+    await openDetail(id); load();
+    if(r.adopted){
+      const link=r.upload&&r.upload.prUrl?` — <a href="${esc(r.upload.prUrl)}" target="_blank" rel="noopener" style="color:var(--accent)">Open PR/review ↗</a>`:'';
+      $('baselineOut').innerHTML=`<div class="note"><b>✅ Adopted — green as before</b> · ${esc(r.migration||'')}${link}</div>`;
+      toast('Migrated (verified as before)');
+    } else {
+      const regs=(r.regressions||[]).map(x=>`<div class="finding medium">↩ regression: ${esc(x.scenario)} (${esc(x.was||'passed')} → ${esc(x.now||'failed')})</div>`).join('');
+      $('baselineOut').innerHTML=`<div class="finding"><b>⛔ Not adopted (rolled back)</b> — ${esc(r.reason||(r.gate&&r.gate.summary)||'not green as before')}</div>`+regs;
+      toast('Not adopted — kept the working version');
+    }
+  }catch(e){ $('baselineOut').innerHTML=`<div class="finding">${esc(e.message)}</div>`; toast('Error: '+e.message); }
+  finally{ setBusy(id,false); }
 }
 async function captureBaselineNow(){
   if(!current) return; const id=current.id; setBusy(id,true);

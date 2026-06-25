@@ -33,6 +33,7 @@ import { autoFixComponent } from './src/service/autofix.js';
 import { maintainComponent } from './src/service/maintain.js';
 import { runUiTests } from './src/test/run-ui.js';
 import { captureBaseline } from './src/service/baseline.js';
+import { redevelopComponent } from './src/service/redev.js';
 import { uploadFix } from './src/service/upload.js';
 import { slug as slugify } from './src/util/slug.js';
 import { resolveAiBackend, aiBackendView } from './src/ai/configure.js';
@@ -346,6 +347,20 @@ function cmdServe(portArg) {
       const hasPlaywright = fs.existsSync(path.join(__dirname, 'node_modules', '@playwright', 'test'));
       const b = await captureBaseline(store, store.get(id), { pluginUrl: url, specsDir: path.join(DATA_DIR, 'ui-tests', slugify(c.name)), hasPlaywright, onBaseline });
       return json(res, b);
+    });
+
+    // Re-Dev/Migration gegen die Spec (F-28/T-93): KI migriert → UI-Gate → Übernahme nur „grün wie zuvor" → async
+    if (p.startsWith('/api/components/') && p.endsWith('/redevelop') && req.method === 'POST') return withComponent(async (c) => {
+      const ai = resolveAiBackend(settings, secretStore);
+      const hasPlaywright = fs.existsSync(path.join(__dirname, 'node_modules', '@playwright', 'test'));
+      const r = await redevelopComponent(store, c, {
+        ai,
+        pluginUrl: c.uiTestUrl,
+        specsDir: path.join(DATA_DIR, 'ui-tests', slugify(c.name)),
+        hasPlaywright,
+        upload: uploadFor(true), // Push nur bei settings.allowPush (T-76)
+      });
+      return json(res, r, r?.error ? 400 : 200);
     });
 
     // SBOM (CycloneDX) der Komponente — für Review/Visualisierung (T-69) → GET
