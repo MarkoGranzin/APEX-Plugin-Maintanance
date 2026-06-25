@@ -1,0 +1,17 @@
+# Abhängigkeiten
+node_modules/
+
+# Laufzeit-/Nutzerdaten (Konfiguration, Secrets, Logs, Testpläne) — NICHT versionieren
+data/
+
+# Arbeitsverzeichnis (geklonte Repos)
+workspace/
+
+# lokale/maschinen-spezifische Tooling-Konfiguration
+.mcp.json
+.claude/settings.local.json
+
+# temporäre Dateien
+*.log
+.chk.js
+qa.log

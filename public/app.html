@@ -1,0 +1,814 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AIS Pluginpflege — Verwaltung</title>
+<style>
+  :root{
+    --bg:#0f1620;--panel:#16212e;--panel2:#1c2a3a;--ink:#e7eef6;--muted:#9fb0c3;--line:#26384b;
+    --accent:#4cc2ff;--green:#54d18c;--yellow:#ffc857;--red:#ff6b6b;--radius:12px;
+    --sans:system-ui,-apple-system,"Segoe UI",Roboto,Arial,sans-serif;--mono:ui-monospace,Consolas,monospace;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--ink);font-family:var(--sans);font-size:15px}
+  header{display:flex;align-items:center;gap:16px;padding:16px 22px;border-bottom:1px solid var(--line);background:var(--panel);position:sticky;top:0;z-index:5}
+  header h1{font-size:1.15rem;margin:0;letter-spacing:-.01em}
+  header .sp{flex:1}
+  a{color:var(--accent);text-decoration:none}
+  button{font:inherit;cursor:pointer;border-radius:9px;border:1px solid var(--line);background:var(--panel2);color:var(--ink);padding:8px 13px}
+  button.primary{background:var(--accent);color:#06243a;border-color:transparent;font-weight:600}
+  button.ghost{background:transparent}
+  button.danger{color:var(--red);border-color:rgba(255,107,107,.4)}
+  button:hover{filter:brightness(1.08)}
+  .wrap{padding:22px;max-width:1200px;margin:0 auto}
+  table{width:100%;border-collapse:collapse;background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);overflow:hidden}
+  th,td{text-align:left;padding:11px 13px;border-bottom:1px solid var(--line);vertical-align:middle}
+  th{color:var(--muted);font-size:.76rem;text-transform:uppercase;letter-spacing:.04em}
+  tr:last-child td{border-bottom:none}
+  tr.row:hover{background:var(--panel2);cursor:pointer}
+  .badge{display:inline-block;font-size:.74rem;padding:3px 9px;border-radius:999px;border:1px solid var(--line);color:var(--muted);white-space:nowrap}
+  .badge.export{color:var(--accent);border-color:rgba(76,194,255,.4)}
+  .badge.tc{color:#c9a3ff;border-color:#5a4a7a}
+  .dot{display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:6px;background:var(--muted)}
+  .dot.ok{background:var(--green)} .dot.warn{background:var(--yellow)} .dot.err{background:var(--red)}
+  .muted{color:var(--muted)} .small{font-size:.85rem}
+  .actions{display:flex;gap:6px;justify-content:flex-end}
+  .empty{padding:50px;text-align:center;color:var(--muted)}
+  /* Drawer */
+  .drawer-bg{position:fixed;inset:0;background:rgba(0,0,0,.5);display:none}
+  .drawer-bg.open{display:block}
+  .drawer{position:fixed;top:0;right:0;height:100%;width:min(540px,94vw);background:var(--panel);border-left:1px solid var(--line);transform:translateX(100%);transition:transform .2s;overflow:auto;z-index:20}
+  .drawer.open{transform:none}
+  .drawer .dh{display:flex;align-items:center;gap:10px;padding:18px 20px;border-bottom:1px solid var(--line);position:sticky;top:0;background:var(--panel)}
+  .drawer .body{padding:18px 20px}
+  .drawer h2{margin:.2em 0;font-size:1.2rem}
+  .kv{display:grid;grid-template-columns:120px 1fr;gap:6px 12px;margin:10px 0}
+  .kv .muted{color:var(--muted)}
+  .sec{margin-top:22px}
+  .sec h3{font-size:.9rem;text-transform:uppercase;letter-spacing:.04em;color:var(--muted);margin:0 0 8px}
+  .note{background:var(--panel2);border:1px solid var(--line);border-radius:10px;padding:9px 11px;margin:7px 0}
+  .note .meta{font-size:.74rem;color:var(--muted)}
+  .finding{border-left:3px solid var(--red);padding:4px 10px;margin:6px 0;background:var(--panel2);border-radius:0 8px 8px 0;font-size:.86rem}
+  .finding.medium{border-color:var(--yellow)} .finding.low{border-color:var(--muted)}
+  .logbox{max-height:260px;overflow:auto;background:var(--panel2);border:1px solid var(--line);border-radius:8px;padding:8px 10px;font-family:var(--mono);font-size:.78rem;margin-top:8px}
+  .logline{padding:2px 0} .logline .ag{color:var(--accent)} .logline.error .ag,.logline.high .ag{color:var(--red)} .logline.warn .ag{color:var(--yellow)}
+  .logline.error,.logline.high,.logline.critical{color:#ff8a8a} .logline.warn,.logline.medium{color:#ffd479} .logline.pass{color:#5ad27e}
+  .chat{display:flex;flex-direction:column;gap:8px;margin-top:8px;max-height:420px;overflow:auto}
+  .chatmsg{display:flex;gap:8px} .chatmsg .who{flex:0 0 104px;text-align:right;font-size:.76rem;font-weight:600;color:var(--accent);padding-top:7px}
+  .chatmsg .bubble{flex:1;background:var(--panel2);border:1px solid var(--line);border-radius:10px;padding:7px 11px;font-size:.82rem}
+  .chatmsg.bad .who{color:#f85149} .chatmsg.bad .bubble{border-color:#f8514966;background:rgba(248,81,73,.07)}
+  .chatmsg.warn .who{color:#d29922} .chatmsg.warn .bubble{border-color:#d2992266}
+  .chatmsg.ok .who{color:#3fb950}
+  .chatmsg .file{color:var(--muted);font-size:.74rem;font-family:var(--mono);margin-bottom:2px}
+  .gherkin{background:var(--panel2);border:1px solid var(--line);border-radius:8px;padding:10px 12px;font-size:.82rem;max-height:380px;overflow:auto}
+  .gh-feature{font-weight:700;color:var(--accent);margin:8px 0 8px;font-size:.9rem}
+  .gh-scn{font-weight:600;margin:12px 0 4px;padding:3px 8px;border-left:3px solid var(--accent);background:rgba(76,194,255,.06)}
+  .gh-scn.neg{border-left-color:var(--yellow);background:rgba(255,212,121,.06)} .gh-scn.ui{border-left-color:#c9a3ff;background:rgba(201,163,255,.06)}
+  .gh-step{padding:1px 0 1px 18px} .gh-kw{color:var(--accent);font-weight:600;margin-right:6px}
+  .gh-ex{margin:6px 0 2px 18px;color:var(--muted);font-size:.78rem}
+  .gh-cmt{color:var(--muted);font-style:italic;margin-top:10px}
+  .gh-tbl{border-collapse:collapse;margin:4px 0 8px 18px;font-size:.78rem}
+  .gh-tbl th,.gh-tbl td{border:1px solid var(--line);padding:2px 9px;text-align:left}
+  .gh-tbl th{background:var(--panel);color:var(--muted);font-weight:600}
+  .hero{background:var(--panel2);border:1px solid var(--line);border-radius:10px;padding:12px 14px;margin-bottom:6px}
+  .tabs{display:flex;gap:2px;border-bottom:1px solid var(--line);margin:14px 0 14px;flex-wrap:wrap;position:sticky;top:0;background:var(--panel);z-index:2}
+  .tab{background:none;border:0;border-bottom:2px solid transparent;color:var(--muted);padding:9px 14px;cursor:pointer;font:inherit;border-radius:0}
+  .tab:hover{color:var(--ink)} .tab.active{color:var(--accent);border-bottom-color:var(--accent);font-weight:600}
+  .moreact{margin-top:4px} .moreact>summary{cursor:pointer;color:var(--muted);font-size:.85rem;list-style:none;padding:4px 0;display:inline-block}
+  .moreact>summary::-webkit-details-marker{display:none}
+  .tabpanel[hidden]{display:none}
+  input,select,textarea{width:100%;font:inherit;background:var(--panel2);color:var(--ink);border:1px solid var(--line);border-radius:9px;padding:9px 11px}
+  label{display:block;font-size:.82rem;color:var(--muted);margin:12px 0 4px}
+  .row2{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+  .modal-bg{position:fixed;inset:0;background:rgba(0,0,0,.55);display:none;align-items:center;justify-content:center;z-index:30}
+  .modal-bg.open{display:flex}
+  .modal{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:22px;width:min(480px,94vw)}
+  .modal h2{margin:0 0 6px;font-size:1.15rem}
+  .modal .foot{display:flex;justify-content:flex-end;gap:8px;margin-top:18px}
+  .toast{position:fixed;bottom:20px;left:50%;transform:translateX(-50%);background:var(--panel2);border:1px solid var(--line);padding:10px 16px;border-radius:10px;display:none;z-index:50}
+  .toast.show{display:block}
+  .inline{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+  .agcount{display:inline-block;min-width:74px;font-size:.72rem;font-weight:600;text-transform:uppercase;letter-spacing:.04em;color:var(--muted)}
+  .protogrp{margin:6px 0} .protogrp summary{cursor:pointer;padding:4px 0;font-size:.82rem;font-weight:600;list-style:none}
+  .protogrp summary::-webkit-details-marker{display:none}
+  .protogrp summary .pill{display:inline-block;min-width:18px;text-align:center;font-size:.7rem;padding:1px 7px;border-radius:999px;background:var(--panel2);border:1px solid var(--line);margin-left:6px}
+  .protogrp summary .pill.bad{color:var(--red);border-color:rgba(255,90,90,.4)} .protogrp summary .pill.warn{color:var(--yellow)}
+  .chk{display:flex;align-items:center;gap:8px} .chk input{width:auto}
+</style>
+</head>
+<body>
+<header>
+  <h1>🔧 AIS Pluginpflege</h1>
+  <span class="muted small">Verwaltung der Plugins &amp; Template-Komponenten</span>
+  <span class="sp"></span>
+  <a class="small" href="/readme.html" target="_blank">Doku ↗</a>
+  <button class="ghost" onclick="openSettings()">⚙ Einstellungen</button>
+  <button class="primary" onclick="openEdit()">+ Plugin</button>
+</header>
+
+<div id="staleBanner" style="display:none;margin:0;padding:10px 22px;background:#7a1d1d;color:#fff;font-size:.9rem"></div>
+<div class="wrap">
+  <div class="inline" style="margin-bottom:14px;gap:8px">
+    <button id="navPlugins" class="primary" onclick="switchView('plugins')">Plugins</button>
+    <button id="navLibs" class="ghost" onclick="switchView('libs')">Bibliotheken</button>
+    <span class="muted small" id="wdLabel" style="margin-left:8px"></span>
+    <span class="sp" style="flex:1"></span>
+    <button class="primary" onclick="runAll()">▶ Alle prüfen</button>
+  </div>
+
+  <div id="pluginsView">
+    <table id="tbl">
+      <thead><tr>
+        <th>Name</th><th>Repo</th><th>Typ</th><th>Format</th><th>Status</th><th>Bibliotheken</th><th>Letzte Änderung</th><th>Zusammenfassung</th><th></th>
+      </tr></thead>
+      <tbody id="rows"></tbody>
+    </table>
+    <div id="empty" class="empty" style="display:none">Noch keine Plugins — lege mit „+ Plugin" das erste an.</div>
+  </div>
+
+  <div id="libsView" style="display:none">
+    <table>
+      <thead><tr><th>Bibliothek</th><th>Version</th><th>Status</th><th>Verwendet von</th></tr></thead>
+      <tbody id="libRows"></tbody>
+    </table>
+    <div id="libsEmpty" class="empty" style="display:none">Keine Bibliotheken erkannt — Repos zuordnen und „Alle prüfen".</div>
+  </div>
+</div>
+
+<!-- Detail-Drawer -->
+<div class="drawer-bg" id="drawerBg" onclick="closeDrawer()"></div>
+<div class="drawer" id="drawer">
+  <div class="dh">
+    <h2 id="dName">—</h2><span class="sp" style="flex:1"></span>
+    <button class="ghost" onclick="closeDrawer()">✕</button>
+  </div>
+  <div class="body" id="dBody"></div>
+</div>
+
+<!-- Add/Edit-Modal -->
+<div class="modal-bg" id="modalBg">
+  <div class="modal">
+    <h2 id="mTitle">Komponente</h2>
+    <input type="hidden" id="mId">
+    <label>Name</label><input id="mName" placeholder="z.B. ColorPicker">
+    <label>Verzeichnis / Repo-Pfad <span class="muted small">(optional — sonst später per „🔗 Repo zuordnen")</span></label><input id="mPath" placeholder="D:\repos\plugin">
+    <div class="muted small" style="margin-top:10px">Typ und Format werden beim Prüfen automatisch erkannt. Es wird immer alles getestet.</div>
+    <div class="foot">
+      <button class="ghost" onclick="closeModal()">Abbrechen</button>
+      <button class="primary" onclick="saveComponent()">Speichern</button>
+    </div>
+  </div>
+</div>
+
+<!-- Repo-zuordnen-Modal (F-21) -->
+<div class="modal-bg" id="assignBg">
+  <div class="modal">
+    <h2>Repo zuordnen</h2>
+    <p class="muted small" style="margin-top:0">Das Repo wird in ein eigenes Verzeichnis geklont und Typ/Format automatisch erkannt.</p>
+    <label>URL oder lokaler Pfad</label><input id="aSource" placeholder="https://github.com/org/mein-plugin.git  oder  D:\\repos\\plugin">
+    <label>Sichtbarkeit</label>
+    <select id="aVisibility" onchange="toggleCreds()"><option value="öffentlich">öffentlich</option><option value="intern">intern / privat</option></select>
+    <div id="credBox" style="display:none">
+      <label>Personal Access Token (für https, optional)</label><input id="aToken" type="password" placeholder="z.B. ghp_…">
+      <label>ODER SSH-Key-Pfad (für git@…)</label><input id="aSshKey" placeholder="z.B. C:\\Users\\du\\.ssh\\id_ed25519">
+      <p class="muted small">Zugangsdaten werden verschlüsselt gespeichert; die Komponente hält nur eine Referenz.</p>
+    </div>
+    <div class="foot">
+      <button class="ghost" onclick="closeAssign()">Abbrechen</button>
+      <button class="primary" id="aBtn" onclick="saveAssign()">Zuordnen &amp; klonen</button>
+    </div>
+  </div>
+</div>
+
+<!-- Einstellungen-Modal -->
+<div class="modal-bg" id="settingsBg">
+  <div class="modal" style="max-width:560px">
+    <h2>Einstellungen</h2>
+    <label>Arbeitsverzeichnis (jedes Repo erhält darin ein eigenes Unterverzeichnis)</label>
+    <input id="workDir" placeholder="./workspace">
+
+    <h3 style="margin:18px 0 4px;font-size:1rem">KI-Backend (für Reviewen, Fixen, Testgenerierung)</h3>
+    <label>Backend</label>
+    <select id="aiKind" onchange="toggleAi()">
+      <option value="stub">— keins (Stub, nur Tests) —</option>
+      <option value="cli">Lokale CLI</option>
+      <option value="provider">Provider + API-Key</option>
+    </select>
+    <div id="aiCli" style="display:none"><label>CLI-Befehl</label><input id="aiCommand" placeholder="z.B. claude"></div>
+    <div id="aiProvider" style="display:none">
+      <div class="row2"><div><label>Endpoint</label><input id="aiEndpoint" placeholder="https://api.anthropic.com/v1/messages"></div><div><label>Modell</label><input id="aiModel" placeholder="claude-opus-4-8"></div></div>
+      <label>API-Key <span id="aiKeyState" class="muted small"></span></label><input id="aiKey" type="password" placeholder="wird verschlüsselt gespeichert">
+    </div>
+    <div class="inline" style="margin-top:8px"><button onclick="testAi()">🔌 Verbindung testen</button><span id="aiTestOut" class="muted small"></span></div>
+
+    <h3 style="margin:18px 0 4px;font-size:1rem">Automatischer Check (Zeitplan)</h3>
+    <div class="chk"><input type="checkbox" id="schedEnabled"><span>automatischen Check aktivieren</span></div>
+    <label>Cron-Ausdruck (Min Std Tag Monat Wochentag) <span class="muted small" id="schedHint"></span></label>
+    <input id="schedule" placeholder="0 3 * * 1" oninput="updateSchedHint()">
+
+    <h3 style="margin:18px 0 4px;font-size:1rem">E-Mail-Report (SMTP)</h3>
+    <div class="row2"><div><label>SMTP-Host</label><input id="smtpHost" placeholder="smtp.firma.de"></div><div><label>Port</label><input id="smtpPort" placeholder="587"></div></div>
+    <div class="chk"><input type="checkbox" id="smtpSecure"><span>TLS (secure)</span></div>
+    <div class="row2"><div><label>Benutzer</label><input id="smtpUser" placeholder="user@firma.de"></div><div><label>Absender (From)</label><input id="smtpFrom" placeholder="aisp@firma.de"></div></div>
+    <label>Passwort <span id="smtpPassState" class="muted small"></span></label><input id="smtpPass" type="password" placeholder="wird verschlüsselt gespeichert">
+    <label>Empfänger (Komma-getrennt)</label><input id="recipients" placeholder="a@firma.de, b@firma.de">
+    <div class="inline" style="margin-top:8px"><button onclick="sendReport()">✉ Report jetzt senden</button><span id="reportOut" class="muted small"></span></div>
+
+    <div class="foot">
+      <button class="ghost" onclick="closeSettings()">Schließen</button>
+      <button class="primary" onclick="saveSettingsAll()">Speichern</button>
+    </div>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+const $ = (id) => document.getElementById(id);
+const esc = (s) => String(s ?? '').replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const api = async (m, url, body) => {
+  const r = await fetch(url, { method:m, headers: body?{'Content-Type':'application/json'}:{}, body: body?JSON.stringify(body):undefined });
+  const t = await r.text(); let d; try{ d=JSON.parse(t);}catch{ d=t; }
+  if(!r.ok) throw new Error((d&&d.error)||r.statusText); return d;
+};
+const toast = (msg) => { const t=$('toast'); t.textContent=msg; t.classList.add('show'); setTimeout(()=>t.classList.remove('show'),2200); };
+const fmtDate = (s) => s ? new Date(s).toLocaleString('de-DE') : '—';
+function libWarnBadge(w){
+  if(!w) return '';
+  let h='';
+  if(w.vulnerable) h+=` <span class="badge" style="color:#f85149;border-color:#f8514966" title="${w.vulnerable} verwundbare Bibliothek(en)">⛔ ${w.vulnerable} verwundbar</span>`;
+  if(w.unmaintained) h+=` <span class="badge" style="color:#d29922;border-color:#d2992266" title="${w.unmaintained} nicht gepflegte Bibliothek(en)">⚠ ${w.unmaintained} nicht gepflegt</span>`;
+  return h;
+}
+
+let current = null;
+
+async function load(){
+  const list = await api('GET','/api/components');
+  const rows = $('rows'); rows.innerHTML='';
+  $('empty').style.display = list.length ? 'none' : 'block';
+  for(const c of list){
+    const tr = document.createElement('tr'); tr.className='row';
+    const dot = (c.libWarning&&c.libWarning.vulnerable) ? 'err' : (c.status==='ok'||c.status==='getestet') ? 'ok' : c.status==='neu' ? '' : 'warn';
+    const badgeCls = c.formatBadge==='APEX-SQL-Export'?'export':'';
+    const typeBadge = c.type==='template_component'?'<span class="badge tc">Template Component</span>':'<span class="badge">Plugin</span>';
+    tr.innerHTML = `
+      <td><b>${esc(c.name)}</b>${libWarnBadge(c.libWarning)}</td>
+      <td class="small muted">${esc(c.repo||'—')}</td>
+      <td>${typeBadge}</td>
+      <td><span class="badge ${badgeCls}">${esc(c.formatBadge)}</span></td>
+      <td><span class="dot ${dot}"></span>${esc(c.status)}</td>
+      <td class="small muted">${(c.libs||[]).slice(0,4).map(l=>`<span class="badge ${l.status==='verwundbar'?'':''}" style="${l.status==='verwundbar'?'color:var(--red)':l.status==='nicht gepflegt'?'color:var(--yellow)':''}">${esc(l.name)}@${esc(l.version)}</span>`).join(' ')||'—'}${(c.libs||[]).length>4?` <span class="muted">+${c.libs.length-4}</span>`:''}</td>
+      <td class="small muted">${fmtDate(c.lastChange&&c.lastChange.at)}</td>
+      <td class="small">${esc(c.changeSummary)}</td>
+      <td><div class="actions">
+        <button class="ghost small" data-act="edit">Bearbeiten</button>
+        <button class="ghost small danger" data-act="del">Löschen</button>
+      </div></td>`;
+    tr.onclick = (e)=>{ const a=e.target.getAttribute('data-act'); if(a==='edit'){e.stopPropagation();openEdit(c);} else if(a==='del'){e.stopPropagation();delComponent(c);} else openDetail(c.id); };
+    rows.appendChild(tr);
+  }
+}
+
+async function openDetail(id){
+  current = await api('GET','/api/components/'+id);
+  $('dName').textContent = current.name;
+  const c = current;
+  const libDot = c.libWarning ? ` <span style="color:${c.libWarning.vulnerable?'#f85149':'#d29922'}">●</span>` : '';
+  $('dBody').innerHTML = `
+    <div class="hero">
+      ${!c.source ? `<div class="finding medium" style="margin:0 0 10px">Kein Repo zugeordnet — über „🔗 Repo zuordnen" anbinden, damit Prüfen/Tests/Bibliotheken funktionieren.</div>` : ''}
+      <div class="inline" style="gap:6px">
+        ${statusPill(c)}${libWarnBadge(c.libWarning)}
+        <span class="badge">${c.type==='template_component'?'Template Component':'Plugin'}</span>
+        <span class="badge ${c.formatBadge==='APEX-SQL-Export'?'export':''}">${esc(c.formatBadge)}</span>
+      </div>
+      <div class="inline" style="margin-top:10px;gap:6px">
+        <button class="primary" onclick="runMaintain()">🧰 Vollständige Pflege jetzt</button>
+        <button onclick="runOne()">▶ Prüfen</button>
+        <details class="moreact"><summary>⋯ Weitere Aktionen</summary>
+          <div class="inline" style="margin-top:8px;gap:6px">
+            <button onclick="openAssign()">🔗 Repo zuordnen</button>
+            <button onclick="openGit()">🌐 Git öffnen</button>
+            <button onclick="openDir()">📂 Lokal öffnen</button>
+            <button onclick="runReview()">🔍 Manuelles Review</button>
+            <button onclick="runAutoReview()">🤖 Autonom reviewen &amp; fixen</button>
+            <button onclick="runAutoFix()">🛠 Alles automatisch beheben</button>
+            <button onclick="runUpdate()">⬆ Auto-Update</button>
+          </div>
+        </details>
+      </div>
+      <div id="reviewOut" style="margin-top:8px"></div>
+    </div>
+
+    <div class="tabs">
+      <button class="tab active" data-tab="overview" onclick="showTab('overview')">Übersicht</button>
+      <button class="tab" data-tab="libs" onclick="showTab('libs')">Bibliotheken${libDot}</button>
+      <button class="tab" data-tab="tests" onclick="showTab('tests')">Tests</button>
+      <button class="tab" data-tab="proto" onclick="showTab('proto')">Protokoll</button>
+      <button class="tab" data-tab="notes" onclick="showTab('notes')">Notizen</button>
+    </div>
+
+    <div class="tabpanel" data-panel="overview">
+      <div class="kv">
+        <span class="muted">Typ</span><span>${c.type==='template_component'?'Template Component':'Plugin'}</span>
+        <span class="muted">Format</span><span>${esc(c.formatBadge)}</span>
+        <span class="muted">Status</span><span>${esc(c.status)}</span>
+        <span class="muted">Quelle</span><span class="small" style="font-family:var(--mono)">${esc(c.source)||'— (kein Repo zugeordnet)'}</span>
+        <span class="muted">Sichtbarkeit</span><span>${esc(c.visibility||'öffentlich')}${c.secretRef?' 🔒':''}</span>
+        <span class="muted">Pfad</span><span class="small" style="font-family:var(--mono)">${esc(c.path)||'—'}</span>
+        <span class="muted">Letzte Änderung</span><span>${fmtDate(c.lastChange&&c.lastChange.at)} — ${esc(c.lastChange&&c.lastChange.summary||'—')}</span>
+      </div>
+    </div>
+
+    <div class="tabpanel" data-panel="libs" hidden>
+      <div class="inline" style="justify-content:space-between"><h3 style="margin:0">SBOM &amp; Bibliotheken ${c.libsCheckedAt?`<span class="muted small">· Web-Check ${fmtDate(c.libsCheckedAt)}</span>`:''}</h3></div>
+      ${sbomViz(c.libs)}
+      <div class="inline" style="margin-bottom:6px"><button onclick="checkLibs()">🌐 Aus dem Web prüfen (Version &amp; Alter)</button>${(c.libs&&c.libs.length)?'<button onclick="downloadSbom()">⬇ SBOM (CycloneDX)</button>':''}</div>
+      ${(c.libs && c.libs.length)
+        ? `<div class="logbox">${c.libs.map(l=>libLine(l)).join('')}</div>`
+        : '<div class="muted small">Noch nicht erkannt — „▶ Prüfen" oder manuell hinzufügen.</div>'}
+      <div class="inline" style="margin-top:8px">
+        <input id="libName" placeholder="Bibliothek (z.B. jquery)" style="max-width:180px">
+        <input id="libVer" placeholder="Version (z.B. 3.4.1)" style="max-width:140px">
+        <input id="libSrc" placeholder="Quelle/URL (optional)" style="max-width:220px">
+        <button onclick="addLib()">+ manuell hinzufügen</button>
+      </div>
+    </div>
+
+    <div class="tabpanel" data-panel="tests" hidden>
+      <div class="muted small" style="margin-bottom:6px">Ergebnis der Testdurchführung (Ist) + Cucumber-Testplan (Soll, Baseline bis „neu erzeugen").</div>
+      <h4 class="muted small" style="margin:8px 0 4px">▶ Letzte Ausführung ${c.lastLog?'· '+fmtDate(c.lastLog.at):''} <span class="muted">(läuft stets, auch ungefixt)</span></h4>
+      ${renderTestExecution(c)}
+      <h4 class="muted small" style="margin:14px 0 4px">📋 Testplan (Cucumber) — geplante Abdeckung</h4>
+      ${c.coverage ? `<div class="finding low" style="margin:4px 0">Pfadabdeckung: ${c.coverage.scenarios} Szenarien · Funktionen ${c.coverage.functionsCovered}/${c.coverage.functions} · Branches ${c.coverage.branchesCovered}/${c.coverage.branches} · Parameter ${c.coverage.paramsCovered}/${c.coverage.params}</div>` : ''}
+      <div class="inline" style="margin-bottom:6px"><button onclick="regenTestPlan()">🔄 Plan neu erzeugen</button>${c.testPlan?'<button onclick="downloadTestPlan()">⬇ .feature</button>':''}${(c.codedTests&&c.codedTests.length)?c.codedTests.map((t,i)=>`<button onclick="downloadCoded(${i})">⬇ ${esc(t.name)}</button>`).join(''):''}</div>
+      <h4 class="muted small" style="margin:14px 0 4px">🎭 Coded-UI-Tests (Playwright) <span class="muted">— live ausführen &amp; bewerten (nicht im geplanten Job)</span></h4>
+      <div class="inline" style="gap:6px"><input id="uiUrl" placeholder="UI-Test-URL: Seite mit dem Plugin (z.B. APEX-Demo)" value="${esc(c.uiTestUrl||'')}" style="max-width:340px"><button onclick="runPwTests()">▶ UI-Tests ausführen</button></div>
+      <div id="uiTestOut"></div>
+      <h4 class="muted small" style="margin:14px 0 4px">📋 Testplan (Cucumber) — geplante Szenarien</h4>
+      ${renderGherkin(c.testPlan)}
+      <h4 class="muted small" style="margin:14px 0 4px">🕘 Verlauf (frühere Läufe)</h4>
+      <div id="testHistory"><div class="muted small">lädt…</div></div>
+      <div id="runLogView"></div>
+    </div>
+
+    <div class="tabpanel" data-panel="proto" hidden>
+      <div class="inline" style="justify-content:space-between"><h3 style="margin:0">Prüfprotokoll ${c.lastLog ? '· '+fmtDate(c.lastLog.at) : ''}</h3>${c.lastLog&&(c.lastLog.entries||[]).length?'<button onclick="downloadLog()">⬇ Log</button>':''}</div>
+      <div class="muted small" style="margin:2px 0 6px">Arbeit der Agenten je Datei. Test-Ergebnisse stehen im Tab „Tests".</div>
+      <div class="inline" style="gap:2px;margin-bottom:4px"><button class="tab" id="pvG" onclick="setProtoView('grouped')">Gruppiert</button><button class="tab" id="pvC" onclick="setProtoView('chat')">💬 Agenten-Chat</button></div>
+      <div id="protoBody"></div>
+      <h4 class="muted small" style="margin:14px 0 4px">🗄 Protokoll-Archiv</h4>
+      <div id="logArchive"><div class="muted small">lädt…</div></div>
+    </div>
+
+    <div class="tabpanel" data-panel="notes" hidden>
+      <h3 style="margin:0 0 6px">Hinweise / Notizen</h3>
+      <div class="inline"><input id="noteText" placeholder="Hinweis oder Protokolleintrag…"><button onclick="addNote()">Hinzufügen</button></div>
+      <div id="notes"></div>
+      <h3 style="margin:16px 0 6px">Reviews</h3><div id="reviews"></div>
+    </div>`;
+  showTab('overview');
+  renderNotes(); renderReviews(); loadLogArchive(); loadTestHistory(); setProtoView('grouped');
+  $('drawer').classList.add('open'); $('drawerBg').classList.add('open');
+}
+// Status-Pille fürs Drawer-Kopf: rot bei Verwundbarkeit, gelb bei Handlungsbedarf, grün bei ok.
+function statusPill(c){
+  const v=c.libWarning&&c.libWarning.vulnerable;
+  const col = v ? '#f85149' : (c.status==='handlungsbedarf'||c.status==='zu klären') ? '#d29922' : c.status==='ok' ? '#3fb950' : 'var(--muted)';
+  return `<span class="badge" style="color:${col};border-color:${col}66">● ${esc(v?'kritisch':(c.status||'—'))}</span>`;
+}
+function showTab(name){
+  document.querySelectorAll('#dBody .tabpanel').forEach(p=>{ p.hidden = p.getAttribute('data-panel')!==name; });
+  document.querySelectorAll('#dBody .tab').forEach(t=>t.classList.toggle('active', t.getAttribute('data-tab')===name));
+}
+function renderNotes(){
+  $('notes').innerHTML = (current.notes||[]).map(n=>`<div class="note"><div class="meta">${fmtDate(n.at)} · ${esc(n.kind)}</div>${esc(n.text)}</div>`).join('') || '<div class="muted small">Keine Einträge.</div>';
+}
+// Gherkin/Cucumber-Testplan ordentlich rendern: Struktur, Keywords, Beispiel-Tabellen.
+function renderGherkin(text){
+  if(!text) return '<div class="muted small">Noch nicht erzeugt — „▶ Prüfen" erstellt den Testplan.</div>';
+  const lines=text.split('\n'); let html=''; let tbl=null;
+  const flush=()=>{ if(tbl){ const h=tbl[0]||[], b=tbl.slice(1); html+='<table class="gh-tbl"><thead><tr>'+h.map(x=>`<th>${esc(x)}</th>`).join('')+'</tr></thead><tbody>'+b.map(r=>'<tr>'+r.map(c=>`<td>${esc(c)}</td>`).join('')+'</tr>').join('')+'</tbody></table>'; tbl=null; } };
+  for(const raw of lines){
+    const line=raw.trim();
+    if(line.startsWith('|')){ (tbl=tbl||[]).push(line.split('|').slice(1,-1).map(s=>s.trim())); continue; }
+    flush();
+    if(!line) continue;
+    if(/^Funktionalität:/i.test(line)){ html+=`<div class="gh-feature">📦 ${esc(line)}</div>`; continue; }
+    if(/^(Szenariogrundriss|Szenario):/i.test(line)){ const cls=/Negativ/i.test(line)?'neg':/UI|Event/i.test(line)?'ui':''; html+=`<div class="gh-scn ${cls}">${esc(line)}</div>`; continue; }
+    if(/^Beispiele:/i.test(line)){ html+=`<div class="gh-ex">${esc(line)}</div>`; continue; }
+    if(/^#/.test(line)){ html+=`<div class="gh-cmt">${esc(line)}</div>`; continue; }
+    const m=line.match(/^(Angenommen|Wenn|Dann|Und|Aber|Given|When|Then|And|But)\b(.*)$/i);
+    html+= m ? `<div class="gh-step"><span class="gh-kw">${esc(m[1])}</span>${esc(m[2])}</div>` : `<div class="gh-step">${esc(line)}</div>`;
+  }
+  flush();
+  return `<div class="gherkin">${html}</div>`;
+}
+// Testausführung des letzten Laufs (Ist-Ergebnis), nach Artefakt gruppiert + Zusammenfassung.
+function renderTestExecution(c){
+  const tests=((c.lastLog&&c.lastLog.entries)||[]).filter(e=>e.agent==='Test' && /bestanden|fehlgeschlagen/.test(e.result||''));
+  if(!tests.length) return '<div class="muted small">Noch keine Ausführung — „▶ Prüfen" führt die Tests aus.</div>';
+  const fail=tests.filter(e=>e.severity==='error').length, pass=tests.length-fail;
+  const head=`<div class="inline" style="gap:6px;margin-bottom:6px"><span class="badge" style="color:#3fb950;border-color:#3fb95066">${pass} ✓ bestanden</span>${fail?`<span class="badge" style="color:#f85149;border-color:#f8514966">${fail} ✗ fehlgeschlagen</span>`:''}</div>`;
+  // nach Artefakt (file) gruppieren — übersichtlich statt langer Flachliste
+  const groups={}; for(const e of tests){ (groups[e.file]=groups[e.file]||[]).push(e); }
+  const body=Object.keys(groups).map(art=>{
+    const list=groups[art]; const bad=list.filter(e=>e.severity==='error').length;
+    return `<details class="protogrp"${bad?' open':''}><summary><span class="ag">${esc(art)}</span> <span class="pill${bad?' bad':''}">${list.length-bad} ✓${bad?` · ${bad} ✗`:''}</span></summary>`
+      +`<div class="logbox">${list.map(e=>`<div class="logline ${e.severity==='error'?'error':'pass'}">${esc(e.result)}</div>`).join('')}</div></details>`;
+  }).join('');
+  return head+body;
+}
+async function loadTestHistory(){
+  if(!current) return;
+  try{
+    const list = await api('GET',`/api/components/${current.id}/logs`);
+    $('testHistory').innerHTML = (list&&list.length)
+      ? list.slice(0,10).map(l=>`<div class="note inline" style="justify-content:space-between"><span class="meta">${fmtDate(l.at)}</span><button onclick="openLog('${esc(l.name)}','runLogView')">Lauf öffnen</button></div>`).join('')
+      : '<div class="muted small">Noch keine früheren Läufe.</div>';
+  }catch{ $('testHistory').innerHTML='<div class="muted small">Verlauf nicht verfügbar.</div>'; }
+}
+// Protokoll als Agenten-Chat (chronologisch, Bubbles je Agent).
+const AGENT_LABEL={Erkennung:'🔎 Erkennung',Extraktion:'📦 Extraktion',Lint:'🧹 Lint',AST:'🌳 AST',Test:'🧪 Test',Security:'🛡 Security','Code-Review':'🔍 Code-Review','Review-Gate':'⚖ Review-Gate','Web-Dev':'🛠 Web-Dev','Auto-Review':'🤖 Auto-Review','Quick-Fix':'🛠 Quick-Fix','Lib-Update':'⬆ Lib-Update','Auto-Fix':'🤖 Auto-Fix','retire.js':'⚠ retire.js',Snapshot:'📸 Snapshot'};
+function renderProtocolChat(entries){
+  return `<div class="chat">${entries.map(e=>{
+    const bad=e.severity==='error'||e.severity==='high'||e.severity==='critical';
+    const warn=e.severity==='warn'||e.severity==='medium';
+    const ok=/bestanden|approved|keine Befunde|ok\b/i.test(e.result||'') && !bad && !warn;
+    const cls=bad?'bad':warn?'warn':ok?'ok':'';
+    return `<div class="chatmsg ${cls}"><div class="who">${esc(AGENT_LABEL[e.agent]||e.agent)}</div><div class="bubble">${e.file&&e.file!==e.agent?`<div class="file">${esc(e.file)}</div>`:''}${esc(e.result)}</div></div>`;
+  }).join('')}</div>`;
+}
+function setProtoView(v){
+  const entries=((current&&current.lastLog&&current.lastLog.entries)||[]).filter(e=>e.agent!=='Test');
+  const body=$('protoBody'); if(!body) return;
+  body.innerHTML = !entries.length ? '<div class="muted small">Noch nicht geprüft — „▶ Prüfen" erzeugt das Protokoll.</div>'
+    : (v==='chat' ? renderProtocolChat(entries) : renderProtocol(entries));
+  const g=$('pvG'), ch=$('pvC'); if(g) g.classList.toggle('active',v!=='chat'); if(ch) ch.classList.toggle('active',v==='chat');
+}
+// Protokoll nach Agent gruppieren, in sinnvoller Reihenfolge; Gruppen mit Befunden offen.
+function renderProtocol(entries){
+  const order=['Erkennung','Extraktion','Lint','AST','Test','Security','Code-Review','Review-Gate','Web-Dev','Auto-Review','retire.js','Snapshot'];
+  const groups={};
+  for(const e of entries){ (groups[e.agent]=groups[e.agent]||[]).push(e); }
+  const names=Object.keys(groups).sort((a,b)=>{const ia=order.indexOf(a),ib=order.indexOf(b);return (ia<0?99:ia)-(ib<0?99:ib);});
+  const desc={Erkennung:'Inventar/Format',Extraktion:'Asset-Extraktion',Lint:'Static-First Lint',AST:'Einstiegspunkte',Test:'ausgeführte Tests',Security:'OWASP-Review','Code-Review':'Qualitäts-Review','Review-Gate':'Freigabe-Entscheid','Web-Dev':'autonome Fixes','Auto-Review':'Auto-Review-Ergebnis','retire.js':'CVE-Bibliotheken',Snapshot:'Golden-Master'};
+  return names.map(n=>{
+    const list=groups[n];
+    const bad=list.filter(e=>e.severity==='error'||e.severity==='high'||e.severity==='critical').length;
+    const warn=list.filter(e=>e.severity==='warn'||e.severity==='medium').length;
+    const open = bad||warn ? ' open':'';
+    // Test-Gruppe: bestanden/fehlgeschlagen klar zählen
+    const pill = n==='Test'
+      ? `<span class="pill">${list.length-bad} ✓</span>${bad?`<span class="pill bad">${bad} ✗</span>`:''}`
+      : bad?`<span class="pill bad">${bad}</span>`:warn?`<span class="pill warn">${warn}</span>`:`<span class="pill">${list.length}</span>`;
+    return `<details class="protogrp"${open}><summary><span class="ag">[${esc(n)}]</span> <span class="muted small">${esc(desc[n]||'')}</span>${pill}</summary>`
+      +`<div class="logbox">${list.map(e=>`<div class="logline ${esc(e.severity||'')}">${esc(e.file)} → ${esc(e.result)}</div>`).join('')}</div></details>`;
+  }).join('');
+}
+// Eine Bibliotheks-Zeile inkl. Web-Aktualität (neueste Version, Alter, outdated)
+function libLine(l){
+  const cls = (l.status==='verwundbar'||l.outdated)?'error':(l.status==='nicht gepflegt'||l.webStatus==='veraltet')?'warn':'';
+  const web = l.latest
+    ? ` · neueste ${esc(l.latest)} ${l.outdated?'⬆ veraltet':'✓ aktuell'}${l.ageDays!=null?` (Release vor ${l.ageDays} Tagen)`:''}`
+    : (l.webStatus==='unbekannt' ? ' · Web: unbekannt' : '');
+  const inst = l.installedAgeDays!=null ? ` · installierte Version ${l.installedAgeDays} Tage alt` : '';
+  const link = l.source||l.homepage||l.npm;
+  const src = link ? ` · <a href="${esc(link)}" target="_blank" rel="noopener" style="color:var(--accent)">Quelle ↗</a>` : '';
+  const manual = l.detectedBy==='manuell' ? ' <span class="badge">manuell</span>' : '';
+  return `<div class="logline ${cls}"><b>${esc(l.name)}@${esc(l.version)}</b>${manual} — ${esc(l.status||'')}${l.vuln?` (${esc(l.vuln)})`:''}${l.reason?` — ${esc(l.reason)}`:''}${web}${inst}${src}</div>`;
+}
+// SBOM-Visualisierung: Zähler + gestapelter Balken nach Status
+function sbomViz(libs){
+  libs = libs||[];
+  if(!libs.length) return '';
+  const vuln=libs.filter(l=>l.status==='verwundbar').length;
+  const unmaint=libs.filter(l=>l.status==='nicht gepflegt').length;
+  const outdated=libs.filter(l=>l.outdated && l.status!=='verwundbar' && l.status!=='nicht gepflegt').length;
+  const ok=libs.length-vuln-unmaint-outdated;
+  const seg=(n,col,lbl)=> n?`<div title="${lbl}: ${n}" style="flex:${n};background:${col}"></div>`:'';
+  const bar=`<div style="display:flex;height:8px;gap:2px;border-radius:6px;overflow:hidden;background:var(--line);margin:6px 0">${seg(ok,'#3fb950','aktuell')}${seg(outdated,'#d29922','veraltet')}${seg(unmaint,'#ff8a3d','nicht gepflegt')}${seg(vuln,'#f85149','verwundbar')}</div>`;
+  const chip=(n,col,lbl)=> n?`<span class="badge" style="color:${col};border-color:${col}66">${lbl}: ${n}</span>`:'';
+  const summary = (!vuln&&!unmaint&&!outdated)
+    ? `<span class="badge" style="color:#3fb950;border-color:#3fb95066">✓ alle ${libs.length} aktuell</span>`
+    : `${chip(vuln,'#f85149','⛔ verwundbar')}${chip(unmaint,'#ff8a3d','⚠ nicht gepflegt')}${chip(outdated,'#d29922','veraltet')}${chip(ok,'#3fb950','aktuell')}`;
+  return `<div class="small muted">${libs.length} Komponente(n) im SBOM</div>${bar}<div class="inline" style="gap:6px;margin-bottom:6px">${summary}</div>`;
+}
+async function downloadSbom(){
+  if(!current) return;
+  try{
+    const r=await fetch(`/api/components/${current.id}/sbom`); const sbom=await r.json();
+    const blob=new Blob([JSON.stringify(sbom,null,2)],{type:'application/json'});
+    const url=URL.createObjectURL(blob); const a=document.createElement('a'); a.href=url; a.download=`${current.name}.cdx.json`; a.click(); URL.revokeObjectURL(url);
+  }catch(e){ toast('Fehler: '+e.message); }
+}
+async function runPwTests(){
+  if(!current) return;
+  const url=$('uiUrl').value.trim();
+  $('uiTestOut').innerHTML='<div class="muted small">Playwright-UI-Tests laufen… (kann etwas dauern)</div>';
+  try{
+    const r=await api('POST',`/api/components/${current.id}/ui-tests`,{url});
+    if(!r.ran){ $('uiTestOut').innerHTML=`<div class="finding medium">${esc(r.reason||'nicht ausgeführt')}</div>`; return; }
+    const head=`<div class="note"><b style="color:${r.ok?'#3fb950':'#f85149'}">${r.ok?'✅ UI-Tests grün':'⛔ UI-Tests rot'}</b> — ${r.passed||0} ✓ / ${r.failed||0} ✗ <span class="muted small">(${esc(r.url||'')})</span></div>`;
+    $('uiTestOut').innerHTML=head+`<pre class="logbox" style="white-space:pre-wrap">${esc(r.output||'(keine Ausgabe)')}</pre>`;
+  }catch(e){ $('uiTestOut').innerHTML=`<div class="finding">${esc(e.message)}</div>`; }
+}
+async function addLib(){
+  if(!current) return;
+  const name=$('libName').value.trim(); if(!name) return toast('Name fehlt');
+  const version=$('libVer').value.trim(); const source=$('libSrc').value.trim()||null;
+  try{ await api('POST',`/api/components/${current.id}/libraries`,{name,version,source}); await openDetail(current.id); toast('Bibliothek hinzugefügt'); }
+  catch(e){ toast('Fehler: '+e.message); }
+}
+async function runMaintain(){
+  if(!current) return;
+  const id=current.id; $('reviewOut').innerHTML='<div class="muted small">Vollständige Pflege läuft (prüfen → review → fixen → Updates → re-test)…</div>';
+  try{
+    const r = await api('POST',`/api/components/${id}/maintain`,{});
+    if(r.error){ $('reviewOut').innerHTML=`<div class="finding">${esc(r.error)}</div>`; return; }
+    if(r.skipped){ $('reviewOut').innerHTML=`<div class="finding medium">Übersprungen: ${esc(r.reason||'')}</div>`; return; }
+    await openDetail(id); load();
+    $('reviewOut').innerHTML = `<div class="note"><b>🧰 Pflege abgeschlossen:</b> ${esc(r.before)} → ${esc(r.after)}</div>`
+      + (r.steps||[]).map(s=>`<div class="finding low"><b>${esc(s.step)}</b> ${esc(s.summary||s.status||(s.error?('Fehler: '+s.error):JSON.stringify(s)))}</div>`).join('');
+    toast('Vollständige Pflege fertig');
+  }catch(e){ $('reviewOut').innerHTML=`<div class="finding">${esc(e.message)}</div>`; toast('Fehler: '+e.message); }
+}
+async function checkLibs(){
+  if(!current) return;
+  toast('Prüfe Bibliotheken im Web…');
+  try{ await api('POST',`/api/components/${current.id}/libraries/check`,{}); await openDetail(current.id); toast('Bibliotheken geprüft'); }
+  catch(e){ toast('Fehler: '+e.message); }
+}
+async function runAutoFix(){
+  if(!current) return;
+  const id=current.id; $('reviewOut').innerHTML='<div class="muted small">Automatische Korrekturen laufen…</div>';
+  try{
+    const r = await api('POST',`/api/components/${id}/autofix`,{});
+    if(r.error){ $('reviewOut').innerHTML=`<div class="finding">${esc(r.error)}</div>`; return; }
+    await openDetail(id); load();
+    $('reviewOut').innerHTML = `<div class="note"><b>🛠 Auto-Fix:</b> ${r.quickFixes} Quick-Fix(es)${r.libUpdate?', Lib-Update ausgelöst':''}${r.aiResult?(r.aiResult.pass?', KI grün':', KI nicht grün'):''}</div>`
+      + (r.protocol||[]).map(p=>`<div class="finding ${p.severity==='error'?'':'low'}"><b>${esc(p.agent||'')}</b> ${esc(p.file||'')} — ${esc(p.result||'')}</div>`).join('');
+    toast('Auto-Fix abgeschlossen');
+  }catch(e){ $('reviewOut').innerHTML=`<div class="finding">${esc(e.message)}</div>`; toast('Fehler: '+e.message); }
+}
+function renderReviews(){
+  $('reviews').innerHTML = (current.reviews||[]).map(r=>`<div class="note"><div class="meta">${fmtDate(r.at)} · ${esc(r.kind)} · ${r.pass?'✅ bestanden':'⛔ '+esc(r.stage)}</div>${r.findingsCount||0} Finding(s)</div>`).join('') || '<div class="muted small">Noch keine Reviews.</div>';
+}
+function closeDrawer(){ $('drawer').classList.remove('open'); $('drawerBg').classList.remove('open'); current=null; }
+
+async function addNote(){
+  const text = $('noteText').value.trim(); if(!text) return;
+  await api('POST',`/api/components/${current.id}/notes`,{kind:'hinweis',text});
+  current = await api('GET','/api/components/'+current.id); $('noteText').value=''; renderNotes(); toast('Notiz gespeichert');
+}
+async function openDir(){
+  try{ const r = await api('POST',`/api/components/${current.id}/open`,{}); toast(r.ok?('Geöffnet: '+r.command):('Fehler: '+r.error)); }
+  catch(e){ toast('Fehler: '+e.message); }
+}
+function openGit(){
+  if(!current) return;
+  const src = (current.source||'').trim();
+  if(/^https?:\/\//i.test(src)){ window.open(src,'_blank','noopener'); return; }
+  const m = src.match(/^git@([^:]+):(.+?)(?:\.git)?$/i); // git@host:org/repo(.git) → https
+  if(m){ window.open(`https://${m[1]}/${m[2]}`,'_blank','noopener'); return; }
+  toast(src ? 'Quelle ist ein lokaler Pfad — nutze „Lokal öffnen".' : 'Kein Repo zugeordnet.');
+}
+async function runReview(){
+  if(!current) return;
+  $('reviewOut').innerHTML='<div class="muted small">Review läuft…</div>';
+  try{
+    const r = await api('POST',`/api/components/${current.id}/review`,{save:true});
+    if(!r.gate){ $('reviewOut').innerHTML=`<div class="note">${esc(r.message||'Kein Ergebnis')}</div>`; return; }
+    const g = r.gate; const f = [...((g.security&&g.security.findings)||[]),...((g.quality&&g.quality.findings)||[])];
+    $('reviewOut').innerHTML = `<div class="note"><b>${g.pass?'✅ Review bestanden':'⛔ blockiert ('+esc(g.stage)+')'}</b></div>`
+      + (f.length ? f.map(x=>`<div class="finding ${esc(x.severity)}"><b>${esc(x.severity)}</b> ${esc(x.rule||'')} — ${esc(x.message||'')} ${x.asset?'<span class="muted">('+esc(x.asset)+')</span>':''}</div>`).join('') : '<div class="muted small">Keine Befunde.</div>');
+    current = await api('GET','/api/components/'+current.id); renderReviews();
+  }catch(e){ $('reviewOut').innerHTML='<div class="finding">Fehler: '+esc(e.message)+'</div>'; }
+}
+
+function downloadLog(){
+  if(!current||!current.lastLog) return;
+  const t = `AIS Pluginpflege — Prüfprotokoll\nKomponente: ${current.name}\nZeit: ${current.lastLog.at}\n\n`
+    + (current.lastLog.entries||[]).map(e=>`[${e.agent}] ${e.file} → ${e.result}${e.severity?(' ('+e.severity+')'):''}`).join('\n') + '\n';
+  const blob = new Blob([t], {type:'text/plain;charset=utf-8'});
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a'); a.href=url; a.download=`${current.name}-pruefprotokoll.log`; a.click();
+  URL.revokeObjectURL(url);
+}
+
+async function runAutoReview(){
+  if(!current) return;
+  const id=current.id; $('reviewOut').innerHTML='<div class="muted small">Autonomes Review & Fix läuft…</div>';
+  try{
+    const r = await api('POST',`/api/components/${id}/autoreview`,{});
+    await openDetail(id); load();
+    $('reviewOut').innerHTML = `<div class="note"><b>${r.pass?'✅ Autonom grün':'⛔ nicht grün'} nach ${r.attempts??0} Fix-Versuch(en)</b></div>`
+      + (r.protocol||[]).map(p=>`<div class="finding ${p.result&&/Fehler|nicht/.test(p.result)?'medium':'low'}"><b>${esc(p.agent||'')}</b> ${esc(p.file||'')} — ${esc(p.result||'')}</div>`).join('');
+    toast(r.pass?'Autonom gefixt':'Kein grünes Gate');
+  }catch(e){ $('reviewOut').innerHTML=`<div class="finding">${esc(e.message)}</div>`; toast('Fehler: '+e.message); }
+}
+function downloadTestPlan(){
+  if(!current||!current.testPlan) return;
+  const blob=new Blob([current.testPlan],{type:'text/plain;charset=utf-8'});
+  const url=URL.createObjectURL(blob); const a=document.createElement('a'); a.href=url; a.download=`${current.name}.feature`; a.click(); URL.revokeObjectURL(url);
+}
+function downloadCoded(i){
+  const t=(current&&current.codedTests||[])[i]; if(!t) return;
+  const blob=new Blob([t.content],{type:'text/javascript;charset=utf-8'});
+  const url=URL.createObjectURL(blob); const a=document.createElement('a'); a.href=url; a.download=t.name; a.click(); URL.revokeObjectURL(url);
+}
+async function regenTestPlan(){
+  if(!current) return; const id=current.id; toast('Testplan wird neu erzeugt…');
+  try{ await api('POST',`/api/components/${id}/testplan`,{}); await openDetail(id); toast('Testplan neu erzeugt'); }
+  catch(e){ toast('Fehler: '+e.message); }
+}
+async function loadLogArchive(){
+  if(!current) return;
+  try{
+    const list = await api('GET',`/api/components/${current.id}/logs`);
+    $('logArchive').innerHTML = (list&&list.length)
+      ? list.map(l=>`<div class="note inline" style="justify-content:space-between"><span class="meta">${fmtDate(l.at)}</span><button onclick="openLog('${esc(l.name)}')">öffnen</button></div>`).join('')
+      : '<div class="muted small">Noch keine Protokolle abgelegt.</div>';
+  }catch{ $('logArchive').innerHTML='<div class="muted small">Archiv nicht verfügbar.</div>'; }
+}
+async function openLog(name, targetId='logArchive'){
+  try{
+    const r=await fetch(`/api/components/${current.id}/logs/${encodeURIComponent(name)}`); const t=await r.text();
+    const tgt=$(targetId); if(!tgt) return;
+    const ex=tgt.querySelector('.logopen'); if(ex) ex.remove(); // nur einen offenen Lauf zeigen
+    const block=`<div class="logopen"><div class="inline" style="justify-content:space-between;margin-top:8px"><h4 class="muted small" style="margin:0">📄 Lauf ${esc(name.replace('.log',''))}</h4><button class="ghost small" onclick="this.closest('.logopen').remove()">schließen</button></div><pre class="logbox" style="white-space:pre-wrap">${esc(t)}</pre></div>`;
+    tgt.insertAdjacentHTML('afterbegin', block);
+  }catch(e){ toast('Fehler: '+e.message); }
+}
+
+function openEdit(c){
+  $('mTitle').textContent = c&&c.id ? 'Plugin bearbeiten' : 'Plugin hinzufügen';
+  $('mId').value=c&&c.id||''; $('mName').value=c&&c.name||''; $('mPath').value=c&&c.path||'';
+  $('modalBg').classList.add('open');
+}
+function closeModal(){ $('modalBg').classList.remove('open'); }
+async function saveComponent(){
+  const id=$('mId').value;
+  const p=$('mPath').value.trim();
+  const isUrl=/^(https?:\/\/|git@)/i.test(p); // URL → klonen (Repo zuordnen), lokaler Pfad → direkt
+  // Typ/Format/Status werden automatisch erkannt — der Nutzer wählt sie nicht.
+  const data={ name:$('mName').value.trim(), path: isUrl?'':p };
+  if(!data.name) return toast('Name fehlt');
+  try{
+    const comp = id ? await api('PUT','/api/components/'+id,data) : await api('POST','/api/components',data);
+    if(isUrl && comp && comp.id){
+      toast('Repo wird geklont…');
+      await api('POST',`/api/components/${comp.id}/assign-repo`,{source:p,visibility:'öffentlich'});
+    }
+    closeModal(); load(); toast(isUrl?'Gespeichert & Repo geklont — „▶ Prüfen" erkennt Typ/Format':'Gespeichert');
+  }catch(e){ toast('Fehler: '+e.message); }
+}
+async function delComponent(c){
+  if(!confirm(`Komponente „${c.name}" wirklich löschen?`)) return;
+  await api('DELETE','/api/components/'+c.id); load(); toast('Gelöscht');
+}
+
+// --- Einstellungen (Arbeitsverzeichnis, KI, Zeitplan, SMTP) ---
+let settingsCache = {};
+async function loadSettings(){
+  try{ settingsCache = await api('GET','/api/settings'); $('wdLabel').textContent = 'Arbeitsverzeichnis: '+(settingsCache.workDir||'—'); }catch{}
+}
+function openSettings(){
+  const s = settingsCache, ai = s.aiBackend||{kind:'stub'}, sm = s.smtp||{};
+  $('workDir').value = s.workDir||'';
+  $('aiKind').value = ai.kind||'stub'; $('aiCommand').value=ai.command||''; $('aiEndpoint').value=ai.endpoint||''; $('aiModel').value=ai.model||''; $('aiKey').value=''; $('aiKeyState').textContent=ai.hasKey?'(Key hinterlegt)':''; $('aiTestOut').textContent='';
+  $('schedEnabled').checked=!!s.scheduleEnabled; $('schedule').value=s.schedule||''; updateSchedHint();
+  $('smtpHost').value=sm.host||''; $('smtpPort').value=sm.port||587; $('smtpSecure').checked=!!sm.secure; $('smtpUser').value=sm.user||''; $('smtpFrom').value=sm.from||''; $('smtpPass').value=''; $('reportOut').textContent='';
+  $('recipients').value=(s.recipients||[]).join(', ');
+  toggleAi(); $('settingsBg').classList.add('open');
+}
+function closeSettings(){ $('settingsBg').classList.remove('open'); }
+function toggleAi(){ const k=$('aiKind').value; $('aiCli').style.display=k==='cli'?'block':'none'; $('aiProvider').style.display=k==='provider'?'block':'none'; }
+function updateSchedHint(){ const m={'0 3 * * 1':'wöchentlich montags 03:00','0 3 * * *':'täglich 03:00','0 * * * *':'stündlich','*/15 * * * *':'alle 15 Minuten'}; $('schedHint').textContent=m[$('schedule').value.trim()]?('· '+m[$('schedule').value.trim()]):''; }
+async function testAi(){
+  $('aiTestOut').textContent='teste…';
+  try{ const r=await api('POST','/api/ai/test',{}); $('aiTestOut').textContent = r.ok?('✅ ok'+(r.model?' ('+r.model+')':'')):('⛔ '+(r.error||'Fehler')); }
+  catch(e){ $('aiTestOut').textContent='Fehler: '+e.message; }
+}
+async function sendReport(){
+  $('reportOut').textContent='sende…';
+  try{ const r=await api('POST','/api/report/send',{}); $('reportOut').textContent = r.ok?('✅ gesendet an '+(r.sent||[]).join(', ')):('⛔ '+(r.error||'Fehler')); }
+  catch(e){ $('reportOut').textContent='Fehler: '+e.message; }
+}
+async function saveSettingsAll(){
+  try{
+    const ai = { kind:$('aiKind').value, command:$('aiCommand').value.trim()||undefined, endpoint:$('aiEndpoint').value.trim()||undefined, model:$('aiModel').value.trim()||undefined };
+    const smtp = { host:$('smtpHost').value.trim(), port:Number($('smtpPort').value)||587, secure:$('smtpSecure').checked, user:$('smtpUser').value.trim(), from:$('smtpFrom').value.trim() };
+    const recipients = $('recipients').value.split(',').map(x=>x.trim()).filter(Boolean);
+    await api('PUT','/api/settings',{ workDir:$('workDir').value.trim(), aiBackend:ai, smtp, recipients, schedule:$('schedule').value.trim(), scheduleEnabled:$('schedEnabled').checked });
+    if($('aiKey').value) await api('POST','/api/ai/key',{key:$('aiKey').value});
+    if($('smtpPass').value) await api('POST','/api/smtp/pass',{pass:$('smtpPass').value});
+    await loadSettings(); closeSettings(); toast('Einstellungen gespeichert');
+  }catch(e){ toast('Fehler: '+e.message); }
+}
+
+// --- Repo einem Plugin zuordnen (F-21) ---
+function toggleCreds(){ $('credBox').style.display = $('aVisibility').value==='intern' ? 'block' : 'none'; }
+function openAssign(){
+  if(!current) return;
+  $('aSource').value=current.source||''; $('aVisibility').value=current.visibility||'öffentlich';
+  $('aToken').value=''; $('aSshKey').value=''; toggleCreds();
+  $('assignBg').classList.add('open');
+}
+function closeAssign(){ $('assignBg').classList.remove('open'); }
+async function saveAssign(){
+  if(!current) return;
+  const source=$('aSource').value.trim(); if(!source) return toast('Quelle erforderlich');
+  const body={ source, visibility:$('aVisibility').value, token:$('aToken').value||undefined, sshKeyPath:$('aSshKey').value.trim()||undefined };
+  const btn=$('aBtn'); btn.disabled=true; btn.textContent='Klone…';
+  try{ await api('POST',`/api/components/${current.id}/assign-repo`,body); closeAssign(); await openDetail(current.id); load(); toast('Repo zugeordnet'); }
+  catch(e){ toast('Fehler: '+e.message); }
+  finally{ btn.disabled=false; btn.textContent='Zuordnen & klonen'; }
+}
+async function runUpdate(){
+  if(!current) return;
+  const id=current.id; toast('Auto-Update läuft…');
+  try{
+    const r = await api('POST',`/api/components/${id}/update`,{});
+    await openDetail(id); load();
+    const out = (r.results||[]).map(x=>`<div class="finding ${x.pushed?'low':'medium'}">${esc(x.lib)} ${esc(x.from)}→${esc(x.to)} — ${x.pushed?('PR-Branch '+esc((x.prRef&&x.prRef.branch)||x.branchKey||'')):('Review-blockiert ('+esc(x.stage||'')+')')}</div>`).join('');
+    $('reviewOut').innerHTML = `<div class="note"><b>Auto-Update:</b> ${esc(r.summary)}</div>` + out;
+    toast(r.summary);
+  }catch(e){ toast('Fehler: '+e.message); }
+}
+async function runAll(){
+  toast('Prüfe alle Komponenten…');
+  try{ const r = await api('POST','/api/run',{}); await load();
+    toast(`Geprüft: ${r.count} Komponente(n)`);
+  }catch(e){ toast('Fehler: '+e.message); }
+}
+async function runOne(){
+  if(!current) return;
+  const id = current.id;
+  toast('Prüfe…');
+  try{ const r = await api('POST',`/api/components/${id}/run`,{}); await openDetail(id); load(); toast(`Geprüft: ${r.summary}`); }
+  catch(e){ toast('Fehler: '+e.message); }
+}
+async function rescan(){
+  toast('Scanne erneut…');
+  try{ const r = await api('POST','/api/repos/rescan',{}); await load();
+    const sum = (r||[]).reduce((a,x)=>({added:a.added+x.added,updated:a.updated+x.updated}),{added:0,updated:0});
+    toast(`Fertig: ${sum.added} neu, ${sum.updated} aktualisiert`);
+  }catch(e){ toast('Fehler: '+e.message); }
+}
+
+function switchView(v){
+  const plugins = v !== 'libs';
+  $('pluginsView').style.display = plugins ? '' : 'none';
+  $('libsView').style.display = plugins ? 'none' : '';
+  $('navPlugins').className = plugins ? 'primary' : 'ghost';
+  $('navLibs').className = plugins ? 'ghost' : 'primary';
+  if(!plugins) loadLibraries();
+}
+async function loadLibraries(){
+  try{
+    const r = await api('GET','/api/libraries');
+    const libs = r.libraries || [];
+    const rows = $('libRows'); rows.innerHTML='';
+    $('libsEmpty').style.display = libs.length ? 'none' : 'block';
+    const cls = { 'verwundbar':'err', 'nicht gepflegt':'warn', 'veraltet':'warn', 'aktuell':'ok' };
+    for(const l of libs){
+      const tr = document.createElement('tr');
+      tr.innerHTML = `<td><b>${esc(l.name)}</b></td><td class="small">${esc(l.version)}</td>`
+        + `<td><span class="dot ${cls[l.status]||''}"></span>${esc(l.status)}`
+        + `${l.vuln?` <span class="muted small">(${esc(l.vuln)})</span>`:''}${l.reason?` <span class="muted small">— ${esc(l.reason)}</span>`:''}`
+        + `${l.outdated&&l.latest?` <span class="muted small">→ ${esc(l.latest)}</span>`:''}</td>`
+        + `<td class="small muted">${(l.usedBy||[]).map(esc).join(', ')}</td>`;
+      rows.appendChild(tr);
+    }
+    load(); // libWarning evtl. aktualisiert → Plugin-Übersicht neu zeichnen
+  }catch(e){ toast('Fehler: '+e.message); }
+}
+
+// Build-Marker: muss mit BUILD in start.js übereinstimmen. Erkennt einen veralteten Backend-Prozess.
+const APP_BUILD = '2026-06-25.3';
+async function checkBackend(){
+  const b = $('staleBanner');
+  try{
+    const r = await fetch('/api/health');
+    if(!r.ok) throw 0;
+    const h = await r.json();
+    if(h.build !== APP_BUILD){
+      b.style.display='block';
+      b.innerHTML = `⚠ <b>Backend veraltet</b> — der laufende Dienst (Build ${esc(h.build||'?')}) passt nicht zur Oberfläche (Build ${APP_BUILD}). Bitte den Dienst neu starten (Start.cmd → automatisch), sonst sind Daten/Erkennung veraltet.`;
+    } else { b.style.display='none'; }
+  }catch{
+    b.style.display='block';
+    b.innerHTML = `⚠ <b>Backend veraltet</b> — kein /api/health. Bitte den Dienst über <b>Start.cmd</b> neu starten (beendet die alte Instanz automatisch).`;
+  }
+}
+
+checkBackend();
+loadSettings();
+load();
+loadLibraries(); // beim Öffnen: Bibliotheken + Warn-Badges aktualisieren
+</script>
+</body>
+</html>

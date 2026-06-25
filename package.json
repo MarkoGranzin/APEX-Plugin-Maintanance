@@ -1,0 +1,23 @@
+{
+  "name": "ais-pluginpflege",
+  "version": "0.1.0",
+  "description": "Automatisierte Pflege von APEX-Plugins und Template-Komponenten: Repo anbinden, Artefakte erkennen, kanonisch extrahieren, KI-Tests generieren und ausführen.",
+  "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "lint": "eslint src"
+  },
+  "dependencies": {
+    "acorn": "^8.11.3",
+    "acorn-walk": "^8.3.2",
+    "nodemailer": "^9.0.1",
+    "simple-git": "^3.27.0"
+  },
+  "devDependencies": {
+    "vitest": "^2.1.8"
+  }
+}

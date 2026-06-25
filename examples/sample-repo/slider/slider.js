@@ -1,0 +1,1 @@
+(function(){ function init(){ apex.item("P2").setValue(1);} window.slider=init; })();
