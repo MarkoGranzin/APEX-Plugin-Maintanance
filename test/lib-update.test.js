@@ -14,6 +14,10 @@ describe('T-79 classifyUpdate', () => {
     expect(classifyUpdate('1.5.0', '1.5.0')).toBe('none');
     expect(classifyUpdate('unbekannt', '1.0.0')).toBe('none');
   });
+  it('0.x: Minor ist die Breaking-Stelle (T-90)', () => {
+    expect(classifyUpdate('0.116.0', '0.185.0')).toBe('breaking'); // three: nicht blind tauschen → Re-Dev
+    expect(classifyUpdate('0.116.0', '0.116.5')).toBe('safe');     // gleicher Minor → Patch ist safe
+  });
 });
 
 describe('T-79 applyVendoredUpdates', () => {

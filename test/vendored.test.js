@@ -29,6 +29,17 @@ describe('T-68/T-69 Vendored-Lib-Erkennung, Unmaintained, SBOM', () => {
     expect(libs.some((l) => /script/.test(l.name))).toBe(false);
   });
 
+  it('three: REVISION-Anchor erkennt Version trotz dev-/Buchstaben-Suffix (T-90)', () => {
+    const rf = { 'js/lib/three.js': "var x=1; const REVISION = '116dev'; function f(){return REVISION;}" };
+    const libs = detectVendoredLibraries('/x', { files: ['js/lib/three.js'], readFile: (f) => rf[f] || '' });
+    expect(libs.find((l) => l.name === 'three').version).toBe('0.116.0');
+    // klassische Schreibweisen weiterhin
+    expect(detectVendoredLibraries('/x', { files: ['three.min.js'], readFile: () => 'REVISION="160"' }).find((l) => l.name === 'three').version).toBe('0.160.0');
+    expect(detectVendoredLibraries('/x', { files: ['three.js'], readFile: () => 'REVISION = r152,' }).find((l) => l.name === 'three').version).toBe('0.152.0');
+    // kein Marker → unbekannt (kein Falschtreffer)
+    expect(detectVendoredLibraries('/x', { files: ['three.js'], readFile: () => 'var REVISION = REVISION;' }).find((l) => l.name === 'three').version).toBe('unbekannt');
+  });
+
   it('scanRepo: mxgraph nicht gepflegt, jquery verwundbar, libWarning gesetzt', () => {
     const r = scanRepo(dir);
     const byName = Object.fromEntries(r.libs.map((l) => [l.name, l]));

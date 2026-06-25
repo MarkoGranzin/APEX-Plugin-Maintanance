@@ -44,7 +44,8 @@ const HEADER_RES = [
 ];
 // Lib-spezifische Marker, die irgendwo in der (ggf. großen) Datei stehen dürfen.
 const ANCHOR = {
-  three: (t) => { const m = t.match(/REVISION\s*[=:]\s*['"]?(\d{2,3})\b/); return m ? `0.${m[1]}.0` : null; },
+  // three: REVISION = '116dev' / "160" / r152 → 0.<rev>.0 (Dev-/Buchstaben-Suffix tolerieren, T-90)
+  three: (t) => { const m = t.match(/REVISION\s*[=:]\s*['"]?r?(\d{2,3})(?:dev|[a-z][\w.-]*)?['"]?/i); return m ? `0.${m[1]}.0` : null; },
   mxgraph: (t) => { const m = t.match(/mxClient\.VERSION\s*=\s*['"]([\d.]+)['"]/); return m ? m[1] : null; },
   bootstrap: (t) => { const m = t.match(/bootstrap[^\n]{0,40}?v(\d+\.\d+\.\d+)/i); return m ? m[1] : null; },
 };

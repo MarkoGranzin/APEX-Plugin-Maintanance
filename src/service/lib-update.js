@@ -16,16 +16,20 @@ import { detectVendoredLibraries } from '../sbom/vendored.js';
 import { npmPackageName } from '../sbom/registry.js';
 import { cmpSemver as cmp } from '../util/version.js';
 
-const major = (v) => { const m = String(v ?? '').match(/(\d+)/); return m ? Number(m[1]) : null; };
 
-/** 'none' | 'safe' | 'breaking' — safe = gleiche Major, neuere Version. */
+/**
+ * 'none' | 'safe' | 'breaking'. safe = gleiche Breaking-Stelle, neuere Version.
+ * Für 0.x.y gilt die semver-Konvention für pre-1.0: die MINOR-Stelle ist breaking
+ * (z.B. three 0.116 → 0.185 ist breaking, nicht safe), sonst die MAJOR-Stelle.
+ */
 export function classifyUpdate(current, latest) {
   if (!current || !latest || current === 'unbekannt') return 'none';
-  const mc = major(current);
-  const ml = major(latest);
-  if (mc == null || ml == null) return 'none';
+  const pc = String(current).split('.').map((n) => Number(n) || 0);
+  const pl = String(latest).split('.').map((n) => Number(n) || 0);
+  if (pc[0] == null || pl[0] == null) return 'none';
   if (cmp(latest, current) <= 0) return 'none';
-  return mc === ml ? 'safe' : 'breaking';
+  const bi = (pc[0] === 0 && pl[0] === 0) ? 1 : 0; // 0.x → Minor ist die Breaking-Stelle
+  return (pc[bi] || 0) === (pl[bi] || 0) ? 'safe' : 'breaking';
 }
 
 /** Lädt die Default-Datei einer npm-Version vom CDN (best effort). */
