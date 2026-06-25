@@ -34,7 +34,7 @@ describe('T-40 autoUpdateComponent', () => {
     expect(fs.readFileSync(path.join(dir, 'cp.sql'), 'utf8')).toContain('jquery-3.5.0');
     expect(pushed[0].branch).toBe(branchKey('apex-colorpicker', 'jquery', '3.5.0'));
     const after = store.get('c1');
-    expect(after.lastChange.summary).toMatch(/Update/);
+    expect(after.lastChange.summary).toMatch(/update/i);
     expect(after.status).toBe('pr-offen');
     expect(after.reviews).toHaveLength(1);
   });
@@ -64,6 +64,6 @@ describe('T-40 autoUpdateComponent', () => {
     fs.writeFileSync(path.join(dir, 'cp.sql'), SQL('3.7.1'));
     const res = await autoUpdateComponent(store, comp, { push: async () => ({}) });
     expect(res.plans).toBe(0);
-    expect(res.summary).toMatch(/keine/);
+    expect(res.summary).toMatch(/no automatic updates/);
   });
 });

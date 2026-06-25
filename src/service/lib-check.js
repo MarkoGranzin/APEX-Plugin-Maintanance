@@ -67,8 +67,10 @@ export async function checkLibrariesOnline(libs, deps = {}) {
       const instTime = info.time?.[lib.version];
       e.installedReleasedAt = instTime ?? null;
       e.installedAgeDays = instTime ? Math.max(0, Math.floor((now() - Date.parse(instTime)) / DAY)) : null;
-      e.outdated = !!(info.latest && lib.version && lib.version !== 'unbekannt' && info.latest !== lib.version);
-      e.webStatus = e.outdated ? 'veraltet' : info.latest ? 'aktuell' : 'unbekannt';
+      const knownVersion = !!(lib.version && lib.version !== 'unbekannt');
+      e.outdated = !!(info.latest && knownVersion && info.latest !== lib.version);
+      // Unbekannte installierte Version ist NICHT „aktuell" — auch wenn latest bekannt ist (B-5-Klasse)
+      e.webStatus = e.outdated ? 'veraltet' : (knownVersion && info.latest) ? 'aktuell' : 'unbekannt';
       e.status = libStatus(e); // Gesamtstatus konsistent halten
     } catch (err) {
       e.webStatus = 'unbekannt';

@@ -99,8 +99,8 @@ export async function autoUpdateComponent(store, component, deps = {}) {
   const pushed = results.filter((r) => r.pushed);
   const blocked = results.filter((r) => r.reviewBlocked);
   const summary = plans.length === 0
-    ? 'keine automatischen Updates'
-    : [pushed.length ? `${pushed.length} Update(s) als PR` : null, blocked.length ? `${blocked.length} Review-blockiert` : null].filter(Boolean).join(', ') || 'keine Änderung';
+    ? 'no automatic updates'
+    : [pushed.length ? `${pushed.length} update(s) as PR` : null, blocked.length ? `${blocked.length} review-blocked` : null].filter(Boolean).join(', ') || 'no change';
 
   if (plans.length > 0) {
     store.setLastChange(component.id, summary);
@@ -112,7 +112,7 @@ export async function autoUpdateComponent(store, component, deps = {}) {
       id: deps.runId ?? `update-${component.name}`,
       status: blocked.length ? 'partial' : 'green',
       updated: pushed.map((r) => ({ artifact: component.name, change: `${r.lib} ${r.from}→${r.to}`, prRef: r.prRef })),
-      failures: blocked.map((r) => ({ artifact: component.name, reason: `review-blockiert (${r.stage}): ${r.lib}` })),
+      failures: blocked.map((r) => ({ artifact: component.name, reason: `review-blocked (${r.stage}): ${r.lib}` })),
     });
   }
 
