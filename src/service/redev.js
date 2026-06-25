@@ -79,8 +79,11 @@ export async function redevelopComponent(store, comp, deps = {}) {
   if (gate.pass) {
     let upload = null;
     if (deps.upload) { try { upload = await deps.upload(store.get(comp.id) ?? comp); } catch (e) { upload = { error: String(e?.message ?? e) }; } }
+    // T-94: Komponente als neu gebaut/migriert kennzeichnen (GUI-Badge + E-Mail-Report)
+    const target = (store.get(comp.id)?.libs ?? comp.libs ?? []).filter((l) => l.latest).map((l) => `${l.name}@${l.latest}`).join(', ') || 'latest';
+    store.update(comp.id, { rebuilt: true, rebuiltAt: now(), rebuiltTo: target, rebuiltSummary: mig.summary, verifiedAsBefore: true, reviewUrl: upload?.prUrl ?? (store.get(comp.id)?.reviewUrl ?? null), reviewBranch: upload?.branch ?? (store.get(comp.id)?.reviewBranch ?? null) });
     store.addReview?.(comp.id, { kind: 'redev', pass: true, migration: mig.summary });
-    return { adopted: true, at: now(), migration: mig.summary, gate, upload };
+    return { adopted: true, at: now(), migration: mig.summary, rebuiltTo: target, gate, upload };
   }
   // Regress → Rollback (nichts wird ohne „grün wie zuvor" übernommen)
   if (mig.rollback) await mig.rollback();

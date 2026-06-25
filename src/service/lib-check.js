@@ -13,6 +13,7 @@ import fs from 'node:fs';
 import { listFiles } from '../inventory/inventory.js';
 import { isLibraryFile } from '../inventory/format.js';
 import { fetchNpmInfo } from '../sbom/registry.js';
+import { classifyLicense } from '../sbom/licenses.js';
 
 const DAY = 86400000;
 
@@ -71,6 +72,8 @@ export async function checkLibrariesOnline(libs, deps = {}) {
       e.outdated = !!(info.latest && knownVersion && info.latest !== lib.version);
       // Unbekannte installierte Version ist NICHT „aktuell" — auch wenn latest bekannt ist (B-5-Klasse)
       e.webStatus = e.outdated ? 'veraltet' : (knownVersion && info.latest) ? 'aktuell' : 'unbekannt';
+      if (info.license != null) e.license = info.license; // Lizenz aus der Registry (T-95)
+      e.licenseInfo = classifyLicense(e.license); // kommerziell ok? Pflichten?
       e.status = libStatus(e); // Gesamtstatus konsistent halten
     } catch (err) {
       e.webStatus = 'unbekannt';

@@ -14,6 +14,7 @@
 import http from 'node:http';
 import fs from 'node:fs';
 import path from 'node:path';
+import { spawn as childSpawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { scanRepo } from './src/service/run-repo.js';
 import { createScheduler } from './src/service/scheduler.js';
@@ -52,7 +53,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const DATA_DIR = process.env.AISPP_DATA_DIR || path.join(__dirname, 'data');
 // Build-Marker: muss mit APP_BUILD in public/app.html übereinstimmen. Bei Backend-Änderungen erhöhen.
 // Das Frontend vergleicht beide und warnt, wenn der laufende Dienst veraltet ist (Neustart nötig).
-const BUILD = '2026-06-25.9';
+const BUILD = '2026-06-25.10';
 const C = { reset: '\x1b[0m', bold: '\x1b[1m', dim: '\x1b[2m', green: '\x1b[32m', yellow: '\x1b[33m', red: '\x1b[31m', cyan: '\x1b[36m' };
 const c = (col, s) => `${C[col]}${s}${C.reset}`;
 
@@ -130,10 +131,17 @@ function cmdServe(portArg) {
   // Report aus dem aktuellen Stand aller Komponenten bauen
   const buildReport = () => {
     const comps = store.list();
-    const updated = comps.filter((x) => x.lastChange).map((x) => ({ artifact: x.name, change: x.lastChange.summary, testResult: x.status, gitLink: x.source || '', reviewUrl: x.reviewUrl || null }));
+    const updated = comps.filter((x) => x.lastChange).map((x) => ({ artifact: x.name, change: x.lastChange.summary, testResult: x.status, gitLink: x.source || '', reviewUrl: x.reviewUrl || null, rebuilt: !!x.rebuilt }));
     const risks = comps.filter((x) => x.libWarning).map((x) => ({ name: x.name, label: '⚠ Libs', reasons: [`${x.libWarning.vulnerable || 0} verwundbar, ${x.libWarning.unmaintained || 0} nicht gepflegt`] }));
     const failures = comps.filter((x) => ['zu klären', 'review-blockiert'].includes(x.status)).map((x) => ({ artifact: x.name, reason: x.status }));
-    return renderReport({ updated, risks, failures });
+    // T-94: neu gebaute/migrierte Komponenten gesondert ausweisen
+    const rebuilt = comps.filter((x) => x.rebuilt).map((x) => ({ artifact: x.name, to: x.rebuiltTo || 'latest', at: x.rebuiltAt || null, reviewUrl: x.reviewUrl || null }));
+    // T-95: Lizenz-Auffälligkeiten (copyleft/unbekannt) über alle Libs
+    const licenses = [];
+    for (const x of comps) for (const l of x.libs || []) {
+      const c = l.licenseInfo; if (c && c.level === 'warn') licenses.push({ name: `${x.name}/${l.name}`, id: c.id, reason: c.reason });
+    }
+    return renderReport({ updated, risks, failures, rebuilt, licenses });
   };
 
   // Geplanter Lauf je Repo: neu anbinden (fetch+detect) → analysieren → lastChange/Status + History
@@ -230,7 +238,26 @@ function cmdServe(portArg) {
     if (p === '/readme.html') return serveFile(res, path.join(__dirname, 'readme.html'), 'text/html');
 
     // Health/Build-Marker: das Frontend vergleicht ihn mit seinem APP_BUILD und warnt bei Abweichung
-    if (p === '/api/health') return json(res, { ok: true, build: BUILD, features: ['vendored-libs', 'sbom', 'deep-tests', 'maintain', 'web-libcheck', 'ui-tests', 'pr-upload', 'lib-update', 'auto-repair'] });
+    if (p === '/api/health') return json(res, { ok: true, build: BUILD, hasPlaywright: fs.existsSync(path.join(__dirname, 'node_modules', '@playwright', 'test')), aiReady: resolveAiBackend(settings, secretStore).kind !== 'stub', features: ['vendored-libs', 'sbom', 'deep-tests', 'maintain', 'web-libcheck', 'ui-tests', 'pr-upload', 'lib-update', 'auto-repair', 'characterization', 'redev', 'licenses'] });
+
+    // Playwright aus der App installieren (F-28/T-96): npm i -D @playwright/test + Browser → async
+    if (p === '/api/playwright/install' && req.method === 'POST') {
+      try {
+        const sh = process.platform === 'win32';
+        const run = (cmd, args) => new Promise((resolve) => {
+          const ch = childSpawn(cmd, args, { cwd: __dirname, shell: sh });
+          let out = '';
+          ch.stdout?.on('data', (d) => { out += d; });
+          ch.stderr?.on('data', (d) => { out += d; });
+          ch.on('error', (e) => resolve({ code: -1, out: out + String(e?.message ?? e) }));
+          ch.on('close', (code) => resolve({ code: code ?? -1, out }));
+        });
+        const step1 = await run('npm', ['i', '-D', '@playwright/test']);
+        const step2 = step1.code === 0 ? await run('npx', ['playwright', 'install', 'chromium']) : { code: -1, out: 'skipped (npm install failed)' };
+        const ok = step1.code === 0 && step2.code === 0;
+        return json(res, { ok, hasPlaywright: fs.existsSync(path.join(__dirname, 'node_modules', '@playwright', 'test')), log: (step1.out + '\n' + step2.out).slice(-8000) }, ok ? 200 : 500);
+      } catch (err) { return json(res, { ok: false, error: String(err?.message ?? err) }, 500); }
+    }
 
     // KI-Backend: Verbindung testen / Key hinterlegen
     if (p === '/api/ai/test' && req.method === 'POST') {

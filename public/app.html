@@ -259,6 +259,10 @@ function libWarnBadge(w){
   if(w.unknown) h+=` <span class="badge" style="color:var(--muted)" title="${w.unknown} librar(y/ies) with unknown version">? ${w.unknown} unknown</span>`;
   return h;
 }
+// T-94: Kennzeichnung neu gebauter/migrierter Komponenten (verifiziert „wie zuvor")
+function rebuiltBadge(c){
+  return c && c.rebuilt ? ` <span class="badge" title="Rebuilt on ${esc(c.rebuiltTo||'latest')} — verified as before" style="color:#3fb950;border-color:#3fb95066">🚀 rebuilt</span>` : '';
+}
 
 let current = null;
 
@@ -286,7 +290,7 @@ async function load(){
     const badgeCls = c.formatBadge==='APEX-SQL-Export'?'export':'';
     const typeBadge = c.type==='template_component'?'<span class="badge tc">Template Component</span>':'<span class="badge">Plugin</span>';
     tr.innerHTML = `
-      <td><span class="spin" data-cid="${c.id}"${BUSY.has(c.id)?'':' hidden'}></span><b>${esc(c.name)}</b>${libWarnBadge(c.libWarning)}</td>
+      <td><span class="spin" data-cid="${c.id}"${BUSY.has(c.id)?'':' hidden'}></span><b>${esc(c.name)}</b>${libWarnBadge(c.libWarning)}${rebuiltBadge(c)}</td>
       <td class="small muted">${esc(c.repo||'—')}</td>
       <td>${typeBadge}</td>
       <td><span class="badge ${badgeCls}">${esc(c.formatBadge)}</span></td>
@@ -312,7 +316,7 @@ async function openDetail(id){
     <div class="hero">
       ${!c.source ? `<div class="finding medium" style="margin:0 0 10px">No repo assigned — connect via “🔗 Assign repo” so check/tests/libraries work.</div>` : ''}
       <div class="inline" style="gap:6px">
-        ${statusPill(c)}${libWarnBadge(c.libWarning)}
+        ${statusPill(c)}${libWarnBadge(c.libWarning)}${rebuiltBadge(c)}
         <span class="badge">${c.type==='template_component'?'Template Component':'Plugin'}</span>
         <span class="badge ${c.formatBadge==='APEX-SQL-Export'?'export':''}">${esc(c.formatBadge)}</span>
       </div>
@@ -386,6 +390,7 @@ async function openDetail(id){
       <div class="inline" style="margin-bottom:6px"><button onclick="regenTestPlan()">🔄 Regenerate plan</button>${c.testPlan?'<button onclick="downloadTestPlan()">⬇ .feature</button>':''}${(c.codedTests&&c.codedTests.length)?c.codedTests.map((t,i)=>`<button onclick="downloadCoded(${i})">⬇ ${esc(t.name)}</button>`).join(''):''}</div>
       <h4 class="muted small" style="margin:14px 0 4px">🎭 Coded UI tests (Playwright) <span class="muted">— run live &amp; evaluate (not in the scheduled job)</span></h4>
       <div class="inline" style="gap:6px"><input id="uiUrl" placeholder="UI test URL: page with the plugin (e.g. APEX demo)" value="${esc(c.uiTestUrl||'')}" style="max-width:340px"><button onclick="runPwTests()">▶ Run UI tests</button></div>
+      <div class="small muted" style="margin-top:4px">Playwright: ${healthCache.hasPlaywright?'<span style="color:#3fb950">✓ installed</span>':'<span style="color:#d29922">not installed</span> <button class="ghost small" onclick="installPlaywright()">⬇ Install Playwright</button>'}</div>
       <div id="uiTestOut"></div>
       <h4 class="muted small" style="margin:14px 0 4px">📌 Characterization baseline <span class="muted">— pin the working behavior (“works as before”)</span></h4>
       ${renderBaseline(c)}
@@ -531,7 +536,14 @@ function libLine(l){
   const link = l.source||l.homepage||l.npm;
   const src = link ? ` · <a href="${esc(link)}" target="_blank" rel="noopener" style="color:var(--accent)">Source ↗</a>` : '';
   const manual = l.detectedBy==='manuell' ? ' <span class="badge">manual</span>' : '';
-  return `<div class="logline ${cls}"><b>${esc(l.name)}@${esc(l.version)}</b>${manual} — ${esc(libStatusLabel(l.status))}${l.vuln?` (${esc(l.vuln)})`:''}${l.reason?` — ${esc(l.reason)}`:''}${web}${inst}${src}</div>`;
+  return `<div class="logline ${cls}"><b>${esc(l.name)}@${esc(l.version)}</b>${manual} — ${esc(libStatusLabel(l.status))}${l.vuln?` (${esc(l.vuln)})`:''}${l.reason?` — ${esc(l.reason)}`:''}${web}${inst}${licenseBadge(l)}${src}</div>`;
+}
+// Lizenz-Badge: pflichtenarm (grün) / Attribution (gelb) / copyleft|unklar (rot) — T-95
+function licenseBadge(l){
+  const c = l.licenseInfo; if(!c) return '';
+  const col = c.level==='clean' ? '#3fb950' : c.level==='attribution' ? '#d29922' : '#f85149';
+  const icon = c.level==='clean' ? '⚖✓' : c.level==='attribution' ? '⚖' : '⚖⚠';
+  return ` · <span class="badge" title="${esc(c.reason)}" style="color:${col};border-color:${col}66">${icon} ${esc(c.id)}</span>`;
 }
 // SBOM-Visualisierung: Zähler + gestapelter Balken nach Status
 function sbomViz(libs){
@@ -697,6 +709,17 @@ function renderBaseline(c){
   const modeBadge = b.mode==='ui' ? '🎭 UI' : '📄 static (degraded)';
   return `<div class="finding ${b.mode==='ui'?'low':'medium'}" style="margin:4px 0"><b>Baseline</b> · ${fmtDate(b.at)} · ${modeBadge} · ${ok}/${tot} green${b.note?` · <span class="muted">${esc(b.note)}</span>`:''}</div>`;
 }
+async function installPlaywright(){
+  if(!confirm('Install Playwright now? This downloads @playwright/test + a Chromium browser (~150 MB) and may take a few minutes.')) return;
+  $('uiTestOut').innerHTML='<div class="muted small">Installing Playwright (npm + Chromium)… this can take a few minutes.</div>';
+  try{
+    const r=await api('POST','/api/playwright/install',{});
+    await checkBackend();
+    if(current) await openDetail(current.id);
+    $('uiTestOut').innerHTML=`<div class="${r.ok?'note':'finding'}"><b>${r.ok?'✅ Playwright installed':'⛔ Install failed'}</b><pre class="small" style="white-space:pre-wrap;max-height:200px;overflow:auto">${esc((r.log||r.error||'').slice(-2000))}</pre></div>`;
+    toast(r.ok?'Playwright installed':'Install failed');
+  }catch(e){ $('uiTestOut').innerHTML=`<div class="finding">${esc(e.message)}</div>`; toast('Error: '+e.message); }
+}
 async function runRedev(){
   if(!current) return; const id=current.id; setBusy(id,true);
   if(!confirm('AI migrates/rebuilds this plugin onto the latest stable library and verifies it against the captured baseline.\n\nChanges are only kept if the UI tests are green as before (otherwise rolled back). Continue?')){ setBusy(id,false); return; }
@@ -782,6 +805,7 @@ async function delComponent(c){
 
 // --- Einstellungen (Arbeitsverzeichnis, KI, Zeitplan, SMTP) ---
 let settingsCache = {};
+let healthCache = {};
 async function loadSettings(){
   try{ settingsCache = await api('GET','/api/settings'); $('wdLabel').textContent = 'Working directory: '+(settingsCache.workDir||'—'); }catch{}
 }
@@ -904,13 +928,14 @@ async function loadLibraries(){
 }
 
 // Build-Marker: muss mit BUILD in start.js übereinstimmen. Erkennt einen veralteten Backend-Prozess.
-const APP_BUILD = '2026-06-25.9';
+const APP_BUILD = '2026-06-25.10';
 async function checkBackend(){
   const b = $('staleBanner');
   try{
     const r = await fetch('/api/health');
     if(!r.ok) throw 0;
     const h = await r.json();
+    healthCache = h;
     if(h.build !== APP_BUILD){
       b.style.display='block';
       b.innerHTML = `⚠ <b>Backend out of date</b> — the running service (build ${esc(h.build||'?')}) does not match the UI (build ${APP_BUILD}). Please restart the service (Start.cmd → automatic), otherwise data/detection are stale.`;

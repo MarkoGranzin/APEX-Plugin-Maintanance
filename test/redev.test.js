@@ -23,6 +23,11 @@ describe('F-28 T-93 redevelopComponent (Spec-gesicherte Migration)', () => {
     expect(r.gate.pass).toBe(true);
     expect(uploaded).toBe(true);
     expect(rolledBack).toBe(false);
+    // T-94: Komponente ist als neu gebaut markiert
+    const after = store.get(id);
+    expect(after.rebuilt).toBe(true);
+    expect(after.verifiedAsBefore).toBe(true);
+    expect(after.rebuiltAt).toBeTruthy();
   });
 
   it('Regress (vorher gruen, jetzt rot) → verworfen + Rollback + Bericht', async () => {

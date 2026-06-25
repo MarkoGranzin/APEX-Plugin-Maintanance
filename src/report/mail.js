@@ -30,6 +30,8 @@ export function renderReport(run, opts = {}) {
   const updated = run.updated ?? [];
   const risks = run.risks ?? [];
   const failures = run.failures ?? [];
+  const rebuilt = run.rebuilt ?? [];     // T-94: neu gebaute/migrierte Komponenten
+  const licenses = run.licenses ?? [];   // T-95: Lizenz-Auffälligkeiten
 
   const lines = [];
   lines.push(`Plugin Maintenance — Run report`);
@@ -41,9 +43,21 @@ export function renderReport(run, opts = {}) {
     lines.push('');
   }
 
+  if (rebuilt.length) {
+    lines.push(`🚀 Rebuilt (verified as before) (${rebuilt.length})`);
+    for (const r of rebuilt) lines.push(`- ${r.artifact}: rebuilt on ${r.to || 'latest'}${r.at ? ` (${r.at})` : ''}${r.reviewUrl ? ` — ${r.reviewUrl}` : ''}`);
+    lines.push('');
+  }
+
+  if (licenses.length) {
+    lines.push(`⚖️ License attention (${licenses.length})`);
+    for (const l of licenses) lines.push(`- ${l.name}: ${l.id} — ${l.reason}`);
+    lines.push('');
+  }
+
   lines.push(`✅ Updated artifacts (${updated.length})`);
   for (const u of updated) {
-    lines.push(`- ${u.artifact}: ${u.change} — ${u.testResult}${u.gitLink ? ` — ${u.gitLink}` : ''}`);
+    lines.push(`- ${u.artifact}: ${u.change} — ${u.testResult}${u.gitLink ? ` — ${u.gitLink}` : ''}${u.rebuilt ? ' — 🚀 rebuilt (verified as before)' : ''}`);
     if (u.reviewUrl) lines.push(`    → Open review/PR: ${u.reviewUrl}`);
   }
 
@@ -54,7 +68,7 @@ export function renderReport(run, opts = {}) {
   }
 
   const body = redact(lines.join('\n'), opts.secrets);
-  const subject = `[Plugin Maintenance] ${updated.length} updated, ${risks.length} action needed, ${failures.length} failures`;
+  const subject = `[Plugin Maintenance] ${updated.length} updated, ${rebuilt.length} rebuilt, ${risks.length} action needed, ${failures.length} failures`;
   return { subject, body };
 }
 

@@ -31,6 +31,8 @@ export function overviewViewModel(store) {
     changeSummary: c.lastChange?.summary ?? '—',
     libs: c.libs ?? [],
     libWarning: c.libWarning ?? null,
+    rebuilt: !!c.rebuilt,
+    rebuiltTo: c.rebuiltTo ?? null,
     notesCount: c.notes.length,
     reviewsCount: c.reviews.length,
   }));

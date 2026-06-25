@@ -65,5 +65,8 @@ export async function fetchNpmInfo(name, deps = {}) {
   }
   const npm = `https://www.npmjs.com/package/${pkg}`;
   const links = { source: normalizeRepoUrl(doc?.repository) ?? null, homepage: doc?.homepage ?? null, npm };
-  return { name: pkg, latest, releasedAt: latest ? time[latest] ?? null : null, time, links };
+  // Lizenz: bevorzugt aus dem latest-Manifest, sonst Root (T-95)
+  const lic = doc?.versions?.[latest]?.license ?? doc?.license ?? null;
+  const license = lic && typeof lic === 'object' ? (lic.type || lic.name || null) : lic;
+  return { name: pkg, latest, releasedAt: latest ? time[latest] ?? null : null, time, links, license };
 }
