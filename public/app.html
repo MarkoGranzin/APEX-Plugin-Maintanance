@@ -205,11 +205,7 @@
     </div>
     <div class="inline" style="margin-top:8px"><button onclick="testAi()">🔌 Test connection</button><span id="aiTestOut" class="muted small"></span></div>
 
-    <h3 style="margin:18px 0 4px;font-size:1rem">Automation</h3>
-    <div class="chk"><input type="checkbox" id="autoRepair"><span><b>Auto-repair after a check</b> — when a check finds issues, run the full maintenance (safe fixes + safe lib updates + re-test). Breaking changes/push stay gated.</span></div>
-
-    <h3 style="margin:18px 0 4px;font-size:1rem">Upload &amp; security</h3>
-    <div class="chk"><input type="checkbox" id="allowPush"><span><b>Allow push to remote</b> — unchecked keeps it at local branch+commit (no upload, not even in the job)</span></div>
+    <div class="muted small" style="margin:14px 0 4px">Auto-repair (check → full maintenance) and push to remote are always on. Outward-facing pushes still ask for a confirmation when you click Upload.</div>
 
     <h3 style="margin:18px 0 4px;font-size:1rem">Automatic check (schedule)</h3>
     <div class="chk"><input type="checkbox" id="schedEnabled"><span>enable automatic check</span></div>
@@ -331,12 +327,10 @@ async function openDetail(id){
             <button onclick="openDir()" title="Open the local working copy in the OS file manager. No changes.">📂 Open locally</button>
             <button onclick="runReview()" title="Security + quality gate. Read-only — reports findings, changes nothing.">🔍 Manual review</button>
           </div>
-          <div class="small muted" style="margin-top:10px">Writes files / Git — single steps of “Full maintenance”</div>
+          <div class="small muted" style="margin-top:10px">Writes files / Git <span class="muted">— fixes &amp; AI review live inside “🧰 Full maintenance now”</span></div>
           <div class="inline" style="margin-top:4px;gap:6px">
-            <button onclick="runAutoFix()" title="Quick-fixes (remove console/debugger) + safe lib updates + AI review-fix. Writes files. Needs an AI backend for code fixes.">🛠 Fix everything automatically</button>
-            <button onclick="runAutoReview()" title="Only the AI review-fix step of “Fix everything automatically”. Writes files via AI, rolls back if not green. Needs an AI backend.">🤖 AI review &amp; fix</button>
-            <button onclick="runUpdate()" title="Create lib update branches. Pushes to the remote only if “allow push” is ON.">⬆ Auto-update libs</button>
-            <button onclick="runUpload()" title="Commit current changes on a NEW branch and (if “allow push” is ON) push it + show PR link. Never touches your current branch.">📤 Upload (branch + PR)</button>
+            <button onclick="runUpdate()" title="Update libraries to the latest version. Safe updates are applied directly; for breaking ones you get a force option (you verify) or use the verified migration in the Tests tab.">⬆ Update libs to latest</button>
+            <button onclick="runUpload()" title="Commit current changes on a NEW branch and push it + show the PR link (asks for confirmation). Never touches your current branch.">📤 Upload (branch + PR)</button>
           </div>
         </details>
       </div>
@@ -815,7 +809,6 @@ function openSettings(){
   $('workDir').value = s.workDir||'';
   $('aiKind').value = ai.kind||'stub'; $('aiCommand').value=ai.command||''; $('aiEndpoint').value=ai.endpoint||''; $('aiModel').value=ai.model||''; $('aiKey').value=''; $('aiKeyState').textContent=ai.hasKey?'(key stored)':''; $('aiTestOut').textContent='';
   $('schedEnabled').checked=!!s.scheduleEnabled; $('schedule').value=s.schedule||''; updateSchedHint();
-  $('allowPush').checked=!!s.allowPush; $('autoRepair').checked=!!s.autoRepair;
   $('smtpHost').value=sm.host||''; $('smtpPort').value=sm.port||587; $('smtpSecure').checked=!!sm.secure; $('smtpUser').value=sm.user||''; $('smtpFrom').value=sm.from||''; $('smtpPass').value=''; $('reportOut').textContent='';
   $('recipients').value=(s.recipients||[]).join(', ');
   toggleAi(); $('settingsBg').classList.add('open');
@@ -838,7 +831,7 @@ async function saveSettingsAll(){
     const ai = { kind:$('aiKind').value, command:$('aiCommand').value.trim()||undefined, endpoint:$('aiEndpoint').value.trim()||undefined, model:$('aiModel').value.trim()||undefined };
     const smtp = { host:$('smtpHost').value.trim(), port:Number($('smtpPort').value)||587, secure:$('smtpSecure').checked, user:$('smtpUser').value.trim(), from:$('smtpFrom').value.trim() };
     const recipients = $('recipients').value.split(',').map(x=>x.trim()).filter(Boolean);
-    await api('PUT','/api/settings',{ workDir:$('workDir').value.trim(), aiBackend:ai, smtp, recipients, schedule:$('schedule').value.trim(), scheduleEnabled:$('schedEnabled').checked, allowPush:$('allowPush').checked, autoRepair:$('autoRepair').checked });
+    await api('PUT','/api/settings',{ workDir:$('workDir').value.trim(), aiBackend:ai, smtp, recipients, schedule:$('schedule').value.trim(), scheduleEnabled:$('schedEnabled').checked });
     if($('aiKey').value) await api('POST','/api/ai/key',{key:$('aiKey').value});
     if($('smtpPass').value) await api('POST','/api/smtp/pass',{pass:$('smtpPass').value});
     await loadSettings(); closeSettings(); toast('Settings saved');
@@ -863,17 +856,25 @@ async function saveAssign(){
   catch(e){ toast('Error: '+e.message); }
   finally{ btn.disabled=false; btn.textContent='Assign & clone'; }
 }
-async function runUpdate(){
+async function runUpdate(force){
   if(!current) return;
-  // Auto-update kann (bei aktiviertem „allow push") einen Branch zum Remote pushen → bestätigen
-  if(settingsCache.allowPush && !confirm('Auto-update creates update branches and — because “allow push” is ON — may push them to the remote.\n\nContinue?')) return;
-  const id=current.id; setBusy(id,true); toast('Auto-update running…');
+  if(force && !confirm('Force update vendored libraries to the LATEST version — including BREAKING ones (e.g. three 0.116→0.185, jQuery 1→3).\n\nThe files are swapped (a backup is kept), but the plugin is NOT auto-verified — you must test it yourself afterwards. Continue?')) return;
+  const id=current.id; setBusy(id,true); toast(force?'Force-updating libs…':'Auto-update running…');
   try{
-    const r = await api('POST',`/api/components/${id}/update`,{});
+    const r = await api('POST',`/api/components/${id}/update`,{force:!!force});
     await openDetail(id); load();
-    const out = (r.results||[]).map(x=>`<div class="finding ${x.pushed?'low':'medium'}">${esc(x.lib)} ${esc(x.from)}→${esc(x.to)} — ${x.pushed?('PR branch '+esc((x.prRef&&x.prRef.branch)||x.branchKey||'')):('Review blocked ('+esc(x.stage||'')+')')}</div>`).join('');
-    $('reviewOut').innerHTML = `<div class="note"><b>Auto-update:</b> ${esc(r.summary)}</div>` + out;
-    toast(r.summary);
+    const urlOut = (r.results||[]).map(x=>`<div class="finding ${x.pushed?'low':'medium'}">${esc(x.lib)} ${esc(x.from)}→${esc(x.to)} — ${x.pushed?('PR branch '+esc((x.prRef&&x.prRef.branch)||x.branchKey||'')):('Review blocked ('+esc(x.stage||'')+')')}</div>`).join('');
+    const vend = (r.vendored||[]);
+    const vendOut = vend.map(x=>x.applied
+      ? `<div class="finding low">✅ ${esc(x.name)} ${esc(x.from)}→${esc(x.to)} — file swapped${x.breaking?' (breaking — please test!)':''}</div>`
+      : `<div class="finding medium">⚠ ${esc(x.name)} ${esc(x.from)}→${esc(x.to)} — ${esc(x.reason||'not applied')}</div>`).join('');
+    const anyApplied = vend.some(x=>x.applied);
+    const anyBreaking = vend.some(x=>!x.applied && x.breaking);
+    const hint = (!anyApplied && (r.results||[]).length===0 && vend.length===0)
+      ? '<div class="muted small">No CDN-referenced or vendored library had a safe update. Breaking/unmaintained libs are not auto-swapped — use “🚀 Migrate to latest” (Tests tab, verified) or force below.</div>' : '';
+    const forceBtn = (anyBreaking && !r.forced) ? `<div class="inline" style="margin-top:6px"><button onclick="runUpdate(true)">⚡ Force update to latest (breaking — I verify myself)</button></div>` : '';
+    $('reviewOut').innerHTML = `<div class="note"><b>${force?'Force update':'Auto-update'}:</b> ${esc(r.summary||'')}</div>` + urlOut + vendOut + hint + forceBtn;
+    toast(anyApplied?'Libraries updated':(r.summary||'no automatic updates'));
   }catch(e){ toast('Error: '+e.message); }
   finally{ setBusy(id,false); }
 }
@@ -929,7 +930,7 @@ async function loadLibraries(){
 }
 
 // Build-Marker: muss mit BUILD in start.js übereinstimmen. Erkennt einen veralteten Backend-Prozess.
-const APP_BUILD = '2026-06-25.11';
+const APP_BUILD = '2026-06-25.13';
 async function checkBackend(){
   const b = $('staleBanner');
   try{

@@ -26,6 +26,7 @@ import { defaultGather } from './src/gui/components.js';
 import { syncRepo } from './src/service/workspace.js';
 import { runManaged } from './src/service/run-component.js';
 import { autoUpdateComponent } from './src/service/update-component.js';
+import { applyVendoredUpdates } from './src/service/lib-update.js';
 import { assignRepoToComponent } from './src/service/assign-repo.js';
 import { autoReviewFix } from './src/service/autoreview.js';
 import { checkLibrariesOnline } from './src/service/lib-check.js';
@@ -53,7 +54,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const DATA_DIR = process.env.AISPP_DATA_DIR || path.join(__dirname, 'data');
 // Build-Marker: muss mit APP_BUILD in public/app.html übereinstimmen. Bei Backend-Änderungen erhöhen.
 // Das Frontend vergleicht beide und warnt, wenn der laufende Dienst veraltet ist (Neustart nötig).
-const BUILD = '2026-06-25.11';
+const BUILD = '2026-06-25.13';
 const C = { reset: '\x1b[0m', bold: '\x1b[1m', dim: '\x1b[2m', green: '\x1b[32m', yellow: '\x1b[33m', red: '\x1b[31m', cyan: '\x1b[36m' };
 const c = (col, s) => `${C[col]}${s}${C.reset}`;
 
@@ -99,6 +100,10 @@ function cmdServe(portArg) {
   // Einstellungen persistent (F-21/F-18): bleiben über Neustart erhalten
   const settingsFile = path.join(DATA_DIR, 'settings.json');
   try { if (fs.existsSync(settingsFile)) Object.assign(settings, JSON.parse(fs.readFileSync(settingsFile, 'utf8'))); } catch {}
+  // Vom Nutzer gewünscht: Auto-Repair und Push sind dauerhaft an (keine Settings-Toggles mehr).
+  // Outward-facing: der Upload-Button fragt weiterhin vor dem Push nach (Bestätigung im Klick).
+  settings.autoRepair = true;
+  settings.allowPush = true;
   const saveSettings = () => {
     try { fs.mkdirSync(path.dirname(settingsFile), { recursive: true }); fs.writeFileSync(settingsFile, JSON.stringify(settings, null, 2)); } catch {}
   };
@@ -335,11 +340,20 @@ function cmdServe(portArg) {
     });
 
     // Auto-Update je Komponente (F-20) → async, vor dem synchronen Handler
-    if (p.startsWith('/api/components/') && p.endsWith('/update') && req.method === 'POST') return withComponent(async (c) => {
-      // SICHERHEIT: Push nur bei settings.allowPush; sonst No-op-Default (Branch lokal, kein Remote-Push) — wie /upload, /maintain (T-76)
-      const r = await autoUpdateComponent(store, c, { push: settings.allowPush ? localGitPush(c.path) : undefined, registry: prRegistry, recordRun: record });
+    if (p.startsWith('/api/components/') && p.endsWith('/update') && req.method === 'POST') return withComponent(async (c, id) => {
+      const body = await readBody(req);
+      // 0) Aktualität sicherstellen (latest/outdated), damit vendored-Updates erkannt werden
+      try { const enr = await checkLibrariesOnline(store.get(id).libs || []); store.update(id, { libs: enr }); } catch { /* offline → weiter */ }
+      // 1) URL-basierte Updates (CDN-Refs gegen Vuln-DB). SICHERHEIT: Push nur bei settings.allowPush (T-76)
+      const r = await autoUpdateComponent(store, store.get(id), { push: settings.allowPush ? localGitPush(c.path) : undefined, registry: prRegistry, recordRun: record });
+      // 2) Vendored-Datei-Updates: safe immer; breaking nur mit force (Nutzer bestätigt, Backup vorhanden)
+      const vend = await applyVendoredUpdates(c.path, store.get(id).libs || [], { force: !!body?.force });
+      if (vend.results.some((x) => x.applied)) {
+        runComponentOnce(store, store.get(id), { scan: scanRepo, logSink: writeLog, onTestPlan, onSbom }); // neu erkennen nach Swap
+        try { const enr2 = await checkLibrariesOnline(store.get(id).libs || []); store.update(id, { libs: enr2 }); } catch { /* offline */ }
+      }
       const { branchRegistry, ...out } = r;
-      return json(res, out);
+      return json(res, { ...out, vendored: vend.results, forced: !!body?.force, backups: [...vend.backups.keys()].length });
     });
 
     // Bibliotheks-Aktualität aus dem Web prüfen (T-59) → async

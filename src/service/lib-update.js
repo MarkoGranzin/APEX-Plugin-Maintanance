@@ -62,11 +62,11 @@ export async function applyVendoredUpdates(dir, libs, deps = {}) {
     // Breaking (Major-Sprung) wird standardmäßig NICHT blind getauscht — die Software migriert es
     // über ihren KI-Agenten (force=true, danach KI-Fix der aufrufenden Stellen + Re-Test/Rollback).
     if (cls === 'breaking' && !deps.force) {
-      results.push({ name: lib.name, from: lib.version, to: lib.latest, applied: false, breaking: true, reason: 'breaking (Major) — Migration durch KI-Agent der Software' });
+      results.push({ name: lib.name, from: lib.version, to: lib.latest, applied: false, breaking: true, reason: 'breaking (major) — use “force to latest” or the verified migration (Tests tab)' });
       continue;
     }
     const rel = fileFor(lib.name);
-    if (!rel) { results.push({ name: lib.name, from: lib.version, to: lib.latest, applied: false, reason: 'Datei nicht gefunden' }); continue; }
+    if (!rel) { results.push({ name: lib.name, from: lib.version, to: lib.latest, applied: false, reason: 'file not found in repo' }); continue; }
     const abs = path.join(dir, rel);
     try {
       const content = await fetchFile(npmPackageName(lib.name), lib.latest);
@@ -75,7 +75,7 @@ export async function applyVendoredUpdates(dir, libs, deps = {}) {
       fs.writeFileSync(abs, content);
       results.push({ name: lib.name, from: lib.version, to: lib.latest, applied: true, breaking: cls === 'breaking', file: rel });
     } catch (e) {
-      results.push({ name: lib.name, from: lib.version, to: lib.latest, applied: false, reason: 'Download/Schreiben fehlgeschlagen: ' + (e?.message ?? e) });
+      results.push({ name: lib.name, from: lib.version, to: lib.latest, applied: false, reason: 'download/write failed: ' + (e?.message ?? e) });
     }
   }
   return { results, backups };
