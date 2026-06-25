@@ -707,7 +707,8 @@ function renderBaseline(c){
   if(!b) return '<div class="muted small">No baseline yet — set a UI test URL, run the UI tests against the working build, then capture it. Migrations/rebuilds are afterwards verified “green as before”.</div>';
   const ok=(b.scenarios||[]).filter(s=>s.status==='passed').length, tot=(b.scenarios||[]).length;
   const modeBadge = b.mode==='ui' ? '🎭 UI' : '📄 static (degraded)';
-  return `<div class="finding ${b.mode==='ui'?'low':'medium'}" style="margin:4px 0"><b>Baseline</b> · ${fmtDate(b.at)} · ${modeBadge} · ${ok}/${tot} green${b.note?` · <span class="muted">${esc(b.note)}</span>`:''}</div>`;
+  const noGreen = ok===0;
+  return `<div class="finding ${noGreen?'':b.mode==='ui'?'low':'medium'}" style="margin:4px 0"><b>Baseline</b> · ${fmtDate(b.at)} · ${modeBadge} · ${ok}/${tot} green${noGreen?' — ⚠ no green scenarios: not a usable baseline (make the UI tests pass on the working build first — migration cannot be verified against a red baseline)':(b.note?` · <span class="muted">${esc(b.note)}</span>`:'')}</div>`;
 }
 async function installPlaywright(){
   if(!confirm('Install Playwright now? This downloads @playwright/test + a Chromium browser (~150 MB) and may take a few minutes.')) return;

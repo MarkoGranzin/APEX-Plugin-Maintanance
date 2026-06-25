@@ -54,7 +54,9 @@ export async function captureBaseline(store, comp, deps = {}) {
       .map((e, i) => ({ scenario: e.file || `test-${i}`, status: /rot|fail|fehl/i.test(e.result || '') ? 'failed' : 'passed' }));
   }
 
-  const baseline = { at: now(), mode, specHash, note, scenarios };
+  const green = scenarios.filter((s) => s.status === 'passed').length;
+  if (!green && !note) note = 'no green scenarios — set a UI test URL and make the UI tests pass before this is a usable baseline';
+  const baseline = { at: now(), mode, specHash, note, green, total: scenarios.length, scenarios };
   store.update(comp.id, { baseline });
   if (deps.onBaseline) { try { deps.onBaseline(comp, baseline); } catch { /* Datei-Fehler nicht eskalieren */ } }
   return baseline;
@@ -65,6 +67,12 @@ export function compareToBaseline(comp, currentScenarios) {
   const baseline = comp?.baseline;
   if (!baseline || !baseline.scenarios?.length) {
     return { pass: false, regressions: [], newlyGreen: [], summary: 'no baseline captured — run “Capture baseline” on the working build first', noBaseline: true };
+  }
+  // Rote Baseline (kein vorher-grünes Szenario) → das Gate kann „wie zuvor" NICHT verifizieren
+  // (es gäbe nichts zu schützen). Nicht stillschweigend „pass", sondern ablehnen.
+  const greenBaseline = baseline.scenarios.filter((s) => s.status === 'passed').length;
+  if (!greenBaseline) {
+    return { pass: false, regressions: [], newlyGreen: [], noGreenBaseline: true, mode: baseline.mode, summary: 'baseline has no green scenarios — capture a baseline on a WORKING build first (the UI tests must pass before migrating)' };
   }
   const staleSpec = baseline.specHash && comp.codedTests && baseline.specHash !== specHashOf(comp.codedTests);
   const res = worksAsBefore(baseline.scenarios, currentScenarios);

@@ -46,6 +46,13 @@ describe('F-28 T-92 Charakterisierungs-Baseline', () => {
     expect(compareToBaseline({}, []).noBaseline).toBe(true);
   });
 
+  it('rote Baseline (0 grün) → Gate verweigert (kein stilles pass)', () => {
+    const comp = { codedTests: [uiSpec], baseline: { mode: 'ui', specHash: specHashOf([uiSpec]), scenarios: [{ scenario: 'A', status: 'failed' }] } };
+    const r = compareToBaseline(comp, [{ scenario: 'A', status: 'failed' }]);
+    expect(r.pass).toBe(false);
+    expect(r.noGreenBaseline).toBe(true);
+  });
+
   it('parsePlaywrightJson liest Einzelergebnisse aus dem JSON-Reporter', () => {
     const json = JSON.stringify({ suites: [{ specs: [
       { title: 'A', ok: true, tests: [{ results: [{ status: 'passed' }] }] },

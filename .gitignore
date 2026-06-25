@@ -18,3 +18,7 @@ qa.log
 
 # Playwright run artifacts
 test-results/
+
+# F-28 demo scratch (cloned repo + harness)
+.demo/repo/
+.demo/harness/
