@@ -10,6 +10,9 @@
  * Resultat: src/ai/backend.js
  */
 
+import fs from 'node:fs';
+import path from 'node:path';
+
 /**
  * @typedef {Object} AiBackend
  * @property {(prompt:string, opts?:object)=>Promise<string>} complete
@@ -72,24 +75,59 @@ export function cliArgsFor(command) {
   return [];
 }
 
+/**
+ * Findet die gebündelte Claude-Desktop-Binary (claude.exe), wenn `claude` nicht auf dem PATH liegt.
+ * Die Desktop-App installiert nach %APPDATA%/%LOCALAPPDATA%\Claude\claude-code\<version>\claude.exe und
+ * legt KEINEN PATH-Eintrag an — bare `claude` führt sonst zu ENOENT. Wählt die höchste Version.
+ * @param {object} [env] für Tests injizierbar (default process.env)
+ */
+export function findBundledClaude(env = process.env) {
+  if (process.platform !== 'win32') return null;
+  const roots = [env.APPDATA, env.LOCALAPPDATA].filter(Boolean).map((r) => path.join(r, 'Claude', 'claude-code'));
+  const cmp = (a, b) => { for (let i = 0; i < Math.max(a.length, b.length); i++) { const d = (a[i] || 0) - (b[i] || 0); if (d) return d; } return 0; };
+  let best = null, bestV = null;
+  for (const root of roots) {
+    let dirs = [];
+    try { dirs = fs.readdirSync(root); } catch { continue; }
+    for (const d of dirs) {
+      const exe = path.join(root, d, 'claude.exe');
+      try { if (!fs.statSync(exe).isFile()) continue; } catch { continue; }
+      const v = d.split('.').map((n) => parseInt(n, 10) || 0);
+      if (!bestV || cmp(v, bestV) > 0) { best = exe; bestV = v; }
+    }
+  }
+  return best;
+}
+
+/** Löst den CLI-Befehl auf: absoluter Pfad → direkt; bares `claude` (win32) → gebündelte Desktop-Binary, falls vorhanden. */
+export function resolveCliCommand(command, env = process.env) {
+  try { if (path.isAbsolute(command) && fs.existsSync(command)) return command; } catch { /* egal */ }
+  const base = String(command || '').replace(/\\/g, '/').split('/').pop().replace(/\.(cmd|exe|bat|ps1)$/i, '');
+  if (/^claude$/i.test(base)) return findBundledClaude(env) ?? command; // sonst PATH-Auflösung via shell:true
+  return command;
+}
+
 /** Lokale CLI: kein API-Key nötig; Prompt geht an den Befehl, Antwort kommt aus stdout. */
 export function cliBackend(config, deps = {}) {
   const run = deps.spawn ?? defaultSpawn;
+  const resolve = deps.resolveCommand ?? resolveCliCommand;
+  const cmd = resolve(config.command); // bares `claude` (win32) → gebündelte Desktop-Binary, falls vorhanden
   const args = config.args ?? cliArgsFor(config.command); // z.B. claude → ['-p'] (Print-Modus)
   return {
     kind: 'cli',
     requiresApiKey: false,
+    resolvedCommand: cmd,
     async complete(prompt, opts = {}) {
-      const { stdout } = await run(config.command, args, { input: prompt });
+      const { stdout } = await run(cmd, args, { input: prompt });
       return String(stdout).trim();
     },
     async testConnection() {
       try {
-        await run(config.command, ['--version'], {});
-        return { ok: true };
+        await run(cmd, ['--version'], {});
+        return { ok: true, command: cmd };
       } catch (err) {
         const hint = /ENOENT/i.test(String(err?.message ?? err)) ? ' — not found on PATH (install it or set the full path in settings)' : '';
-        return { ok: false, error: `CLI "${config.command}" not callable: ${err?.message ?? err}${hint}` };
+        return { ok: false, error: `CLI "${cmd}" not callable: ${err?.message ?? err}${hint}` };
       }
     },
   };
@@ -134,9 +172,11 @@ export function providerBackend(config, deps = {}) {
 async function defaultSpawn(command, args, { input } = {}) {
   const { spawn } = await import('node:child_process');
   return new Promise((resolve, reject) => {
-    // Windows: shell:true, sonst findet spawn npm-/CLI-Shims wie claude.cmd/.ps1 nicht (ENOENT).
-    // Sicher, weil command/args kontrollierte Konstanten sind; der Prompt geht über stdin, nicht als Arg.
-    const p = spawn(command, args, { stdio: ['pipe', 'pipe', 'pipe'], shell: process.platform === 'win32' });
+    // Windows: für Shims (.cmd/.bat/.ps1) oder bare Namen braucht spawn shell:true, sonst ENOENT.
+    // Eine direkt startbare .exe (z.B. aufgelöste Desktop-Binary) wird OHNE shell gestartet — das
+    // vermeidet die DEP0190-Warnung und das Arg-Quoting-Risiko. Der Prompt geht ohnehin über stdin.
+    const isExe = /\.exe$/i.test(command);
+    const p = spawn(command, args, { stdio: ['pipe', 'pipe', 'pipe'], shell: process.platform === 'win32' && !isExe });
     let stdout = '';
     let stderr = '';
     p.stdout.on('data', (d) => (stdout += d));

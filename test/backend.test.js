@@ -19,7 +19,7 @@ describe('T-11 CLI-Backend', () => {
   it('testConnection ok wenn CLI aufrufbar', async () => {
     const spawn = async () => ({ stdout: 'v1.0' });
     const be = createBackend({ kind: 'cli', command: 'mycli' }, { spawn });
-    expect(await be.testConnection()).toEqual({ ok: true });
+    expect(await be.testConnection()).toMatchObject({ ok: true });
   });
 
   it('testConnection meldet klaren Fehler wenn CLI fehlt', async () => {
