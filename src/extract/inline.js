@@ -11,9 +11,7 @@
  */
 
 import { findCalls } from './extract.js';
-
-const unquote = (s) => s.replace(/''/g, "'");
-const requote = (s) => s.replace(/'/g, "''");
+import { skipString, unquote, requote } from './sql-scan.js';
 
 /** Span (start/end innerhalb argsText) + Ausdruck des benannten bzw. ersten positionalen Arguments. */
 function argSpan(argsText, name) {
@@ -28,18 +26,7 @@ function argSpan(argsText, name) {
   let depth = 0;
   while (i < argsText.length) {
     const c = argsText[i];
-    if (c === "'") {
-      i++;
-      while (i < argsText.length) {
-        if (argsText[i] === "'") {
-          if (argsText[i + 1] === "'") { i += 2; continue; }
-          i++;
-          break;
-        }
-        i++;
-      }
-      continue;
-    }
+    if (c === "'") { i = skipString(argsText, i); continue; }
     if (c === '(') depth++;
     else if (c === ')') depth--;
     else if (c === ',' && depth === 0) break;
@@ -67,18 +54,7 @@ function splitTopLevelConcat(expr) {
   let depth = 0;
   while (i < expr.length) {
     const c = expr[i];
-    if (c === "'") {
-      i++;
-      while (i < expr.length) {
-        if (expr[i] === "'") {
-          if (expr[i + 1] === "'") { i += 2; continue; }
-          i++;
-          break;
-        }
-        i++;
-      }
-      continue;
-    }
+    if (c === "'") { i = skipString(expr, i); continue; }
     if (c === '(') depth++;
     else if (c === ')') depth--;
     else if (c === '|' && expr[i + 1] === '|' && depth === 0) {

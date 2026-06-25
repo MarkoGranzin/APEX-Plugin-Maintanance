@@ -15,6 +15,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { extractInlineJs } from './inline.js';
+import { skipString, unquote } from './sql-scan.js';
 
 /** Findet alle Aufrufe `name(...)` mit balancierten Klammern; ignoriert Klammern in '..'-Literalen. */
 export function findCalls(text, name) {
@@ -27,18 +28,7 @@ export function findCalls(text, name) {
     let i = start;
     while (i < text.length && depth > 0) {
       const c = text[i];
-      if (c === "'") {
-        i++;
-        while (i < text.length) {
-          if (text[i] === "'") {
-            if (text[i + 1] === "'") { i += 2; continue; }
-            i++;
-            break;
-          }
-          i++;
-        }
-        continue;
-      }
+      if (c === "'") { i = skipString(text, i); continue; }
       if (c === '(') depth++;
       else if (c === ')') depth--;
       i++;
@@ -49,7 +39,6 @@ export function findCalls(text, name) {
   return calls;
 }
 
-const unquote = (s) => s.replace(/''/g, "'");
 const isLikelyBase64 = (s) => /^[A-Za-z0-9+/=\s]+$/.test(s) && s.replace(/\s/g, '').length % 4 === 0;
 const classify = (fileName) => (/\.css$/i.test(fileName) ? 'css' : /\.js$/i.test(fileName) ? 'js' : 'other');
 
@@ -81,18 +70,7 @@ function namedArgExpr(argsText, argName) {
   const start = i;
   while (i < argsText.length) {
     const c = argsText[i];
-    if (c === "'") {
-      i++;
-      while (i < argsText.length) {
-        if (argsText[i] === "'") {
-          if (argsText[i + 1] === "'") { i += 2; continue; }
-          i++;
-          break;
-        }
-        i++;
-      }
-      continue;
-    }
+    if (c === "'") { i = skipString(argsText, i); continue; }
     if (c === '(') depth++;
     else if (c === ')') depth--;
     else if (c === ',' && depth === 0) break;

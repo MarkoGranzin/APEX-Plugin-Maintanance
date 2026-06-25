@@ -15,6 +15,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { findCalls } from './extract.js';
 import { buildInlineLiteral } from './inline.js';
+import { skipString, unquote } from './sql-scan.js';
 
 /**
  * Ersetzt nur den p_file_content-Ausdruck genau eines create_plugin_file-Aufrufs (minimaler Diff).
@@ -25,7 +26,7 @@ export function replacePluginFileContent(sql, fileName, newBase64) {
   for (const call of findCalls(sql, 'create_plugin_file')) {
     const args = call.argsText;
     const nameMatch = args.match(/p_file_name\s*=>\s*'((?:[^']|'')*)'/i);
-    if (!nameMatch || nameMatch[1].replace(/''/g, "'") !== fileName) continue;
+    if (!nameMatch || unquote(nameMatch[1]) !== fileName) continue;
 
     // Position des p_file_content-Ausdrucks innerhalb der gesamten SQL bestimmen
     const ce = /p_file_content\s*=>\s*/i.exec(args);
@@ -35,18 +36,7 @@ export function replacePluginFileContent(sql, fileName, newBase64) {
     let depth = 0;
     while (i < args.length) {
       const c = args[i];
-      if (c === "'") {
-        i++;
-        while (i < args.length) {
-          if (args[i] === "'") {
-            if (args[i + 1] === "'") { i += 2; continue; }
-            i++;
-            break;
-          }
-          i++;
-        }
-        continue;
-      }
+      if (c === "'") { i = skipString(args, i); continue; }
       if (c === '(') depth++;
       else if (c === ')') depth--;
       else if (c === ',' && depth === 0) break;
