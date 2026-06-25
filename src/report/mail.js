@@ -32,7 +32,7 @@ export function renderReport(run, opts = {}) {
   const failures = run.failures ?? [];
 
   const lines = [];
-  lines.push(`AIS Pluginpflege — Lauf-Report`);
+  lines.push(`Plugin Maintenance — Lauf-Report`);
   lines.push('');
 
   if (risks.length) {
@@ -51,7 +51,7 @@ export function renderReport(run, opts = {}) {
   }
 
   const body = redact(lines.join('\n'), opts.secrets);
-  const subject = `[AIS Pluginpflege] ${updated.length} aktualisiert, ${risks.length} Handlungsbedarf, ${failures.length} Fehlschläge`;
+  const subject = `[Plugin Maintenance] ${updated.length} aktualisiert, ${risks.length} Handlungsbedarf, ${failures.length} Fehlschläge`;
   return { subject, body };
 }
 

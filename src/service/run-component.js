@@ -41,7 +41,7 @@ export function summarize(result) {
 
 /** Formatiert ein Protokoll als Text (für Logdatei/Download). */
 export function formatLog(component, lastLog) {
-  const head = `AIS Pluginpflege — Prüfprotokoll\nKomponente: ${component.name}\nZeit: ${lastLog.at}\n`;
+  const head = `Plugin Maintenance — Prüfprotokoll\nKomponente: ${component.name}\nZeit: ${lastLog.at}\n`;
   const body = (lastLog.entries ?? [])
     .map((e) => `[${e.agent}] ${e.file} → ${e.result}${e.severity ? ` (${e.severity})` : ''}`)
     .join('\n');

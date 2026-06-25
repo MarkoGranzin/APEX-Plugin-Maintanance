@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# AIS Pluginpflege - Starter (macOS/Linux). Ausführbar machen: chmod +x start.sh
+# Plugin Maintenance - Starter (macOS/Linux). Ausführbar machen: chmod +x start.sh
 set -e
 cd "$(dirname "$0")"
 
@@ -7,7 +7,7 @@ command -v node >/dev/null 2>&1 || { echo "Node.js >= 20 wird benötigt: https:/
 [ -d node_modules ] || { echo "Installiere Abhängigkeiten (npm install) ..."; npm install; }
 
 echo
-echo "  AIS Pluginpflege"
+echo "  Plugin Maintenance"
 echo "  ================"
 echo "   [1] Web-GUI starten (http://localhost:4317)"
 echo "   [2] Repo scannen (read-only Analyse)"

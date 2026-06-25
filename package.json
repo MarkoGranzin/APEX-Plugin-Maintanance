@@ -1,5 +1,5 @@
 {
-  "name": "ais-pluginpflege",
+  "name": "plugin-maintenance",
   "version": "0.1.0",
   "description": "Automatisierte Pflege von APEX-Plugins und Template-Komponenten: Repo anbinden, Artefakte erkennen, kanonisch extrahieren, KI-Tests generieren und ausführen.",
   "type": "module",

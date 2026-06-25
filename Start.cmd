@@ -1,11 +1,11 @@
 @echo off
 REM ============================================================
-REM  AIS Pluginpflege - Doppelklick-Starter (Windows)
+REM  Plugin Maintenance - Doppelklick-Starter (Windows)
 REM  Startet die Web-GUI, scannt ein Repo oder fuehrt Tests aus.
 REM ============================================================
 setlocal EnableDelayedExpansion
 cd /d "%~dp0"
-title AIS Pluginpflege
+title Plugin Maintenance
 
 REM --- Node pruefen ---
 where node >nul 2>nul || (
@@ -31,7 +31,7 @@ goto serve
 cls
 echo.
 echo   ============================================
-echo      AIS Pluginpflege
+echo      Plugin Maintenance
 echo   ============================================
 echo.
 echo     [1]  Web-GUI starten  ^(http://localhost:4317^)

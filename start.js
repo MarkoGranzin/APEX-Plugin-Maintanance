@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * AIS Pluginpflege — Start-/CLI-Einstieg.
+ * Plugin Maintenance — Start-/CLI-Einstieg.
  *
  *   node start.js scan <repo-pfad>     Einmaliger, read-only Pflege-Lauf über ein Repo (Analyse,
  *                                       Inventar, SBOM/Updates, Risiko, Static-First-Gate, Triage).
@@ -53,7 +53,7 @@ const C = { reset: '\x1b[0m', bold: '\x1b[1m', dim: '\x1b[2m', green: '\x1b[32m'
 const c = (col, s) => `${C[col]}${s}${C.reset}`;
 
 function printScan(result) {
-  console.log(c('bold', `\n  AIS Pluginpflege — Scan: ${result.repoDir}\n`));
+  console.log(c('bold', `\n  Plugin Maintenance — Scan: ${result.repoDir}\n`));
   if (result.artifacts.length === 0) {
     console.log(c('yellow', '  Keine APEX-Plugins/Template-Komponenten erkannt.\n'));
     return;
@@ -161,7 +161,7 @@ function cmdServe(portArg) {
   const prRegistry = createPrRegistry();
   const localGitPush = (repoDir) => async ({ branch }) => {
     const git = simpleGit({ baseDir: repoDir });
-    try { await git.addConfig('user.email', 'aisp@local'); await git.addConfig('user.name', 'AIS Pluginpflege'); } catch {}
+    try { await git.addConfig('user.email', 'aisp@local'); await git.addConfig('user.name', 'Plugin Maintenance'); } catch {}
     try { await git.checkoutLocalBranch(branch); } catch { try { await git.checkout(branch); } catch {} }
     try { await git.add('.'); await git.commit(`chore(aisp): update via ${branch}`); } catch {}
     return { branch };
@@ -416,7 +416,7 @@ function cmdServe(portArg) {
   });
 
   server.listen(port, () => {
-    console.log(c('bold', `\n  AIS Pluginpflege — Web-GUI: http://localhost:${port}`));
+    console.log(c('bold', `\n  Plugin Maintenance — Web-GUI: http://localhost:${port}`));
     console.log(c('dim', '  GUI: /   ·   Doku: /readme.html'));
     console.log(c('dim', '  API: /api/components (CRUD, /:id/notes, /:id/review, /:id/open) · /api/scan?path= · /api/dashboard'));
     console.log(c('dim', '  Beenden mit Strg+C.\n'));
@@ -472,7 +472,7 @@ function cmdTest(filter) {
     console.log(c('yellow', `\n  Keine ${filter ? `passende ` : ''}verwalteten Plugins/Template-Komponenten gefunden.\n`));
     return;
   }
-  console.log(c('bold', `\n  AIS Pluginpflege — Tests für ${comps.length} verwaltete Komponente(n)\n`));
+  console.log(c('bold', `\n  Plugin Maintenance — Tests für ${comps.length} verwaltete Komponente(n)\n`));
   const { results, green, red, skipped, ok } = runComponentTests(comps, { scan: scanRepo });
   for (const r of results) {
     if (r.verdict === 'skipped') {
@@ -493,7 +493,7 @@ function fail(msg) {
 }
 function help() {
   console.log(`
-  ${c('bold', 'AIS Pluginpflege')}
+  ${c('bold', 'Plugin Maintenance')}
 
   node start.js scan <repo-pfad>     Einmaliger read-only Pflege-Lauf (Analyse/SBOM/Risiko/Triage)
   node start.js test [name]           Tests ALLER verwalteten Plugins/Template-Komponenten ausführen

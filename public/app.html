@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>AIS Pluginpflege — Verwaltung</title>
+<title>Plugin Maintenance — Verwaltung</title>
 <style>
   :root{
     --bg:#0f1620;--panel:#16212e;--panel2:#1c2a3a;--ink:#e7eef6;--muted:#9fb0c3;--line:#26384b;
@@ -99,7 +99,7 @@
 </head>
 <body>
 <header>
-  <h1>🔧 AIS Pluginpflege</h1>
+  <h1>🔧 Plugin Maintenance</h1>
   <span class="muted small">Verwaltung der Plugins &amp; Template-Komponenten</span>
   <span class="sp"></span>
   <a class="small" href="/readme.html" target="_blank">Doku ↗</a>
@@ -590,7 +590,7 @@ async function runReview(){
 
 function downloadLog(){
   if(!current||!current.lastLog) return;
-  const t = `AIS Pluginpflege — Prüfprotokoll\nKomponente: ${current.name}\nZeit: ${current.lastLog.at}\n\n`
+  const t = `Plugin Maintenance — Prüfprotokoll\nKomponente: ${current.name}\nZeit: ${current.lastLog.at}\n\n`
     + (current.lastLog.entries||[]).map(e=>`[${e.agent}] ${e.file} → ${e.result}${e.severity?(' ('+e.severity+')'):''}`).join('\n') + '\n';
   const blob = new Blob([t], {type:'text/plain;charset=utf-8'});
   const url = URL.createObjectURL(blob);
