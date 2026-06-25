@@ -6,7 +6,7 @@ import { renderReport } from '../src/report/mail.js';
 describe('T-76 Review-Link in der Report-Mail', () => {
   it('Mail enthält PR/Review-Link, wenn reviewUrl gesetzt', () => {
     const { body } = renderReport({ updated: [{ artifact: 'P', change: 'jquery 1→3', testResult: 'ok', reviewUrl: 'https://github.com/o/r/compare/aisp%2Fx?expand=1' }], risks: [], failures: [] });
-    expect(body).toMatch(/Review\/PR öffnen: https:\/\/github\.com\/o\/r\/compare/);
+    expect(body).toMatch(/Open review\/PR: https:\/\/github\.com\/o\/r\/compare/);
   });
 });
 

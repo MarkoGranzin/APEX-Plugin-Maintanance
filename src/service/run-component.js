@@ -9,7 +9,7 @@
  */
 
 import { scanRepo } from './run-repo.js';
-import { libStatus } from './lib-check.js';
+import { libStatus, libWarningFrom } from './lib-check.js';
 import { buildSbom } from '../sbom/sbom.js';
 
 /** Verdichtet ein Scan-Ergebnis zu einer Kurz-Zusammenfassung. */
@@ -26,18 +26,22 @@ export function summarize(result) {
   const risks = result.risks?.length ?? 0;
   const libVuln = result.libWarning?.vulnerable ?? 0;
   const libUnmaint = result.libWarning?.unmaintained ?? 0;
+  const libOutdated = result.libWarning?.outdated ?? 0;
+  const libUnknown = result.libWarning?.unknown ?? 0;
 
   const parts = [];
-  if (outdated) parts.push(`${outdated} Update(s)`);
-  if (vuln || libVuln) parts.push(`${vuln + libVuln} Schwachstelle(n)`);
-  if (libUnmaint) parts.push(`${libUnmaint} nicht gepflegte Lib(s)`);
-  if (risks) parts.push(`${risks} Risiko(s)`);
-  if (lint) parts.push(`${lint} Lint-Fehler`);
-  if (clarify) parts.push(`${clarify} zu klären`);
-  const summary = parts.length ? parts.join(', ') : 'aktuell, keine Auffälligkeiten';
+  if (outdated || libOutdated) parts.push(`${outdated + libOutdated} outdated lib(s)`);
+  if (vuln || libVuln) parts.push(`${vuln + libVuln} vulnerabilit${vuln + libVuln === 1 ? 'y' : 'ies'}`);
+  if (libUnmaint) parts.push(`${libUnmaint} unmaintained lib(s)`);
+  if (libUnknown) parts.push(`${libUnknown} lib(s) with unknown version`);
+  if (risks) parts.push(`${risks} risk(s)`);
+  if (lint) parts.push(`${lint} lint error(s)`);
+  if (clarify) parts.push(`${clarify} to clarify`);
+  const summary = parts.length ? parts.join(', ') : 'up to date, no issues';
 
-  const status = lint || clarify ? 'zu klären' : outdated || vuln || risks || libVuln || libUnmaint ? 'handlungsbedarf' : 'ok';
-  return { summary, status, counts: { outdated, vuln: vuln + libVuln, risks, lint, clarify, libUnmaint } };
+  // Status-WERTE bleiben (GUI übersetzt via Label); veraltete/unbekannte Lib → handlungsbedarf (B-4)
+  const status = lint || clarify ? 'zu klären' : outdated || vuln || risks || libVuln || libUnmaint || libOutdated || libUnknown ? 'handlungsbedarf' : 'ok';
+  return { summary, status, counts: { outdated: outdated + libOutdated, vuln: vuln + libVuln, risks, lint, clarify, libUnmaint, libUnknown } };
 }
 
 /** Formatiert ein Protokoll als Text (für Logdatei/Download). */
@@ -54,16 +58,8 @@ export function runComponentOnce(store, component, opts = {}) {
   const scan = opts.scan ?? scanRepo;
   const now = opts.now ?? (() => new Date().toISOString());
   const result = scan(component.path);
-  const { summary, status, counts } = summarize(result);
-
-  const lastLog = { at: now(), entries: result.log ?? [] };
-  // Testplan-Baseline: einmal erzeugt „in Stein" — nur bei explizitem regenerateTestPlan neu
   const cur = store.get(component.id);
-  const regen = !cur?.testPlan || opts.regenerateTestPlan;
-  const testPlan = regen ? (result.testPlan ?? null) : cur.testPlan;
-  // Coverage + Coded-Tests folgen der Testplan-Baseline (gemeinsam „in Stein", bis neu erzeugt)
-  const coverage = regen ? (result.coverage ?? null) : (cur.coverage ?? null);
-  const codedTests = regen ? (result.codedTests ?? []) : (cur.codedTests ?? []);
+
   // Web-Anreicherung (latest/Alter/Quelle aus T-59) je name@version über den Scan hinweg erhalten
   const prevByKey = new Map((cur?.libs ?? []).map((l) => [`${l.name}@${l.version}`, l]));
   const mergedLibs = (result.libs ?? []).map((l) => {
@@ -74,8 +70,19 @@ export function runComponentOnce(store, component, opts = {}) {
     merged.status = libStatus(merged); // Status inkl. Web-Outdated konsistent halten (Re-Test darf ihn nicht zurücksetzen)
     return merged;
   });
+  // Status/Zusammenfassung aus den GEMERGTEN Libs (inkl. veraltet/unbekannt aus dem Web-Check)
+  const libWarning = libWarningFrom(mergedLibs);
+  const { summary, status, counts } = summarize({ ...result, libWarning });
+
+  const lastLog = { at: now(), entries: result.log ?? [] };
+  // Testplan-Baseline: einmal erzeugt „in Stein" — nur bei explizitem regenerateTestPlan neu
+  const regen = !cur?.testPlan || opts.regenerateTestPlan;
+  const testPlan = regen ? (result.testPlan ?? null) : cur.testPlan;
+  // Coverage + Coded-Tests folgen der Testplan-Baseline (gemeinsam „in Stein", bis neu erzeugt)
+  const coverage = regen ? (result.coverage ?? null) : (cur.coverage ?? null);
+  const codedTests = regen ? (result.codedTests ?? []) : (cur.codedTests ?? []);
   store.setLastChange(component.id, summary);
-  const patch = { status, lastLog, libs: mergedLibs, testPlan, coverage, codedTests, libWarning: result.libWarning ?? null };
+  const patch = { status, lastLog, libs: mergedLibs, testPlan, coverage, codedTests, libWarning };
   // Typ/Format automatisch erkannt → zurückschreiben (nur wenn erkannt, sonst alten Wert behalten)
   if (result.format) patch.format = result.format;
   if (result.type) patch.type = result.type;

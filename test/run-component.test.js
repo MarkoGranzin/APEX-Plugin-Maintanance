@@ -12,11 +12,16 @@ const mkStore = () => createComponentStore({ now: () => '2026-06-24T00:00:00Z', 
 describe('T-38 summarize & runComponentOnce', () => {
   it('Schwachstelle → Zusammenfassung + Status handlungsbedarf', () => {
     const s = summarize(scanVuln());
-    expect(s.summary).toMatch(/Schwachstelle/);
+    expect(s.summary).toMatch(/vulnerab/i);
     expect(s.status).toBe('handlungsbedarf');
   });
   it('sauber → keine Auffälligkeiten + ok', () => {
-    expect(summarize(scanClean())).toMatchObject({ summary: 'aktuell, keine Auffälligkeiten', status: 'ok' });
+    expect(summarize(scanClean())).toMatchObject({ summary: 'up to date, no issues', status: 'ok' });
+  });
+  it('unbekannte Lib-Version → handlungsbedarf + Summary nennt sie (B-4)', () => {
+    const s = summarize({ artifacts: [{ status: 'ok' }], outdated: [], risks: [], failures: [], libWarning: { vulnerable: 0, unmaintained: 0, unknown: 1 } });
+    expect(s.status).toBe('handlungsbedarf');
+    expect(s.summary).toMatch(/unknown version/i);
   });
   it('Lint-Fehler → zu klären', () => {
     expect(summarize(scanLint()).status).toBe('zu klären');
@@ -28,7 +33,7 @@ describe('T-38 summarize & runComponentOnce', () => {
     expect(r.status).toBe('handlungsbedarf');
     const after = store.get(c.id);
     expect(after.lastChange).toMatchObject({ at: '2026-06-24T00:00:00Z' });
-    expect(after.lastChange.summary).toMatch(/Schwachstelle/);
+    expect(after.lastChange.summary).toMatch(/vulnerab/i);
     expect(after.status).toBe('handlungsbedarf');
   });
 });
@@ -60,7 +65,7 @@ describe('T-39 API', () => {
     const id = store.add({ name: 'X', path: '/x' }).id;
     const res = apiHandler('POST', `/api/components/${id}/run`, null, { store, scan: scanVuln });
     expect(res.status).toBe(200);
-    expect(store.get(id).lastChange.summary).toMatch(/Schwachstelle/);
+    expect(store.get(id).lastChange.summary).toMatch(/vulnerab/i);
   });
   it('POST /api/run aktualisiert alle Komponenten', async () => {
     const store = mkStore();

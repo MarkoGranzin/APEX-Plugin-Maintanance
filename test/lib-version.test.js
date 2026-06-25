@@ -23,6 +23,13 @@ describe('T-74 Versionserkennung für vendored Libs', () => {
     const libs = detectVendoredLibraries(dir);
     expect(libs.find((l) => l.name === 'three').version).toBe('0.150.0');
   });
+  it('three-REVISION tief in der Datei (>4 KB) wird gefunden (T-80)', () => {
+    const deep = '/*min*/' + 'x'.repeat(6000) + ";THREE.REVISION='169';" + 'y'.repeat(100);
+    fs.writeFileSync(path.join(dir, 'lib', 'three.min.js'), deep);
+    const libs = detectVendoredLibraries(dir);
+    expect(libs.find((l) => l.name === 'three').version).toBe('0.169.0');
+  });
+
   it('ohne Versionsangabe bleibt unbekannt', () => {
     const libs = detectVendoredLibraries(dir);
     const m = libs.find((l) => l.name === 'mystery');

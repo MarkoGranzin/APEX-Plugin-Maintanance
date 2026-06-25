@@ -91,17 +91,17 @@ export function vulnerabilityFor(name, version, db = DEFAULT_VULN_DB) {
  * externe Signale). name (lowercase) → Grund.
  */
 export const DEFAULT_UNMAINTAINED = {
-  angular: 'AngularJS (1.x) — EOL seit Jan 2022, nicht mehr gepflegt',
-  angularjs: 'AngularJS (1.x) — EOL seit Jan 2022, nicht mehr gepflegt',
-  'jquery-migrate': 'jQuery Migrate — nur Übergangshilfe, langfristig entfernen',
-  bower: 'Bower — eingestellt, durch npm/yarn ersetzen',
-  moment: 'Moment.js — im Maintenance-Mode, Nachfolger empfohlen',
-  momentjs: 'Moment.js — im Maintenance-Mode, Nachfolger empfohlen',
-  mxgraph: 'mxGraph — 2020 eingestellt/archiviert (kein Support, keine Sicherheitsfixes), Migration zu maxGraph empfohlen',
-  mxclient: 'mxGraph (mxClient) — 2020 eingestellt/archiviert, Migration zu maxGraph empfohlen',
-  flash: 'Adobe Flash — End-of-Life seit 2020, nicht mehr nutzbar/sicher',
-  yui: 'YUI — von Yahoo eingestellt, nicht mehr gepflegt',
-  protractor: 'Protractor — eingestellt (E2E), zu Playwright/Cypress migrieren',
+  angular: 'AngularJS (1.x) — EOL since Jan 2022, no longer maintained',
+  angularjs: 'AngularJS (1.x) — EOL since Jan 2022, no longer maintained',
+  'jquery-migrate': 'jQuery Migrate — transitional only, remove long-term',
+  bower: 'Bower — discontinued, use npm/yarn instead',
+  moment: 'Moment.js — in maintenance mode, successor recommended',
+  momentjs: 'Moment.js — in maintenance mode, successor recommended',
+  mxgraph: 'mxGraph — discontinued/archived in 2020 (no support, no security fixes), migrate to maxGraph',
+  mxclient: 'mxGraph (mxClient) — discontinued/archived in 2020, migrate to maxGraph',
+  flash: 'Adobe Flash — end-of-life since 2020, unusable/insecure',
+  yui: 'YUI — discontinued by Yahoo, no longer maintained',
+  protractor: 'Protractor — discontinued (E2E), migrate to Playwright/Cypress',
 };
 
 /** Unmaintained-Grund für einen Lib-Namen oder null. */

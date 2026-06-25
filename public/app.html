@@ -249,6 +249,8 @@ function libWarnBadge(w){
   let h='';
   if(w.vulnerable) h+=` <span class="badge" style="color:#f85149;border-color:#f8514966" title="${w.vulnerable} vulnerable librar(y/ies)">⛔ ${w.vulnerable} vulnerable</span>`;
   if(w.unmaintained) h+=` <span class="badge" style="color:#d29922;border-color:#d2992266" title="${w.unmaintained} unmaintained librar(y/ies)">⚠ ${w.unmaintained} unmaintained</span>`;
+  if(w.outdated) h+=` <span class="badge" style="color:#d29922;border-color:#d2992266" title="${w.outdated} outdated librar(y/ies)">⬆ ${w.outdated} outdated</span>`;
+  if(w.unknown) h+=` <span class="badge" style="color:var(--muted)" title="${w.unknown} librar(y/ies) with unknown version">? ${w.unknown} unknown</span>`;
   return h;
 }
 

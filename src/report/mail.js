@@ -32,29 +32,29 @@ export function renderReport(run, opts = {}) {
   const failures = run.failures ?? [];
 
   const lines = [];
-  lines.push(`Plugin Maintenance — Lauf-Report`);
+  lines.push(`Plugin Maintenance — Run report`);
   lines.push('');
 
   if (risks.length) {
-    lines.push(`⚠️ Handlungsbedarf (${risks.length})`);
+    lines.push(`⚠️ Action needed (${risks.length})`);
     for (const r of risks) lines.push(`- ${r.label} ${r.name}: ${r.reasons.join('; ')}${r.gitLink ? ` (${r.gitLink})` : ''}`);
     lines.push('');
   }
 
-  lines.push(`✅ Aktualisierte Artefakte (${updated.length})`);
+  lines.push(`✅ Updated artifacts (${updated.length})`);
   for (const u of updated) {
     lines.push(`- ${u.artifact}: ${u.change} — ${u.testResult}${u.gitLink ? ` — ${u.gitLink}` : ''}`);
-    if (u.reviewUrl) lines.push(`    → Review/PR öffnen: ${u.reviewUrl}`);
+    if (u.reviewUrl) lines.push(`    → Open review/PR: ${u.reviewUrl}`);
   }
 
   if (failures.length) {
     lines.push('');
-    lines.push(`❌ Fehlschläge (${failures.length})`);
+    lines.push(`❌ Failures (${failures.length})`);
     for (const f of failures) lines.push(`- ${f.artifact}: ${f.reason}`);
   }
 
   const body = redact(lines.join('\n'), opts.secrets);
-  const subject = `[Plugin Maintenance] ${updated.length} aktualisiert, ${risks.length} Handlungsbedarf, ${failures.length} Fehlschläge`;
+  const subject = `[Plugin Maintenance] ${updated.length} updated, ${risks.length} action needed, ${failures.length} failures`;
   return { subject, body };
 }
 

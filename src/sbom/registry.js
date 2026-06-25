@@ -55,8 +55,14 @@ export async function fetchNpmInfo(name, deps = {}) {
   const res = await fetchFn(`https://registry.npmjs.org/${encodeURIComponent(pkg)}`);
   if (!res.ok) throw new Error(`npm-Registry ${res.status}`);
   const doc = await res.json();
-  const latest = doc?.['dist-tags']?.latest ?? null;
   const time = doc?.time ?? {};
+  // „letzte stabil released Version": dist-tags.latest ist i.d.R. stabil; falls es doch ein
+  // Pre-Release ist (enthält „-", z.B. 2.0.0-beta), die höchste stabile Version aus time wählen.
+  let latest = doc?.['dist-tags']?.latest ?? null;
+  if (!latest || /-/.test(latest)) {
+    const stable = Object.keys(time).filter((v) => v !== 'created' && v !== 'modified' && !/-/.test(v));
+    if (stable.length) latest = stable.sort((a, b) => Date.parse(time[a]) - Date.parse(time[b])).pop();
+  }
   const npm = `https://www.npmjs.com/package/${pkg}`;
   const links = { source: normalizeRepoUrl(doc?.repository) ?? null, homepage: doc?.homepage ?? null, npm };
   return { name: pkg, latest, releasedAt: latest ? time[latest] ?? null : null, time, links };

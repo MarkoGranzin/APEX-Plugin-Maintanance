@@ -16,6 +16,19 @@ import { fetchNpmInfo } from '../sbom/registry.js';
 
 const DAY = 86400000;
 
+/** Zählt die Lib-Probleme einer Komponente (für libWarning/Status). null, wenn alles sauber. */
+export function libWarningFrom(libs) {
+  const isVuln = (l) => l.vulnerable || l.status === 'verwundbar';
+  const isUnmaint = (l) => l.unmaintained || l.status === 'nicht gepflegt';
+  const isOutdated = (l) => l.outdated || l.status === 'veraltet';
+  const isUnknown = (l) => !l.version || l.version === 'unbekannt';
+  const vulnerable = (libs ?? []).filter(isVuln).length;
+  const unmaintained = (libs ?? []).filter((l) => isUnmaint(l) && !isVuln(l)).length;
+  const outdated = (libs ?? []).filter((l) => isOutdated(l) && !isVuln(l) && !isUnmaint(l)).length;
+  const unknown = (libs ?? []).filter((l) => isUnknown(l) && !isVuln(l) && !isUnmaint(l) && !isOutdated(l)).length;
+  return vulnerable || unmaintained || outdated || unknown ? { vulnerable, unmaintained, outdated, unknown } : null;
+}
+
 /** Einheitliche Status-Ableitung: verwundbar > nicht gepflegt > veraltet > unbekannt > aktuell. */
 export function libStatus(e) {
   if (e.vulnerable || e.status === 'verwundbar') return 'verwundbar';

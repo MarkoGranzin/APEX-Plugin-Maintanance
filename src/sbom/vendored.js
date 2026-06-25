@@ -35,15 +35,19 @@ const KNOWN = [
 const OWN = /(^|\/)(script|prescript|app|widget|plugin|main|index)(\.min)?\.(js|css)$/i;
 const APEX_CORE = /(^|\/)font-apex/i;
 
-const VERSION_RES = [
+// Header-Muster (nur Datei-Anfang ~3 KB) — Lizenz-/Banner-Konventionen. KEIN generisches „vX.Y.Z"
+// quer durchs Minify-Bundle (sonst falsche Treffer wie three@2.2.2 aus einem zufälligen Token).
+const HEADER_RES = [
   /jquery[^\n]{0,40}?v(\d+\.\d+\.\d+)/i,
-  /mxClient\.VERSION\s*=\s*['"]([\d.]+)['"]/,
   /font\s*awesome[^\n]{0,40}?(\d+\.\d+(?:\.\d+)?)/i, // „Font Awesome 4.7.0 by @davegandy"
   /@version\s+v?(\d+\.\d+(?:\.\d+)?)/i,
-  /\bVERSION\s*[:=]\s*['"]v?(\d+\.\d+(?:\.\d+)?)['"]/i,
-  /\bversion['"]?\s*[:=]\s*['"]v?(\d+\.\d+(?:\.\d+)?)['"]/i,
-  /\bv(\d+\.\d+\.\d+)\b/,
 ];
+// Lib-spezifische Marker, die irgendwo in der (ggf. großen) Datei stehen dürfen.
+const ANCHOR = {
+  three: (t) => { const m = t.match(/REVISION\s*[=:]\s*['"]?(\d{2,3})\b/); return m ? `0.${m[1]}.0` : null; },
+  mxgraph: (t) => { const m = t.match(/mxClient\.VERSION\s*=\s*['"]([\d.]+)['"]/); return m ? m[1] : null; },
+  bootstrap: (t) => { const m = t.match(/bootstrap[^\n]{0,40}?v(\d+\.\d+\.\d+)/i); return m ? m[1] : null; },
+};
 
 const versionFromName = (f) => (f.match(/[-.@](\d+\.\d+(?:\.\d+)?)(?:[.-]min)?\.(?:js|css)$/) || [])[1] ?? null;
 
@@ -66,7 +70,12 @@ const isCandidate = (f) => /(^|\/)(lib|libs|vendor|vendors|third[-_]?party|dist)
 export function detectVendoredLibraries(dir, opts = {}) {
   if (!dir || (!opts.files && !fs.existsSync(dir))) return [];
   const files = (opts.files ?? listFiles(dir)).filter((f) => /\.(js|css)$/i.test(f));
-  const readFile = opts.readFile ?? ((rel) => { try { return fs.readFileSync(path.join(dir, rel), 'utf8').slice(0, 4000); } catch { return ''; } });
+  // Version steht bei minifizierten Libs (three REVISION, mxClient VERSION) oft NACH den ersten KB →
+  // ganze Datei durchsuchen, aber mit Größenlimit (kein Speicherproblem bei riesigen Bundles). (T-80)
+  const MAX_READ = opts.maxRead ?? 8_000_000;
+  const readFile = opts.readFile ?? ((rel) => {
+    try { const p = path.join(dir, rel); if (fs.statSync(p).size > MAX_READ) return fs.readFileSync(p, 'utf8').slice(0, MAX_READ); return fs.readFileSync(p, 'utf8'); } catch { return ''; }
+  });
 
   const byName = new Map();
   for (const f of files) {
@@ -76,10 +85,11 @@ export function detectVendoredLibraries(dir, opts = {}) {
     if (!name) continue;
     let version = versionFromName(f);
     if (!version) {
-      const head = readFile(f);
-      for (const re of VERSION_RES) { const m = head.match(re); if (m) { version = m[1]; break; } }
-      // three.js führt nur eine REVISION (z.B. 150) → npm-Version 0.<rev>.0
-      if (!version && name === 'three') { const m = head.match(/REVISION\s*[=:]\s*['"]?(\d{2,3})\b/i); if (m) version = `0.${m[1]}.0`; }
+      const content = readFile(f);
+      const head = content.slice(0, 3000);
+      for (const re of HEADER_RES) { const m = head.match(re); if (m) { version = m[1]; break; } }
+      // sonst: lib-spezifischer Marker irgendwo in der Datei (kein generisches vX.Y.Z → keine Falschtreffer)
+      if (!version && ANCHOR[name]) version = ANCHOR[name](content);
     }
     const cand = { name, version: version ?? 'unbekannt', detectedBy: 'vendored', evidence: f };
     const prev = byName.get(name);

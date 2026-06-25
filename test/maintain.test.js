@@ -53,7 +53,9 @@ describe('T-66 Vollautomatische Pflege = manuelle Pflege', () => {
     const store = setup();
     let uploaded = null;
     const upload = async (c) => { uploaded = c.name; return { ok: true, branch: 'aisp/x', pushed: true, prUrl: 'https://github.com/o/r/compare/aisp%2Fx?expand=1' }; };
-    const r = await maintainComponent(store, store.get('c1'), { ...baseDeps({}), autoUpload: true, upload });
+    // grün = keine problematische Lib (sonst korrekt handlungsbedarf)
+    const scanGreen = () => ({ ...scanStub(), libs: [] });
+    const r = await maintainComponent(store, store.get('c1'), { ...baseDeps({}), scan: scanGreen, autoUpload: true, upload });
     expect(r.status).toBe('green');
     expect(uploaded).toBe('P');
     expect(store.get('c1').reviewUrl).toMatch(/compare/);

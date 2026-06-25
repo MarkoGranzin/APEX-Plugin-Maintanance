@@ -210,7 +210,9 @@ export function scanRepo(repoDir, opts = {}) {
   }
   const libVulnCount = libsArr.filter((l) => l.vulnerable).length;
   const libUnmaintCount = libsArr.filter((l) => l.unmaintained && !l.vulnerable).length;
-  const libWarning = libVulnCount || libUnmaintCount ? { vulnerable: libVulnCount, unmaintained: libUnmaintCount } : null;
+  // Unbekannte Version = nicht bewertbar → Unsicherheit (darf nicht still „OK" sein) (B-4)
+  const libUnknownCount = libsArr.filter((l) => !l.vulnerable && !l.unmaintained && (!l.version || l.version === 'unbekannt')).length;
+  const libWarning = libVulnCount || libUnmaintCount || libUnknownCount ? { vulnerable: libVulnCount, unmaintained: libUnmaintCount, unknown: libUnknownCount } : null;
 
   const active = filterActiveRisks(allRisks, ack);
   const report = renderReport(
