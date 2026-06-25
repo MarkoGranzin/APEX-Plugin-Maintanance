@@ -15,3 +15,6 @@ workspace/
 *.log
 .chk.js
 qa.log
+
+# Playwright run artifacts
+test-results/
