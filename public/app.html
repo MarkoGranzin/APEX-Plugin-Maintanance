@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Plugin Maintenance — Verwaltung</title>
+<title>Plugin Maintenance</title>
 <style>
   :root{
     --bg:#0f1620;--panel:#16212e;--panel2:#1c2a3a;--ink:#e7eef6;--muted:#9fb0c3;--line:#26384b;
@@ -100,10 +100,10 @@
 <body>
 <header>
   <h1>🔧 Plugin Maintenance</h1>
-  <span class="muted small">Verwaltung der Plugins &amp; Template-Komponenten</span>
+  <span class="muted small">Manage Oracle APEX plugins &amp; template components</span>
   <span class="sp"></span>
-  <a class="small" href="/readme.html" target="_blank">Doku ↗</a>
-  <button class="ghost" onclick="openSettings()">⚙ Einstellungen</button>
+  <a class="small" href="/readme.html" target="_blank">Docs ↗</a>
+  <button class="ghost" onclick="openSettings()">⚙ Settings</button>
   <button class="primary" onclick="openEdit()">+ Plugin</button>
 </header>
 
@@ -111,28 +111,28 @@
 <div class="wrap">
   <div class="inline" style="margin-bottom:14px;gap:8px">
     <button id="navPlugins" class="primary" onclick="switchView('plugins')">Plugins</button>
-    <button id="navLibs" class="ghost" onclick="switchView('libs')">Bibliotheken</button>
+    <button id="navLibs" class="ghost" onclick="switchView('libs')">Libraries</button>
     <span class="muted small" id="wdLabel" style="margin-left:8px"></span>
     <span class="sp" style="flex:1"></span>
-    <button class="primary" onclick="runAll()">▶ Alle prüfen</button>
+    <button class="primary" onclick="runAll()">▶ Check all</button>
   </div>
 
   <div id="pluginsView">
     <table id="tbl">
       <thead><tr>
-        <th>Name</th><th>Repo</th><th>Typ</th><th>Format</th><th>Status</th><th>Bibliotheken</th><th>Letzte Änderung</th><th>Zusammenfassung</th><th></th>
+        <th>Name</th><th>Repo</th><th>Type</th><th>Format</th><th>Status</th><th>Libraries</th><th>Last change</th><th>Summary</th><th></th>
       </tr></thead>
       <tbody id="rows"></tbody>
     </table>
-    <div id="empty" class="empty" style="display:none">Noch keine Plugins — lege mit „+ Plugin" das erste an.</div>
+    <div id="empty" class="empty" style="display:none">No plugins yet — add the first one with “+ Plugin”.</div>
   </div>
 
   <div id="libsView" style="display:none">
     <table>
-      <thead><tr><th>Bibliothek</th><th>Version</th><th>Status</th><th>Verwendet von</th></tr></thead>
+      <thead><tr><th>Library</th><th>Version</th><th>Status</th><th>Used by</th></tr></thead>
       <tbody id="libRows"></tbody>
     </table>
-    <div id="libsEmpty" class="empty" style="display:none">Keine Bibliotheken erkannt — Repos zuordnen und „Alle prüfen".</div>
+    <div id="libsEmpty" class="empty" style="display:none">No libraries detected — assign repos and run “Check all”.</div>
   </div>
 </div>
 
@@ -147,80 +147,80 @@
 </div>
 
 <!-- Add/Edit-Modal -->
-<div class="modal-bg" id="modalBg">
+<div class="modal-bg" id="modalBg" onclick="if(event.target===this)this.classList.remove('open')">
   <div class="modal">
-    <h2 id="mTitle">Komponente</h2>
+    <h2 id="mTitle">Component</h2>
     <input type="hidden" id="mId">
-    <label>Name</label><input id="mName" placeholder="z.B. ColorPicker">
-    <label>Verzeichnis / Repo-Pfad <span class="muted small">(optional — sonst später per „🔗 Repo zuordnen")</span></label><input id="mPath" placeholder="D:\repos\plugin">
-    <div class="muted small" style="margin-top:10px">Typ und Format werden beim Prüfen automatisch erkannt. Es wird immer alles getestet.</div>
+    <label>Name</label><input id="mName" placeholder="e.g. ColorPicker">
+    <label>Directory / repo path <span class="muted small">(optional — otherwise later via “🔗 Assign repo”)</span></label><input id="mPath" placeholder="D:\repos\plugin">
+    <div class="muted small" style="margin-top:10px">Type and format are detected automatically on check. Everything is always tested.</div>
     <div class="foot">
-      <button class="ghost" onclick="closeModal()">Abbrechen</button>
-      <button class="primary" onclick="saveComponent()">Speichern</button>
+      <button class="ghost" onclick="closeModal()">Cancel</button>
+      <button class="primary" onclick="saveComponent()">Save</button>
     </div>
   </div>
 </div>
 
 <!-- Repo-zuordnen-Modal (F-21) -->
-<div class="modal-bg" id="assignBg">
+<div class="modal-bg" id="assignBg" onclick="if(event.target===this)this.classList.remove('open')">
   <div class="modal">
-    <h2>Repo zuordnen</h2>
-    <p class="muted small" style="margin-top:0">Das Repo wird in ein eigenes Verzeichnis geklont und Typ/Format automatisch erkannt.</p>
-    <label>URL oder lokaler Pfad</label><input id="aSource" placeholder="https://github.com/org/mein-plugin.git  oder  D:\\repos\\plugin">
-    <label>Sichtbarkeit</label>
-    <select id="aVisibility" onchange="toggleCreds()"><option value="öffentlich">öffentlich</option><option value="intern">intern / privat</option></select>
+    <h2>Assign repo</h2>
+    <p class="muted small" style="margin-top:0">The repo is cloned into its own directory; type/format are detected automatically.</p>
+    <label>URL or local path</label><input id="aSource" placeholder="https://github.com/org/my-plugin.git  or  D:\\repos\\plugin">
+    <label>Visibility</label>
+    <select id="aVisibility" onchange="toggleCreds()"><option value="öffentlich">public</option><option value="intern">internal / private</option></select>
     <div id="credBox" style="display:none">
-      <label>Personal Access Token (für https, optional)</label><input id="aToken" type="password" placeholder="z.B. ghp_…">
-      <label>ODER SSH-Key-Pfad (für git@…)</label><input id="aSshKey" placeholder="z.B. C:\\Users\\du\\.ssh\\id_ed25519">
-      <p class="muted small">Zugangsdaten werden verschlüsselt gespeichert; die Komponente hält nur eine Referenz.</p>
+      <label>Personal Access Token (for https, optional)</label><input id="aToken" type="password" placeholder="e.g. ghp_…">
+      <label>OR SSH key path (for git@…)</label><input id="aSshKey" placeholder="e.g. C:\\Users\\you\\.ssh\\id_ed25519">
+      <p class="muted small">Credentials are stored encrypted; the component keeps only a reference.</p>
     </div>
     <div class="foot">
-      <button class="ghost" onclick="closeAssign()">Abbrechen</button>
-      <button class="primary" id="aBtn" onclick="saveAssign()">Zuordnen &amp; klonen</button>
+      <button class="ghost" onclick="closeAssign()">Cancel</button>
+      <button class="primary" id="aBtn" onclick="saveAssign()">Assign &amp; clone</button>
     </div>
   </div>
 </div>
 
 <!-- Einstellungen-Modal -->
-<div class="modal-bg" id="settingsBg">
+<div class="modal-bg" id="settingsBg" onclick="if(event.target===this)this.classList.remove('open')">
   <div class="modal" style="max-width:560px">
-    <h2>Einstellungen</h2>
-    <label>Arbeitsverzeichnis (jedes Repo erhält darin ein eigenes Unterverzeichnis)</label>
+    <h2>Settings</h2>
+    <label>Working directory (each repo gets its own subdirectory here)</label>
     <input id="workDir" placeholder="./workspace">
 
-    <h3 style="margin:18px 0 4px;font-size:1rem">KI-Backend (für Reviewen, Fixen, Testgenerierung)</h3>
+    <h3 style="margin:18px 0 4px;font-size:1rem">AI backend (for reviews, fixes, test generation)</h3>
     <label>Backend</label>
     <select id="aiKind" onchange="toggleAi()">
-      <option value="stub">— keins (Stub, nur Tests) —</option>
-      <option value="cli">Lokale CLI</option>
-      <option value="provider">Provider + API-Key</option>
+      <option value="stub">— none (stub, tests only) —</option>
+      <option value="cli">Local CLI</option>
+      <option value="provider">Provider + API key</option>
     </select>
-    <div id="aiCli" style="display:none"><label>CLI-Befehl</label><input id="aiCommand" placeholder="z.B. claude"></div>
+    <div id="aiCli" style="display:none"><label>CLI command</label><input id="aiCommand" placeholder="e.g. claude"></div>
     <div id="aiProvider" style="display:none">
-      <div class="row2"><div><label>Endpoint</label><input id="aiEndpoint" placeholder="https://api.anthropic.com/v1/messages"></div><div><label>Modell</label><input id="aiModel" placeholder="claude-opus-4-8"></div></div>
-      <label>API-Key <span id="aiKeyState" class="muted small"></span></label><input id="aiKey" type="password" placeholder="wird verschlüsselt gespeichert">
+      <div class="row2"><div><label>Endpoint</label><input id="aiEndpoint" placeholder="https://api.anthropic.com/v1/messages"></div><div><label>Model</label><input id="aiModel" placeholder="claude-opus-4-8"></div></div>
+      <label>API key <span id="aiKeyState" class="muted small"></span></label><input id="aiKey" type="password" placeholder="stored encrypted">
     </div>
-    <div class="inline" style="margin-top:8px"><button onclick="testAi()">🔌 Verbindung testen</button><span id="aiTestOut" class="muted small"></span></div>
+    <div class="inline" style="margin-top:8px"><button onclick="testAi()">🔌 Test connection</button><span id="aiTestOut" class="muted small"></span></div>
 
-    <h3 style="margin:18px 0 4px;font-size:1rem">Upload &amp; Sicherheit</h3>
-    <div class="chk"><input type="checkbox" id="allowPush"><span><b>Push zum Remote erlauben</b> — ohne Haken bleibt es bei lokalem Branch+Commit (kein Upload, auch nicht im Job)</span></div>
+    <h3 style="margin:18px 0 4px;font-size:1rem">Upload &amp; security</h3>
+    <div class="chk"><input type="checkbox" id="allowPush"><span><b>Allow push to remote</b> — unchecked keeps it at local branch+commit (no upload, not even in the job)</span></div>
 
-    <h3 style="margin:18px 0 4px;font-size:1rem">Automatischer Check (Zeitplan)</h3>
-    <div class="chk"><input type="checkbox" id="schedEnabled"><span>automatischen Check aktivieren</span></div>
-    <label>Cron-Ausdruck (Min Std Tag Monat Wochentag) <span class="muted small" id="schedHint"></span></label>
+    <h3 style="margin:18px 0 4px;font-size:1rem">Automatic check (schedule)</h3>
+    <div class="chk"><input type="checkbox" id="schedEnabled"><span>enable automatic check</span></div>
+    <label>Cron expression (min hour day month weekday) <span class="muted small" id="schedHint"></span></label>
     <input id="schedule" placeholder="0 3 * * 1" oninput="updateSchedHint()">
 
-    <h3 style="margin:18px 0 4px;font-size:1rem">E-Mail-Report (SMTP)</h3>
-    <div class="row2"><div><label>SMTP-Host</label><input id="smtpHost" placeholder="smtp.firma.de"></div><div><label>Port</label><input id="smtpPort" placeholder="587"></div></div>
+    <h3 style="margin:18px 0 4px;font-size:1rem">Email report (SMTP)</h3>
+    <div class="row2"><div><label>SMTP host</label><input id="smtpHost" placeholder="smtp.company.com"></div><div><label>Port</label><input id="smtpPort" placeholder="587"></div></div>
     <div class="chk"><input type="checkbox" id="smtpSecure"><span>TLS (secure)</span></div>
-    <div class="row2"><div><label>Benutzer</label><input id="smtpUser" placeholder="user@firma.de"></div><div><label>Absender (From)</label><input id="smtpFrom" placeholder="aisp@firma.de"></div></div>
-    <label>Passwort <span id="smtpPassState" class="muted small"></span></label><input id="smtpPass" type="password" placeholder="wird verschlüsselt gespeichert">
-    <label>Empfänger (Komma-getrennt)</label><input id="recipients" placeholder="a@firma.de, b@firma.de">
-    <div class="inline" style="margin-top:8px"><button onclick="sendReport()">✉ Report jetzt senden</button><span id="reportOut" class="muted small"></span></div>
+    <div class="row2"><div><label>User</label><input id="smtpUser" placeholder="user@company.com"></div><div><label>Sender (From)</label><input id="smtpFrom" placeholder="maintenance@company.com"></div></div>
+    <label>Password <span id="smtpPassState" class="muted small"></span></label><input id="smtpPass" type="password" placeholder="stored encrypted">
+    <label>Recipients (comma-separated)</label><input id="recipients" placeholder="a@company.com, b@company.com">
+    <div class="inline" style="margin-top:8px"><button onclick="sendReport()">✉ Send report now</button><span id="reportOut" class="muted small"></span></div>
 
     <div class="foot">
-      <button class="ghost" onclick="closeSettings()">Schließen</button>
-      <button class="primary" onclick="saveSettingsAll()">Speichern</button>
+      <button class="ghost" onclick="closeSettings()">Close</button>
+      <button class="primary" onclick="saveSettingsAll()">Save</button>
     </div>
   </div>
 </div>
@@ -236,12 +236,19 @@ const api = async (m, url, body) => {
   if(!r.ok) throw new Error((d&&d.error)||r.statusText); return d;
 };
 const toast = (msg) => { const t=$('toast'); t.textContent=msg; t.classList.add('show'); setTimeout(()=>t.classList.remove('show'),2200); };
-const fmtDate = (s) => s ? new Date(s).toLocaleString('de-DE') : '—';
+const fmtDate = (s) => s ? new Date(s).toLocaleString('en-GB') : '—';
+// Anzeige-Labels für Backend-Werte (die Werte selbst/Vergleiche bleiben unverändert)
+const STATUS_LABEL={ok:'OK',handlungsbedarf:'action needed','zu klären':'needs clarification',neu:'new',getestet:'tested',erkannt:'detected','review-blockiert':'review blocked'};
+const LIBSTATUS_LABEL={verwundbar:'vulnerable','nicht gepflegt':'unmaintained',veraltet:'outdated',aktuell:'current',unbekannt:'unknown'};
+const VIS_LABEL={'öffentlich':'public',intern:'internal'};
+const statusLabel=(s)=>STATUS_LABEL[s]||s||'—';
+const libStatusLabel=(s)=>LIBSTATUS_LABEL[s]||s||'';
+const visLabel=(s)=>VIS_LABEL[s]||s||'public';
 function libWarnBadge(w){
   if(!w) return '';
   let h='';
-  if(w.vulnerable) h+=` <span class="badge" style="color:#f85149;border-color:#f8514966" title="${w.vulnerable} verwundbare Bibliothek(en)">⛔ ${w.vulnerable} verwundbar</span>`;
-  if(w.unmaintained) h+=` <span class="badge" style="color:#d29922;border-color:#d2992266" title="${w.unmaintained} nicht gepflegte Bibliothek(en)">⚠ ${w.unmaintained} nicht gepflegt</span>`;
+  if(w.vulnerable) h+=` <span class="badge" style="color:#f85149;border-color:#f8514966" title="${w.vulnerable} vulnerable librar(y/ies)">⛔ ${w.vulnerable} vulnerable</span>`;
+  if(w.unmaintained) h+=` <span class="badge" style="color:#d29922;border-color:#d2992266" title="${w.unmaintained} unmaintained librar(y/ies)">⚠ ${w.unmaintained} unmaintained</span>`;
   return h;
 }
 
@@ -261,13 +268,13 @@ async function load(){
       <td class="small muted">${esc(c.repo||'—')}</td>
       <td>${typeBadge}</td>
       <td><span class="badge ${badgeCls}">${esc(c.formatBadge)}</span></td>
-      <td><span class="dot ${dot}"></span>${esc(c.status)}</td>
-      <td class="small muted">${(c.libs||[]).slice(0,4).map(l=>`<span class="badge ${l.status==='verwundbar'?'':''}" style="${l.status==='verwundbar'?'color:var(--red)':l.status==='nicht gepflegt'?'color:var(--yellow)':''}">${esc(l.name)}@${esc(l.version)}</span>`).join(' ')||'—'}${(c.libs||[]).length>4?` <span class="muted">+${c.libs.length-4}</span>`:''}</td>
+      <td><span class="dot ${dot}"></span>${esc(statusLabel(c.status))}</td>
+      <td class="small muted">${(c.libs||[]).slice(0,4).map(l=>`<span class="badge" style="${l.status==='verwundbar'?'color:var(--red)':l.status==='nicht gepflegt'?'color:var(--yellow)':''}">${esc(l.name)}@${esc(l.version)}</span>`).join(' ')||'—'}${(c.libs||[]).length>4?` <span class="muted">+${c.libs.length-4}</span>`:''}</td>
       <td class="small muted">${fmtDate(c.lastChange&&c.lastChange.at)}</td>
       <td class="small">${esc(c.changeSummary)}</td>
       <td><div class="actions">
-        <button class="ghost small" data-act="edit">Bearbeiten</button>
-        <button class="ghost small danger" data-act="del">Löschen</button>
+        <button class="ghost small" data-act="edit">Edit</button>
+        <button class="ghost small danger" data-act="del">Delete</button>
       </div></td>`;
     tr.onclick = (e)=>{ const a=e.target.getAttribute('data-act'); if(a==='edit'){e.stopPropagation();openEdit(c);} else if(a==='del'){e.stopPropagation();delComponent(c);} else openDetail(c.id); };
     rows.appendChild(tr);
@@ -281,96 +288,96 @@ async function openDetail(id){
   const libDot = c.libWarning ? ` <span style="color:${c.libWarning.vulnerable?'#f85149':'#d29922'}">●</span>` : '';
   $('dBody').innerHTML = `
     <div class="hero">
-      ${!c.source ? `<div class="finding medium" style="margin:0 0 10px">Kein Repo zugeordnet — über „🔗 Repo zuordnen" anbinden, damit Prüfen/Tests/Bibliotheken funktionieren.</div>` : ''}
+      ${!c.source ? `<div class="finding medium" style="margin:0 0 10px">No repo assigned — connect via “🔗 Assign repo” so check/tests/libraries work.</div>` : ''}
       <div class="inline" style="gap:6px">
         ${statusPill(c)}${libWarnBadge(c.libWarning)}
         <span class="badge">${c.type==='template_component'?'Template Component':'Plugin'}</span>
         <span class="badge ${c.formatBadge==='APEX-SQL-Export'?'export':''}">${esc(c.formatBadge)}</span>
       </div>
       <div class="inline" style="margin-top:10px;gap:6px">
-        <button class="primary" onclick="runMaintain()">🧰 Vollständige Pflege jetzt</button>
-        <button onclick="runOne()">▶ Prüfen</button>
-        <details class="moreact"><summary>⋯ Weitere Aktionen</summary>
+        <button class="primary" onclick="runMaintain()">🧰 Full maintenance now</button>
+        <button onclick="runOne()">▶ Check</button>
+        <details class="moreact"><summary>⋯ More actions</summary>
           <div class="inline" style="margin-top:8px;gap:6px">
-            <button onclick="openAssign()">🔗 Repo zuordnen</button>
-            <button onclick="openGit()">🌐 Git öffnen</button>
-            <button onclick="openDir()">📂 Lokal öffnen</button>
-            <button onclick="runReview()">🔍 Manuelles Review</button>
-            <button onclick="runAutoReview()">🤖 Autonom reviewen &amp; fixen</button>
-            <button onclick="runAutoFix()">🛠 Alles automatisch beheben</button>
-            <button onclick="runUpdate()">⬆ Auto-Update</button>
-            <button onclick="runUpload()">📤 Upload (Branch + PR)</button>
+            <button onclick="openAssign()">🔗 Assign repo</button>
+            <button onclick="openGit()">🌐 Open Git</button>
+            <button onclick="openDir()">📂 Open locally</button>
+            <button onclick="runReview()">🔍 Manual review</button>
+            <button onclick="runAutoReview()">🤖 Autonomous review &amp; fix</button>
+            <button onclick="runAutoFix()">🛠 Fix everything automatically</button>
+            <button onclick="runUpdate()">⬆ Auto-update</button>
+            <button onclick="runUpload()">📤 Upload (branch + PR)</button>
           </div>
         </details>
       </div>
-      ${c.reviewUrl?`<div class="finding low" style="margin-top:8px">📤 Offener Review: <a href="${esc(c.reviewUrl)}" target="_blank" rel="noopener" style="color:var(--accent)">Branch ${esc(c.reviewBranch||'')} → PR öffnen ↗</a></div>`:''}
+      ${c.reviewUrl?`<div class="finding low" style="margin-top:8px">📤 Open review: <a href="${esc(c.reviewUrl)}" target="_blank" rel="noopener" style="color:var(--accent)">branch ${esc(c.reviewBranch||'')} → open PR ↗</a></div>`:''}
       <div id="reviewOut" style="margin-top:8px"></div>
     </div>
 
     <div class="tabs">
-      <button class="tab active" data-tab="overview" onclick="showTab('overview')">Übersicht</button>
-      <button class="tab" data-tab="libs" onclick="showTab('libs')">Bibliotheken${libDot}</button>
+      <button class="tab active" data-tab="overview" onclick="showTab('overview')">Overview</button>
+      <button class="tab" data-tab="libs" onclick="showTab('libs')">Libraries${libDot}</button>
       <button class="tab" data-tab="tests" onclick="showTab('tests')">Tests</button>
-      <button class="tab" data-tab="proto" onclick="showTab('proto')">Protokoll</button>
-      <button class="tab" data-tab="notes" onclick="showTab('notes')">Notizen</button>
+      <button class="tab" data-tab="proto" onclick="showTab('proto')">Protocol</button>
+      <button class="tab" data-tab="notes" onclick="showTab('notes')">Notes</button>
     </div>
 
     <div class="tabpanel" data-panel="overview">
       <div class="kv">
-        <span class="muted">Typ</span><span>${c.type==='template_component'?'Template Component':'Plugin'}</span>
+        <span class="muted">Type</span><span>${c.type==='template_component'?'Template Component':'Plugin'}</span>
         <span class="muted">Format</span><span>${esc(c.formatBadge)}</span>
-        <span class="muted">Status</span><span>${esc(c.status)}</span>
-        <span class="muted">Quelle</span><span class="small" style="font-family:var(--mono)">${esc(c.source)||'— (kein Repo zugeordnet)'}</span>
-        <span class="muted">Sichtbarkeit</span><span>${esc(c.visibility||'öffentlich')}${c.secretRef?' 🔒':''}</span>
-        <span class="muted">Pfad</span><span class="small" style="font-family:var(--mono)">${esc(c.path)||'—'}</span>
-        <span class="muted">Letzte Änderung</span><span>${fmtDate(c.lastChange&&c.lastChange.at)} — ${esc(c.lastChange&&c.lastChange.summary||'—')}</span>
+        <span class="muted">Status</span><span>${esc(statusLabel(c.status))}</span>
+        <span class="muted">Source</span><span class="small" style="font-family:var(--mono)">${esc(c.source)||'— (no repo assigned)'}</span>
+        <span class="muted">Visibility</span><span>${esc(visLabel(c.visibility||'öffentlich'))}${c.secretRef?' 🔒':''}</span>
+        <span class="muted">Path</span><span class="small" style="font-family:var(--mono)">${esc(c.path)||'—'}</span>
+        <span class="muted">Last change</span><span>${fmtDate(c.lastChange&&c.lastChange.at)} — ${esc(c.lastChange&&c.lastChange.summary||'—')}</span>
       </div>
     </div>
 
     <div class="tabpanel" data-panel="libs" hidden>
-      <div class="inline" style="justify-content:space-between"><h3 style="margin:0">SBOM &amp; Bibliotheken ${c.libsCheckedAt?`<span class="muted small">· Web-Check ${fmtDate(c.libsCheckedAt)}</span>`:''}</h3></div>
+      <div class="inline" style="justify-content:space-between"><h3 style="margin:0">SBOM &amp; libraries ${c.libsCheckedAt?`<span class="muted small">· web check ${fmtDate(c.libsCheckedAt)}</span>`:''}</h3></div>
       ${sbomViz(c.libs)}
-      <div class="inline" style="margin-bottom:6px"><button onclick="checkLibs()">🌐 Aus dem Web prüfen (Version &amp; Alter)</button>${(c.libs&&c.libs.length)?'<button onclick="downloadSbom()">⬇ SBOM (CycloneDX)</button>':''}</div>
+      <div class="inline" style="margin-bottom:6px"><button onclick="checkLibs()">🌐 Check online (version &amp; age)</button>${(c.libs&&c.libs.length)?'<button onclick="downloadSbom()">⬇ SBOM (CycloneDX)</button>':''}</div>
       ${(c.libs && c.libs.length)
         ? `<div class="logbox">${c.libs.map(l=>libLine(l)).join('')}</div>`
-        : '<div class="muted small">Noch nicht erkannt — „▶ Prüfen" oder manuell hinzufügen.</div>'}
+        : '<div class="muted small">Not detected yet — run “▶ Check” or add manually.</div>'}
       <div class="inline" style="margin-top:8px">
-        <input id="libName" placeholder="Bibliothek (z.B. jquery)" style="max-width:180px">
-        <input id="libVer" placeholder="Version (z.B. 3.4.1)" style="max-width:140px">
-        <input id="libSrc" placeholder="Quelle/URL (optional)" style="max-width:220px">
-        <button onclick="addLib()">+ manuell hinzufügen</button>
+        <input id="libName" placeholder="Library (e.g. jquery)" style="max-width:180px">
+        <input id="libVer" placeholder="Version (e.g. 3.4.1)" style="max-width:140px">
+        <input id="libSrc" placeholder="Source/URL (optional)" style="max-width:220px">
+        <button onclick="addLib()">+ Add manually</button>
       </div>
     </div>
 
     <div class="tabpanel" data-panel="tests" hidden>
-      <div class="muted small" style="margin-bottom:6px">Ergebnis der Testdurchführung (Ist) + Cucumber-Testplan (Soll, Baseline bis „neu erzeugen").</div>
-      <h4 class="muted small" style="margin:8px 0 4px">▶ Letzte Ausführung ${c.lastLog?'· '+fmtDate(c.lastLog.at):''} <span class="muted">(läuft stets, auch ungefixt)</span></h4>
+      <div class="muted small" style="margin-bottom:6px">Test execution result (actual) + Cucumber test plan (target, baseline until “regenerate”).</div>
+      <h4 class="muted small" style="margin:8px 0 4px">▶ Last run ${c.lastLog?'· '+fmtDate(c.lastLog.at):''} <span class="muted">(always runs, even unfixed)</span></h4>
       ${renderTestExecution(c)}
-      <h4 class="muted small" style="margin:14px 0 4px">📋 Testplan (Cucumber) — geplante Abdeckung</h4>
-      ${c.coverage ? `<div class="finding low" style="margin:4px 0">Pfadabdeckung: ${c.coverage.scenarios} Szenarien · Funktionen ${c.coverage.functionsCovered}/${c.coverage.functions} · Branches ${c.coverage.branchesCovered}/${c.coverage.branches} · Parameter ${c.coverage.paramsCovered}/${c.coverage.params}</div>` : ''}
-      <div class="inline" style="margin-bottom:6px"><button onclick="regenTestPlan()">🔄 Plan neu erzeugen</button>${c.testPlan?'<button onclick="downloadTestPlan()">⬇ .feature</button>':''}${(c.codedTests&&c.codedTests.length)?c.codedTests.map((t,i)=>`<button onclick="downloadCoded(${i})">⬇ ${esc(t.name)}</button>`).join(''):''}</div>
-      <h4 class="muted small" style="margin:14px 0 4px">🎭 Coded-UI-Tests (Playwright) <span class="muted">— live ausführen &amp; bewerten (nicht im geplanten Job)</span></h4>
-      <div class="inline" style="gap:6px"><input id="uiUrl" placeholder="UI-Test-URL: Seite mit dem Plugin (z.B. APEX-Demo)" value="${esc(c.uiTestUrl||'')}" style="max-width:340px"><button onclick="runPwTests()">▶ UI-Tests ausführen</button></div>
+      <h4 class="muted small" style="margin:14px 0 4px">📋 Test plan (Cucumber) — planned coverage</h4>
+      ${c.coverage ? `<div class="finding low" style="margin:4px 0">Path coverage: ${c.coverage.scenarios} scenarios · functions ${c.coverage.functionsCovered}/${c.coverage.functions} · branches ${c.coverage.branchesCovered}/${c.coverage.branches} · parameters ${c.coverage.paramsCovered}/${c.coverage.params}</div>` : ''}
+      <div class="inline" style="margin-bottom:6px"><button onclick="regenTestPlan()">🔄 Regenerate plan</button>${c.testPlan?'<button onclick="downloadTestPlan()">⬇ .feature</button>':''}${(c.codedTests&&c.codedTests.length)?c.codedTests.map((t,i)=>`<button onclick="downloadCoded(${i})">⬇ ${esc(t.name)}</button>`).join(''):''}</div>
+      <h4 class="muted small" style="margin:14px 0 4px">🎭 Coded UI tests (Playwright) <span class="muted">— run live &amp; evaluate (not in the scheduled job)</span></h4>
+      <div class="inline" style="gap:6px"><input id="uiUrl" placeholder="UI test URL: page with the plugin (e.g. APEX demo)" value="${esc(c.uiTestUrl||'')}" style="max-width:340px"><button onclick="runPwTests()">▶ Run UI tests</button></div>
       <div id="uiTestOut"></div>
-      <h4 class="muted small" style="margin:14px 0 4px">📋 Testplan (Cucumber) — geplante Szenarien</h4>
+      <h4 class="muted small" style="margin:14px 0 4px">📋 Test plan (Cucumber)</h4>
       ${renderGherkin(c.testPlan)}
-      <h4 class="muted small" style="margin:14px 0 4px">🕘 Verlauf (frühere Läufe)</h4>
-      <div id="testHistory"><div class="muted small">lädt…</div></div>
+      <h4 class="muted small" style="margin:14px 0 4px">🕘 History (previous runs)</h4>
+      <div id="testHistory"><div class="muted small">loading…</div></div>
       <div id="runLogView"></div>
     </div>
 
     <div class="tabpanel" data-panel="proto" hidden>
-      <div class="inline" style="justify-content:space-between"><h3 style="margin:0">Prüfprotokoll ${c.lastLog ? '· '+fmtDate(c.lastLog.at) : ''}</h3>${c.lastLog&&(c.lastLog.entries||[]).length?'<button onclick="downloadLog()">⬇ Log</button>':''}</div>
-      <div class="muted small" style="margin:2px 0 6px">Arbeit der Agenten je Datei. Test-Ergebnisse stehen im Tab „Tests".</div>
-      <div class="inline" style="gap:2px;margin-bottom:4px"><button class="tab" id="pvG" onclick="setProtoView('grouped')">Gruppiert</button><button class="tab" id="pvC" onclick="setProtoView('chat')">💬 Agenten-Chat</button></div>
+      <div class="inline" style="justify-content:space-between"><h3 style="margin:0">Check protocol ${c.lastLog ? '· '+fmtDate(c.lastLog.at) : ''}</h3>${c.lastLog&&(c.lastLog.entries||[]).length?'<button onclick="downloadLog()">⬇ Log</button>':''}</div>
+      <div class="muted small" style="margin:2px 0 6px">What each agent did per file. Test results are in the “Tests” tab.</div>
+      <div class="inline" style="gap:2px;margin-bottom:4px"><button class="tab" id="pvG" onclick="setProtoView('grouped')">Grouped</button><button class="tab" id="pvC" onclick="setProtoView('chat')">💬 Agent chat</button></div>
       <div id="protoBody"></div>
-      <h4 class="muted small" style="margin:14px 0 4px">🗄 Protokoll-Archiv</h4>
-      <div id="logArchive"><div class="muted small">lädt…</div></div>
+      <h4 class="muted small" style="margin:14px 0 4px">🗄 Protocol archive</h4>
+      <div id="logArchive"><div class="muted small">loading…</div></div>
     </div>
 
     <div class="tabpanel" data-panel="notes" hidden>
-      <h3 style="margin:0 0 6px">Hinweise / Notizen</h3>
-      <div class="inline"><input id="noteText" placeholder="Hinweis oder Protokolleintrag…"><button onclick="addNote()">Hinzufügen</button></div>
+      <h3 style="margin:0 0 6px">Notes</h3>
+      <div class="inline"><input id="noteText" placeholder="Note or log entry…"><button onclick="addNote()">Add</button></div>
       <div id="notes"></div>
       <h3 style="margin:16px 0 6px">Reviews</h3><div id="reviews"></div>
     </div>`;
@@ -382,18 +389,18 @@ async function openDetail(id){
 function statusPill(c){
   const v=c.libWarning&&c.libWarning.vulnerable;
   const col = v ? '#f85149' : (c.status==='handlungsbedarf'||c.status==='zu klären') ? '#d29922' : c.status==='ok' ? '#3fb950' : 'var(--muted)';
-  return `<span class="badge" style="color:${col};border-color:${col}66">● ${esc(v?'kritisch':(c.status||'—'))}</span>`;
+  return `<span class="badge" style="color:${col};border-color:${col}66">● ${esc(v?'critical':statusLabel(c.status))}</span>`;
 }
 function showTab(name){
   document.querySelectorAll('#dBody .tabpanel').forEach(p=>{ p.hidden = p.getAttribute('data-panel')!==name; });
   document.querySelectorAll('#dBody .tab').forEach(t=>t.classList.toggle('active', t.getAttribute('data-tab')===name));
 }
 function renderNotes(){
-  $('notes').innerHTML = (current.notes||[]).map(n=>`<div class="note"><div class="meta">${fmtDate(n.at)} · ${esc(n.kind)}</div>${esc(n.text)}</div>`).join('') || '<div class="muted small">Keine Einträge.</div>';
+  $('notes').innerHTML = (current.notes||[]).map(n=>`<div class="note"><div class="meta">${fmtDate(n.at)} · ${esc(n.kind)}</div>${esc(n.text)}</div>`).join('') || '<div class="muted small">No entries.</div>';
 }
 // Gherkin/Cucumber-Testplan ordentlich rendern: Struktur, Keywords, Beispiel-Tabellen.
 function renderGherkin(text){
-  if(!text) return '<div class="muted small">Noch nicht erzeugt — „▶ Prüfen" erstellt den Testplan.</div>';
+  if(!text) return '<div class="muted small">Not generated yet — “▶ Check” creates the test plan.</div>';
   const lines=text.split('\n'); let html=''; let tbl=null;
   const flush=()=>{ if(tbl){ const h=tbl[0]||[], b=tbl.slice(1); html+='<table class="gh-tbl"><thead><tr>'+h.map(x=>`<th>${esc(x)}</th>`).join('')+'</tr></thead><tbody>'+b.map(r=>'<tr>'+r.map(c=>`<td>${esc(c)}</td>`).join('')+'</tr>').join('')+'</tbody></table>'; tbl=null; } };
   for(const raw of lines){
@@ -414,9 +421,9 @@ function renderGherkin(text){
 // Testausführung des letzten Laufs (Ist-Ergebnis), nach Artefakt gruppiert + Zusammenfassung.
 function renderTestExecution(c){
   const tests=((c.lastLog&&c.lastLog.entries)||[]).filter(e=>e.agent==='Test' && /bestanden|fehlgeschlagen/.test(e.result||''));
-  if(!tests.length) return '<div class="muted small">Noch keine Ausführung — „▶ Prüfen" führt die Tests aus.</div>';
+  if(!tests.length) return '<div class="muted small">No run yet — “▶ Check” runs the tests.</div>';
   const fail=tests.filter(e=>e.severity==='error').length, pass=tests.length-fail;
-  const head=`<div class="inline" style="gap:6px;margin-bottom:6px"><span class="badge" style="color:#3fb950;border-color:#3fb95066">${pass} ✓ bestanden</span>${fail?`<span class="badge" style="color:#f85149;border-color:#f8514966">${fail} ✗ fehlgeschlagen</span>`:''}</div>`;
+  const head=`<div class="inline" style="gap:6px;margin-bottom:6px"><span class="badge" style="color:#3fb950;border-color:#3fb95066">${pass} ✓ passed</span>${fail?`<span class="badge" style="color:#f85149;border-color:#f8514966">${fail} ✗ failed</span>`:''}</div>`;
   // nach Artefakt (file) gruppieren — übersichtlich statt langer Flachliste
   const groups={}; for(const e of tests){ (groups[e.file]=groups[e.file]||[]).push(e); }
   const body=Object.keys(groups).map(art=>{
@@ -431,12 +438,12 @@ async function loadTestHistory(){
   try{
     const list = await api('GET',`/api/components/${current.id}/logs`);
     $('testHistory').innerHTML = (list&&list.length)
-      ? list.slice(0,10).map(l=>`<div class="note inline" style="justify-content:space-between"><span class="meta">${fmtDate(l.at)}</span><button onclick="openLog('${esc(l.name)}','runLogView')">Lauf öffnen</button></div>`).join('')
-      : '<div class="muted small">Noch keine früheren Läufe.</div>';
-  }catch{ $('testHistory').innerHTML='<div class="muted small">Verlauf nicht verfügbar.</div>'; }
+      ? list.slice(0,10).map(l=>`<div class="note inline" style="justify-content:space-between"><span class="meta">${fmtDate(l.at)}</span><button onclick="openLog('${esc(l.name)}','runLogView')">Open run</button></div>`).join('')
+      : '<div class="muted small">No previous runs yet.</div>';
+  }catch{ $('testHistory').innerHTML='<div class="muted small">History unavailable.</div>'; }
 }
 // Protokoll als Agenten-Chat (chronologisch, Bubbles je Agent).
-const AGENT_LABEL={Erkennung:'🔎 Erkennung',Extraktion:'📦 Extraktion',Lint:'🧹 Lint',AST:'🌳 AST',Test:'🧪 Test',Security:'🛡 Security','Code-Review':'🔍 Code-Review','Review-Gate':'⚖ Review-Gate','Web-Dev':'🛠 Web-Dev','Auto-Review':'🤖 Auto-Review','Quick-Fix':'🛠 Quick-Fix','Lib-Update':'⬆ Lib-Update','Auto-Fix':'🤖 Auto-Fix','retire.js':'⚠ retire.js',Snapshot:'📸 Snapshot'};
+const AGENT_LABEL={Erkennung:'🔎 Detection',Extraktion:'📦 Extraction',Lint:'🧹 Lint',AST:'🌳 AST',Test:'🧪 Test',Security:'🛡 Security','Code-Review':'🔍 Code review','Review-Gate':'⚖ Review gate','Web-Dev':'🛠 Web dev','Auto-Review':'🤖 Auto review','Quick-Fix':'🛠 Quick fix','Lib-Update':'⬆ Lib update','Auto-Fix':'🤖 Auto fix','retire.js':'⚠ retire.js',Snapshot:'📸 Snapshot'};
 function renderProtocolChat(entries){
   return `<div class="chat">${entries.map(e=>{
     const bad=e.severity==='error'||e.severity==='high'||e.severity==='critical';
@@ -449,7 +456,7 @@ function renderProtocolChat(entries){
 function setProtoView(v){
   const entries=((current&&current.lastLog&&current.lastLog.entries)||[]).filter(e=>e.agent!=='Test');
   const body=$('protoBody'); if(!body) return;
-  body.innerHTML = !entries.length ? '<div class="muted small">Noch nicht geprüft — „▶ Prüfen" erzeugt das Protokoll.</div>'
+  body.innerHTML = !entries.length ? '<div class="muted small">Not checked yet — “▶ Check” creates the protocol.</div>'
     : (v==='chat' ? renderProtocolChat(entries) : renderProtocol(entries));
   const g=$('pvG'), ch=$('pvC'); if(g) g.classList.toggle('active',v!=='chat'); if(ch) ch.classList.toggle('active',v==='chat');
 }
@@ -459,7 +466,7 @@ function renderProtocol(entries){
   const groups={};
   for(const e of entries){ (groups[e.agent]=groups[e.agent]||[]).push(e); }
   const names=Object.keys(groups).sort((a,b)=>{const ia=order.indexOf(a),ib=order.indexOf(b);return (ia<0?99:ia)-(ib<0?99:ib);});
-  const desc={Erkennung:'Inventar/Format',Extraktion:'Asset-Extraktion',Lint:'Static-First Lint',AST:'Einstiegspunkte',Test:'ausgeführte Tests',Security:'OWASP-Review','Code-Review':'Qualitäts-Review','Review-Gate':'Freigabe-Entscheid','Web-Dev':'autonome Fixes','Auto-Review':'Auto-Review-Ergebnis','retire.js':'CVE-Bibliotheken',Snapshot:'Golden-Master'};
+  const desc={Erkennung:'inventory/format',Extraktion:'asset extraction',Lint:'static-first lint',AST:'entry points',Test:'executed tests',Security:'OWASP review','Code-Review':'quality review','Review-Gate':'release decision','Web-Dev':'autonomous fixes','Auto-Review':'auto-review result','retire.js':'CVE libraries',Snapshot:'golden master'};
   return names.map(n=>{
     const list=groups[n];
     const bad=list.filter(e=>e.severity==='error'||e.severity==='high'||e.severity==='critical').length;
@@ -477,13 +484,13 @@ function renderProtocol(entries){
 function libLine(l){
   const cls = (l.status==='verwundbar'||l.outdated)?'error':(l.status==='nicht gepflegt'||l.webStatus==='veraltet')?'warn':'';
   const web = l.latest
-    ? ` · neueste ${esc(l.latest)} ${l.outdated?'⬆ veraltet':'✓ aktuell'}${l.ageDays!=null?` (Release vor ${l.ageDays} Tagen)`:''}`
-    : (l.webStatus==='unbekannt' ? ' · Web: unbekannt' : '');
-  const inst = l.installedAgeDays!=null ? ` · installierte Version ${l.installedAgeDays} Tage alt` : '';
+    ? ` · latest ${esc(l.latest)} ${l.outdated?'⬆ outdated':'✓ current'}${l.ageDays!=null?` (released ${l.ageDays} days ago)`:''}`
+    : (l.webStatus==='unbekannt' ? ' · web: unknown' : '');
+  const inst = l.installedAgeDays!=null ? ` · installed version ${l.installedAgeDays} days old` : '';
   const link = l.source||l.homepage||l.npm;
-  const src = link ? ` · <a href="${esc(link)}" target="_blank" rel="noopener" style="color:var(--accent)">Quelle ↗</a>` : '';
-  const manual = l.detectedBy==='manuell' ? ' <span class="badge">manuell</span>' : '';
-  return `<div class="logline ${cls}"><b>${esc(l.name)}@${esc(l.version)}</b>${manual} — ${esc(l.status||'')}${l.vuln?` (${esc(l.vuln)})`:''}${l.reason?` — ${esc(l.reason)}`:''}${web}${inst}${src}</div>`;
+  const src = link ? ` · <a href="${esc(link)}" target="_blank" rel="noopener" style="color:var(--accent)">Source ↗</a>` : '';
+  const manual = l.detectedBy==='manuell' ? ' <span class="badge">manual</span>' : '';
+  return `<div class="logline ${cls}"><b>${esc(l.name)}@${esc(l.version)}</b>${manual} — ${esc(libStatusLabel(l.status))}${l.vuln?` (${esc(l.vuln)})`:''}${l.reason?` — ${esc(l.reason)}`:''}${web}${inst}${src}</div>`;
 }
 // SBOM-Visualisierung: Zähler + gestapelter Balken nach Status
 function sbomViz(libs){
@@ -494,12 +501,12 @@ function sbomViz(libs){
   const outdated=libs.filter(l=>l.outdated && l.status!=='verwundbar' && l.status!=='nicht gepflegt').length;
   const ok=libs.length-vuln-unmaint-outdated;
   const seg=(n,col,lbl)=> n?`<div title="${lbl}: ${n}" style="flex:${n};background:${col}"></div>`:'';
-  const bar=`<div style="display:flex;height:8px;gap:2px;border-radius:6px;overflow:hidden;background:var(--line);margin:6px 0">${seg(ok,'#3fb950','aktuell')}${seg(outdated,'#d29922','veraltet')}${seg(unmaint,'#ff8a3d','nicht gepflegt')}${seg(vuln,'#f85149','verwundbar')}</div>`;
+  const bar=`<div style="display:flex;height:8px;gap:2px;border-radius:6px;overflow:hidden;background:var(--line);margin:6px 0">${seg(ok,'#3fb950','current')}${seg(outdated,'#d29922','outdated')}${seg(unmaint,'#ff8a3d','unmaintained')}${seg(vuln,'#f85149','vulnerable')}</div>`;
   const chip=(n,col,lbl)=> n?`<span class="badge" style="color:${col};border-color:${col}66">${lbl}: ${n}</span>`:'';
   const summary = (!vuln&&!unmaint&&!outdated)
-    ? `<span class="badge" style="color:#3fb950;border-color:#3fb95066">✓ alle ${libs.length} aktuell</span>`
-    : `${chip(vuln,'#f85149','⛔ verwundbar')}${chip(unmaint,'#ff8a3d','⚠ nicht gepflegt')}${chip(outdated,'#d29922','veraltet')}${chip(ok,'#3fb950','aktuell')}`;
-  return `<div class="small muted">${libs.length} Komponente(n) im SBOM</div>${bar}<div class="inline" style="gap:6px;margin-bottom:6px">${summary}</div>`;
+    ? `<span class="badge" style="color:#3fb950;border-color:#3fb95066">✓ all ${libs.length} current</span>`
+    : `${chip(vuln,'#f85149','⛔ vulnerable')}${chip(unmaint,'#ff8a3d','⚠ unmaintained')}${chip(outdated,'#d29922','outdated')}${chip(ok,'#3fb950','current')}`;
+  return `<div class="small muted">${libs.length} component(s) in SBOM</div>${bar}<div class="inline" style="gap:6px;margin-bottom:6px">${summary}</div>`;
 }
 async function downloadSbom(){
   if(!current) return;
@@ -507,82 +514,82 @@ async function downloadSbom(){
     const r=await fetch(`/api/components/${current.id}/sbom`); const sbom=await r.json();
     const blob=new Blob([JSON.stringify(sbom,null,2)],{type:'application/json'});
     const url=URL.createObjectURL(blob); const a=document.createElement('a'); a.href=url; a.download=`${current.name}.cdx.json`; a.click(); URL.revokeObjectURL(url);
-  }catch(e){ toast('Fehler: '+e.message); }
+  }catch(e){ toast('Error: '+e.message); }
 }
 async function runUpload(){
   if(!current) return;
-  if(!confirm('Änderungen als NEUEN Branch committen und (falls Remote/Token vorhanden) pushen?\n\nEs wird nichts auf dem aktuellen Branch verändert; der PR/Review-Link wird danach angezeigt.')) return;
-  const id=current.id; $('reviewOut').innerHTML='<div class="muted small">Upload läuft (Branch + Commit + Push)…</div>';
+  if(!confirm('Commit changes as a NEW branch and (if remote/token available) push?\n\nNothing on the current branch is changed; the PR/review link is shown afterwards.')) return;
+  const id=current.id; $('reviewOut').innerHTML='<div class="muted small">Upload running (branch + commit + push)…</div>';
   try{
     const r=await api('POST',`/api/components/${id}/upload`,{});
-    if(!r.ok){ $('reviewOut').innerHTML=`<div class="finding medium">${esc(r.reason||r.error||'nicht ausgeführt')}</div>`; return; }
+    if(!r.ok){ $('reviewOut').innerHTML=`<div class="finding medium">${esc(r.reason||r.error||'not run')}</div>`; return; }
     await openDetail(id); load();
-    const link = r.prUrl?`<a href="${esc(r.prUrl)}" target="_blank" rel="noopener" style="color:var(--accent)">PR/Review öffnen ↗</a>`:'(kein PR-Link)';
-    $('reviewOut').innerHTML=`<div class="note"><b>📤 ${r.pushed?'Gepusht':'Lokal committet'}</b> auf Branch <code>${esc(r.branch)}</code> — ${link}${r.pushError?` <span class="muted small">(Push: ${esc(r.pushError)})</span>`:''}</div>`;
+    const link = r.prUrl?`<a href="${esc(r.prUrl)}" target="_blank" rel="noopener" style="color:var(--accent)">Open PR/review ↗</a>`:'(no PR link)';
+    $('reviewOut').innerHTML=`<div class="note"><b>📤 ${r.pushed?'Pushed':'Committed locally'}</b> on branch <code>${esc(r.branch)}</code> — ${link}${r.pushError?` <span class="muted small">(push: ${esc(r.pushError)})</span>`:''}</div>`;
   }catch(e){ $('reviewOut').innerHTML=`<div class="finding">${esc(e.message)}</div>`; }
 }
 async function runPwTests(){
   if(!current) return;
   const url=$('uiUrl').value.trim();
-  $('uiTestOut').innerHTML='<div class="muted small">Playwright-UI-Tests laufen… (kann etwas dauern)</div>';
+  $('uiTestOut').innerHTML='<div class="muted small">Playwright UI tests running… (may take a moment)</div>';
   try{
     const r=await api('POST',`/api/components/${current.id}/ui-tests`,{url});
-    if(!r.ran){ $('uiTestOut').innerHTML=`<div class="finding medium">${esc(r.reason||'nicht ausgeführt')}</div>`; return; }
-    const head=`<div class="note"><b style="color:${r.ok?'#3fb950':'#f85149'}">${r.ok?'✅ UI-Tests grün':'⛔ UI-Tests rot'}</b> — ${r.passed||0} ✓ / ${r.failed||0} ✗ <span class="muted small">(${esc(r.url||'')})</span></div>`;
-    $('uiTestOut').innerHTML=head+`<pre class="logbox" style="white-space:pre-wrap">${esc(r.output||'(keine Ausgabe)')}</pre>`;
+    if(!r.ran){ $('uiTestOut').innerHTML=`<div class="finding medium">${esc(r.reason||'not run')}</div>`; return; }
+    const head=`<div class="note"><b style="color:${r.ok?'#3fb950':'#f85149'}">${r.ok?'✅ UI tests green':'⛔ UI tests red'}</b> — ${r.passed||0} ✓ / ${r.failed||0} ✗ <span class="muted small">(${esc(r.url||'')})</span></div>`;
+    $('uiTestOut').innerHTML=head+`<pre class="logbox" style="white-space:pre-wrap">${esc(r.output||'(no output)')}</pre>`;
   }catch(e){ $('uiTestOut').innerHTML=`<div class="finding">${esc(e.message)}</div>`; }
 }
 async function addLib(){
   if(!current) return;
-  const name=$('libName').value.trim(); if(!name) return toast('Name fehlt');
+  const name=$('libName').value.trim(); if(!name) return toast('Name missing');
   const version=$('libVer').value.trim(); const source=$('libSrc').value.trim()||null;
-  try{ await api('POST',`/api/components/${current.id}/libraries`,{name,version,source}); await openDetail(current.id); toast('Bibliothek hinzugefügt'); }
-  catch(e){ toast('Fehler: '+e.message); }
+  try{ await api('POST',`/api/components/${current.id}/libraries`,{name,version,source}); await openDetail(current.id); toast('Library added'); }
+  catch(e){ toast('Error: '+e.message); }
 }
 async function runMaintain(){
   if(!current) return;
-  const id=current.id; $('reviewOut').innerHTML='<div class="muted small">Vollständige Pflege läuft (prüfen → review → fixen → Updates → re-test)…</div>';
+  const id=current.id; $('reviewOut').innerHTML='<div class="muted small">Full maintenance running (check → review → fix → updates → re-test)…</div>';
   try{
     const r = await api('POST',`/api/components/${id}/maintain`,{});
     if(r.error){ $('reviewOut').innerHTML=`<div class="finding">${esc(r.error)}</div>`; return; }
-    if(r.skipped){ $('reviewOut').innerHTML=`<div class="finding medium">Übersprungen: ${esc(r.reason||'')}</div>`; return; }
+    if(r.skipped){ $('reviewOut').innerHTML=`<div class="finding medium">Skipped: ${esc(r.reason||'')}</div>`; return; }
     await openDetail(id); load();
-    $('reviewOut').innerHTML = `<div class="note"><b>🧰 Pflege abgeschlossen:</b> ${esc(r.before)} → ${esc(r.after)}</div>`
-      + (r.steps||[]).map(s=>`<div class="finding low"><b>${esc(s.step)}</b> ${esc(s.summary||s.status||(s.error?('Fehler: '+s.error):JSON.stringify(s)))}</div>`).join('');
-    toast('Vollständige Pflege fertig');
-  }catch(e){ $('reviewOut').innerHTML=`<div class="finding">${esc(e.message)}</div>`; toast('Fehler: '+e.message); }
+    $('reviewOut').innerHTML = `<div class="note"><b>🧰 Maintenance done:</b> ${esc(r.before)} → ${esc(r.after)}</div>`
+      + (r.steps||[]).map(s=>`<div class="finding low"><b>${esc(s.step)}</b> ${esc(s.summary||s.status||(s.error?('Error: '+s.error):JSON.stringify(s)))}</div>`).join('');
+    toast('Full maintenance done');
+  }catch(e){ $('reviewOut').innerHTML=`<div class="finding">${esc(e.message)}</div>`; toast('Error: '+e.message); }
 }
 async function checkLibs(){
   if(!current) return;
-  toast('Prüfe Bibliotheken im Web…');
-  try{ await api('POST',`/api/components/${current.id}/libraries/check`,{}); await openDetail(current.id); toast('Bibliotheken geprüft'); }
-  catch(e){ toast('Fehler: '+e.message); }
+  toast('Checking libraries online…');
+  try{ await api('POST',`/api/components/${current.id}/libraries/check`,{}); await openDetail(current.id); toast('Libraries checked'); }
+  catch(e){ toast('Error: '+e.message); }
 }
 async function runAutoFix(){
   if(!current) return;
-  const id=current.id; $('reviewOut').innerHTML='<div class="muted small">Automatische Korrekturen laufen…</div>';
+  const id=current.id; $('reviewOut').innerHTML='<div class="muted small">Automatic fixes running…</div>';
   try{
     const r = await api('POST',`/api/components/${id}/autofix`,{});
     if(r.error){ $('reviewOut').innerHTML=`<div class="finding">${esc(r.error)}</div>`; return; }
     await openDetail(id); load();
-    $('reviewOut').innerHTML = `<div class="note"><b>🛠 Auto-Fix:</b> ${r.quickFixes} Quick-Fix(es)${r.libUpdate?', Lib-Update ausgelöst':''}${r.aiResult?(r.aiResult.pass?', KI grün':', KI nicht grün'):''}</div>`
+    $('reviewOut').innerHTML = `<div class="note"><b>🛠 Auto-Fix:</b> ${r.quickFixes} quick fix(es)${r.libUpdate?', lib update triggered':''}${r.aiResult?(r.aiResult.pass?', AI green':', AI not green'):''}</div>`
       + (r.protocol||[]).map(p=>`<div class="finding ${p.severity==='error'?'':'low'}"><b>${esc(p.agent||'')}</b> ${esc(p.file||'')} — ${esc(p.result||'')}</div>`).join('');
-    toast('Auto-Fix abgeschlossen');
-  }catch(e){ $('reviewOut').innerHTML=`<div class="finding">${esc(e.message)}</div>`; toast('Fehler: '+e.message); }
+    toast('Auto-fix done');
+  }catch(e){ $('reviewOut').innerHTML=`<div class="finding">${esc(e.message)}</div>`; toast('Error: '+e.message); }
 }
 function renderReviews(){
-  $('reviews').innerHTML = (current.reviews||[]).map(r=>`<div class="note"><div class="meta">${fmtDate(r.at)} · ${esc(r.kind)} · ${r.pass?'✅ bestanden':'⛔ '+esc(r.stage)}</div>${r.findingsCount||0} Finding(s)</div>`).join('') || '<div class="muted small">Noch keine Reviews.</div>';
+  $('reviews').innerHTML = (current.reviews||[]).map(r=>`<div class="note"><div class="meta">${fmtDate(r.at)} · ${esc(r.kind)} · ${r.pass?'✅ passed':'⛔ '+esc(r.stage)}</div>${r.findingsCount||0} Finding(s)</div>`).join('') || '<div class="muted small">No reviews yet.</div>';
 }
 function closeDrawer(){ $('drawer').classList.remove('open'); $('drawerBg').classList.remove('open'); current=null; }
 
 async function addNote(){
   const text = $('noteText').value.trim(); if(!text) return;
   await api('POST',`/api/components/${current.id}/notes`,{kind:'hinweis',text});
-  current = await api('GET','/api/components/'+current.id); $('noteText').value=''; renderNotes(); toast('Notiz gespeichert');
+  current = await api('GET','/api/components/'+current.id); $('noteText').value=''; renderNotes(); toast('Note saved');
 }
 async function openDir(){
-  try{ const r = await api('POST',`/api/components/${current.id}/open`,{}); toast(r.ok?('Geöffnet: '+r.command):('Fehler: '+r.error)); }
-  catch(e){ toast('Fehler: '+e.message); }
+  try{ const r = await api('POST',`/api/components/${current.id}/open`,{}); toast(r.ok?('Opened: '+r.command):('Error: '+r.error)); }
+  catch(e){ toast('Error: '+e.message); }
 }
 function openGit(){
   if(!current) return;
@@ -590,41 +597,41 @@ function openGit(){
   if(/^https?:\/\//i.test(src)){ window.open(src,'_blank','noopener'); return; }
   const m = src.match(/^git@([^:]+):(.+?)(?:\.git)?$/i); // git@host:org/repo(.git) → https
   if(m){ window.open(`https://${m[1]}/${m[2]}`,'_blank','noopener'); return; }
-  toast(src ? 'Quelle ist ein lokaler Pfad — nutze „Lokal öffnen".' : 'Kein Repo zugeordnet.');
+  toast(src ? 'Source is a local path — use “Open locally”.' : 'No repo assigned.');
 }
 async function runReview(){
   if(!current) return;
-  $('reviewOut').innerHTML='<div class="muted small">Review läuft…</div>';
+  $('reviewOut').innerHTML='<div class="muted small">Review running…</div>';
   try{
     const r = await api('POST',`/api/components/${current.id}/review`,{save:true});
-    if(!r.gate){ $('reviewOut').innerHTML=`<div class="note">${esc(r.message||'Kein Ergebnis')}</div>`; return; }
+    if(!r.gate){ $('reviewOut').innerHTML=`<div class="note">${esc(r.message||'No result')}</div>`; return; }
     const g = r.gate; const f = [...((g.security&&g.security.findings)||[]),...((g.quality&&g.quality.findings)||[])];
-    $('reviewOut').innerHTML = `<div class="note"><b>${g.pass?'✅ Review bestanden':'⛔ blockiert ('+esc(g.stage)+')'}</b></div>`
-      + (f.length ? f.map(x=>`<div class="finding ${esc(x.severity)}"><b>${esc(x.severity)}</b> ${esc(x.rule||'')} — ${esc(x.message||'')} ${x.asset?'<span class="muted">('+esc(x.asset)+')</span>':''}</div>`).join('') : '<div class="muted small">Keine Befunde.</div>');
+    $('reviewOut').innerHTML = `<div class="note"><b>${g.pass?'✅ Review passed':'⛔ blocked ('+esc(g.stage)+')'}</b></div>`
+      + (f.length ? f.map(x=>`<div class="finding ${esc(x.severity)}"><b>${esc(x.severity)}</b> ${esc(x.rule||'')} — ${esc(x.message||'')} ${x.asset?'<span class="muted">('+esc(x.asset)+')</span>':''}</div>`).join('') : '<div class="muted small">No findings.</div>');
     current = await api('GET','/api/components/'+current.id); renderReviews();
-  }catch(e){ $('reviewOut').innerHTML='<div class="finding">Fehler: '+esc(e.message)+'</div>'; }
+  }catch(e){ $('reviewOut').innerHTML='<div class="finding">Error: '+esc(e.message)+'</div>'; }
 }
 
 function downloadLog(){
   if(!current||!current.lastLog) return;
-  const t = `Plugin Maintenance — Prüfprotokoll\nKomponente: ${current.name}\nZeit: ${current.lastLog.at}\n\n`
+  const t = `Plugin Maintenance — Check protocol\nComponent: ${current.name}\nTime: ${current.lastLog.at}\n\n`
     + (current.lastLog.entries||[]).map(e=>`[${e.agent}] ${e.file} → ${e.result}${e.severity?(' ('+e.severity+')'):''}`).join('\n') + '\n';
   const blob = new Blob([t], {type:'text/plain;charset=utf-8'});
   const url = URL.createObjectURL(blob);
-  const a = document.createElement('a'); a.href=url; a.download=`${current.name}-pruefprotokoll.log`; a.click();
+  const a = document.createElement('a'); a.href=url; a.download=`${current.name}-check-protocol.log`; a.click();
   URL.revokeObjectURL(url);
 }
 
 async function runAutoReview(){
   if(!current) return;
-  const id=current.id; $('reviewOut').innerHTML='<div class="muted small">Autonomes Review & Fix läuft…</div>';
+  const id=current.id; $('reviewOut').innerHTML='<div class="muted small">Autonomous review & fix running…</div>';
   try{
     const r = await api('POST',`/api/components/${id}/autoreview`,{});
     await openDetail(id); load();
-    $('reviewOut').innerHTML = `<div class="note"><b>${r.pass?'✅ Autonom grün':'⛔ nicht grün'} nach ${r.attempts??0} Fix-Versuch(en)</b></div>`
+    $('reviewOut').innerHTML = `<div class="note"><b>${r.pass?'✅ Autonomous green':'⛔ not green'} after ${r.attempts??0} fix attempt(s)</b></div>`
       + (r.protocol||[]).map(p=>`<div class="finding ${p.result&&/Fehler|nicht/.test(p.result)?'medium':'low'}"><b>${esc(p.agent||'')}</b> ${esc(p.file||'')} — ${esc(p.result||'')}</div>`).join('');
-    toast(r.pass?'Autonom gefixt':'Kein grünes Gate');
-  }catch(e){ $('reviewOut').innerHTML=`<div class="finding">${esc(e.message)}</div>`; toast('Fehler: '+e.message); }
+    toast(r.pass?'Autonomously fixed':'No green gate');
+  }catch(e){ $('reviewOut').innerHTML=`<div class="finding">${esc(e.message)}</div>`; toast('Error: '+e.message); }
 }
 function downloadTestPlan(){
   if(!current||!current.testPlan) return;
@@ -637,31 +644,31 @@ function downloadCoded(i){
   const url=URL.createObjectURL(blob); const a=document.createElement('a'); a.href=url; a.download=t.name; a.click(); URL.revokeObjectURL(url);
 }
 async function regenTestPlan(){
-  if(!current) return; const id=current.id; toast('Testplan wird neu erzeugt…');
-  try{ await api('POST',`/api/components/${id}/testplan`,{}); await openDetail(id); toast('Testplan neu erzeugt'); }
-  catch(e){ toast('Fehler: '+e.message); }
+  if(!current) return; const id=current.id; toast('Regenerating test plan…');
+  try{ await api('POST',`/api/components/${id}/testplan`,{}); await openDetail(id); toast('Test plan regenerated'); }
+  catch(e){ toast('Error: '+e.message); }
 }
 async function loadLogArchive(){
   if(!current) return;
   try{
     const list = await api('GET',`/api/components/${current.id}/logs`);
     $('logArchive').innerHTML = (list&&list.length)
-      ? list.map(l=>`<div class="note inline" style="justify-content:space-between"><span class="meta">${fmtDate(l.at)}</span><button onclick="openLog('${esc(l.name)}')">öffnen</button></div>`).join('')
-      : '<div class="muted small">Noch keine Protokolle abgelegt.</div>';
-  }catch{ $('logArchive').innerHTML='<div class="muted small">Archiv nicht verfügbar.</div>'; }
+      ? list.map(l=>`<div class="note inline" style="justify-content:space-between"><span class="meta">${fmtDate(l.at)}</span><button onclick="openLog('${esc(l.name)}')">open</button></div>`).join('')
+      : '<div class="muted small">No protocols stored yet.</div>';
+  }catch{ $('logArchive').innerHTML='<div class="muted small">Archive unavailable.</div>'; }
 }
 async function openLog(name, targetId='logArchive'){
   try{
     const r=await fetch(`/api/components/${current.id}/logs/${encodeURIComponent(name)}`); const t=await r.text();
     const tgt=$(targetId); if(!tgt) return;
     const ex=tgt.querySelector('.logopen'); if(ex) ex.remove(); // nur einen offenen Lauf zeigen
-    const block=`<div class="logopen"><div class="inline" style="justify-content:space-between;margin-top:8px"><h4 class="muted small" style="margin:0">📄 Lauf ${esc(name.replace('.log',''))}</h4><button class="ghost small" onclick="this.closest('.logopen').remove()">schließen</button></div><pre class="logbox" style="white-space:pre-wrap">${esc(t)}</pre></div>`;
+    const block=`<div class="logopen"><div class="inline" style="justify-content:space-between;margin-top:8px"><h4 class="muted small" style="margin:0">📄 Run ${esc(name.replace('.log',''))}</h4><button class="ghost small" onclick="this.closest('.logopen').remove()">close</button></div><pre class="logbox" style="white-space:pre-wrap">${esc(t)}</pre></div>`;
     tgt.insertAdjacentHTML('afterbegin', block);
-  }catch(e){ toast('Fehler: '+e.message); }
+  }catch(e){ toast('Error: '+e.message); }
 }
 
 function openEdit(c){
-  $('mTitle').textContent = c&&c.id ? 'Plugin bearbeiten' : 'Plugin hinzufügen';
+  $('mTitle').textContent = c&&c.id ? 'Edit plugin' : 'Add plugin';
   $('mId').value=c&&c.id||''; $('mName').value=c&&c.name||''; $('mPath').value=c&&c.path||'';
   $('modalBg').classList.add('open');
 }
@@ -672,30 +679,30 @@ async function saveComponent(){
   const isUrl=/^(https?:\/\/|git@)/i.test(p); // URL → klonen (Repo zuordnen), lokaler Pfad → direkt
   // Typ/Format/Status werden automatisch erkannt — der Nutzer wählt sie nicht.
   const data={ name:$('mName').value.trim(), path: isUrl?'':p };
-  if(!data.name) return toast('Name fehlt');
+  if(!data.name) return toast('Name missing');
   try{
     const comp = id ? await api('PUT','/api/components/'+id,data) : await api('POST','/api/components',data);
     if(isUrl && comp && comp.id){
-      toast('Repo wird geklont…');
+      toast('Cloning repo…');
       await api('POST',`/api/components/${comp.id}/assign-repo`,{source:p,visibility:'öffentlich'});
     }
-    closeModal(); load(); toast(isUrl?'Gespeichert & Repo geklont — „▶ Prüfen" erkennt Typ/Format':'Gespeichert');
-  }catch(e){ toast('Fehler: '+e.message); }
+    closeModal(); load(); toast(isUrl?'Saved & repo cloned — “▶ Check” detects type/format':'Saved');
+  }catch(e){ toast('Error: '+e.message); }
 }
 async function delComponent(c){
-  if(!confirm(`Komponente „${c.name}" wirklich löschen?`)) return;
-  await api('DELETE','/api/components/'+c.id); load(); toast('Gelöscht');
+  if(!confirm(`Really delete component “${c.name}”?`)) return;
+  await api('DELETE','/api/components/'+c.id); load(); toast('Deleted');
 }
 
 // --- Einstellungen (Arbeitsverzeichnis, KI, Zeitplan, SMTP) ---
 let settingsCache = {};
 async function loadSettings(){
-  try{ settingsCache = await api('GET','/api/settings'); $('wdLabel').textContent = 'Arbeitsverzeichnis: '+(settingsCache.workDir||'—'); }catch{}
+  try{ settingsCache = await api('GET','/api/settings'); $('wdLabel').textContent = 'Working directory: '+(settingsCache.workDir||'—'); }catch{}
 }
 function openSettings(){
   const s = settingsCache, ai = s.aiBackend||{kind:'stub'}, sm = s.smtp||{};
   $('workDir').value = s.workDir||'';
-  $('aiKind').value = ai.kind||'stub'; $('aiCommand').value=ai.command||''; $('aiEndpoint').value=ai.endpoint||''; $('aiModel').value=ai.model||''; $('aiKey').value=''; $('aiKeyState').textContent=ai.hasKey?'(Key hinterlegt)':''; $('aiTestOut').textContent='';
+  $('aiKind').value = ai.kind||'stub'; $('aiCommand').value=ai.command||''; $('aiEndpoint').value=ai.endpoint||''; $('aiModel').value=ai.model||''; $('aiKey').value=''; $('aiKeyState').textContent=ai.hasKey?'(key stored)':''; $('aiTestOut').textContent='';
   $('schedEnabled').checked=!!s.scheduleEnabled; $('schedule').value=s.schedule||''; updateSchedHint();
   $('allowPush').checked=!!s.allowPush;
   $('smtpHost').value=sm.host||''; $('smtpPort').value=sm.port||587; $('smtpSecure').checked=!!sm.secure; $('smtpUser').value=sm.user||''; $('smtpFrom').value=sm.from||''; $('smtpPass').value=''; $('reportOut').textContent='';
@@ -704,16 +711,16 @@ function openSettings(){
 }
 function closeSettings(){ $('settingsBg').classList.remove('open'); }
 function toggleAi(){ const k=$('aiKind').value; $('aiCli').style.display=k==='cli'?'block':'none'; $('aiProvider').style.display=k==='provider'?'block':'none'; }
-function updateSchedHint(){ const m={'0 3 * * 1':'wöchentlich montags 03:00','0 3 * * *':'täglich 03:00','0 * * * *':'stündlich','*/15 * * * *':'alle 15 Minuten'}; $('schedHint').textContent=m[$('schedule').value.trim()]?('· '+m[$('schedule').value.trim()]):''; }
+function updateSchedHint(){ const m={'0 3 * * 1':'weekly Mon 03:00','0 3 * * *':'daily 03:00','0 * * * *':'hourly','*/15 * * * *':'every 15 minutes'}; $('schedHint').textContent=m[$('schedule').value.trim()]?('· '+m[$('schedule').value.trim()]):''; }
 async function testAi(){
-  $('aiTestOut').textContent='teste…';
-  try{ const r=await api('POST','/api/ai/test',{}); $('aiTestOut').textContent = r.ok?('✅ ok'+(r.model?' ('+r.model+')':'')):('⛔ '+(r.error||'Fehler')); }
-  catch(e){ $('aiTestOut').textContent='Fehler: '+e.message; }
+  $('aiTestOut').textContent='testing…';
+  try{ const r=await api('POST','/api/ai/test',{}); $('aiTestOut').textContent = r.ok?('✅ ok'+(r.model?' ('+r.model+')':'')):('⛔ '+(r.error||'Error')); }
+  catch(e){ $('aiTestOut').textContent='Error: '+e.message; }
 }
 async function sendReport(){
-  $('reportOut').textContent='sende…';
-  try{ const r=await api('POST','/api/report/send',{}); $('reportOut').textContent = r.ok?('✅ gesendet an '+(r.sent||[]).join(', ')):('⛔ '+(r.error||'Fehler')); }
-  catch(e){ $('reportOut').textContent='Fehler: '+e.message; }
+  $('reportOut').textContent='sending…';
+  try{ const r=await api('POST','/api/report/send',{}); $('reportOut').textContent = r.ok?('✅ sent to '+(r.sent||[]).join(', ')):('⛔ '+(r.error||'Error')); }
+  catch(e){ $('reportOut').textContent='Error: '+e.message; }
 }
 async function saveSettingsAll(){
   try{
@@ -723,8 +730,8 @@ async function saveSettingsAll(){
     await api('PUT','/api/settings',{ workDir:$('workDir').value.trim(), aiBackend:ai, smtp, recipients, schedule:$('schedule').value.trim(), scheduleEnabled:$('schedEnabled').checked, allowPush:$('allowPush').checked });
     if($('aiKey').value) await api('POST','/api/ai/key',{key:$('aiKey').value});
     if($('smtpPass').value) await api('POST','/api/smtp/pass',{pass:$('smtpPass').value});
-    await loadSettings(); closeSettings(); toast('Einstellungen gespeichert');
-  }catch(e){ toast('Fehler: '+e.message); }
+    await loadSettings(); closeSettings(); toast('Settings saved');
+  }catch(e){ toast('Error: '+e.message); }
 }
 
 // --- Repo einem Plugin zuordnen (F-21) ---
@@ -738,43 +745,43 @@ function openAssign(){
 function closeAssign(){ $('assignBg').classList.remove('open'); }
 async function saveAssign(){
   if(!current) return;
-  const source=$('aSource').value.trim(); if(!source) return toast('Quelle erforderlich');
+  const source=$('aSource').value.trim(); if(!source) return toast('Source required');
   const body={ source, visibility:$('aVisibility').value, token:$('aToken').value||undefined, sshKeyPath:$('aSshKey').value.trim()||undefined };
-  const btn=$('aBtn'); btn.disabled=true; btn.textContent='Klone…';
-  try{ await api('POST',`/api/components/${current.id}/assign-repo`,body); closeAssign(); await openDetail(current.id); load(); toast('Repo zugeordnet'); }
-  catch(e){ toast('Fehler: '+e.message); }
-  finally{ btn.disabled=false; btn.textContent='Zuordnen & klonen'; }
+  const btn=$('aBtn'); btn.disabled=true; btn.textContent='Cloning…';
+  try{ await api('POST',`/api/components/${current.id}/assign-repo`,body); closeAssign(); await openDetail(current.id); load(); toast('Repo assigned'); }
+  catch(e){ toast('Error: '+e.message); }
+  finally{ btn.disabled=false; btn.textContent='Assign & clone'; }
 }
 async function runUpdate(){
   if(!current) return;
-  const id=current.id; toast('Auto-Update läuft…');
+  const id=current.id; toast('Auto-update running…');
   try{
     const r = await api('POST',`/api/components/${id}/update`,{});
     await openDetail(id); load();
-    const out = (r.results||[]).map(x=>`<div class="finding ${x.pushed?'low':'medium'}">${esc(x.lib)} ${esc(x.from)}→${esc(x.to)} — ${x.pushed?('PR-Branch '+esc((x.prRef&&x.prRef.branch)||x.branchKey||'')):('Review-blockiert ('+esc(x.stage||'')+')')}</div>`).join('');
-    $('reviewOut').innerHTML = `<div class="note"><b>Auto-Update:</b> ${esc(r.summary)}</div>` + out;
+    const out = (r.results||[]).map(x=>`<div class="finding ${x.pushed?'low':'medium'}">${esc(x.lib)} ${esc(x.from)}→${esc(x.to)} — ${x.pushed?('PR branch '+esc((x.prRef&&x.prRef.branch)||x.branchKey||'')):('Review blocked ('+esc(x.stage||'')+')')}</div>`).join('');
+    $('reviewOut').innerHTML = `<div class="note"><b>Auto-update:</b> ${esc(r.summary)}</div>` + out;
     toast(r.summary);
-  }catch(e){ toast('Fehler: '+e.message); }
+  }catch(e){ toast('Error: '+e.message); }
 }
 async function runAll(){
-  toast('Prüfe alle Komponenten…');
+  toast('Checking all components…');
   try{ const r = await api('POST','/api/run',{}); await load();
-    toast(`Geprüft: ${r.count} Komponente(n)`);
-  }catch(e){ toast('Fehler: '+e.message); }
+    toast(`Checked: ${r.count} component(s)`);
+  }catch(e){ toast('Error: '+e.message); }
 }
 async function runOne(){
   if(!current) return;
   const id = current.id;
-  toast('Prüfe…');
-  try{ const r = await api('POST',`/api/components/${id}/run`,{}); await openDetail(id); load(); toast(`Geprüft: ${r.summary}`); }
-  catch(e){ toast('Fehler: '+e.message); }
+  toast('Checking…');
+  try{ const r = await api('POST',`/api/components/${id}/run`,{}); await openDetail(id); load(); toast(`Checked: ${r.summary}`); }
+  catch(e){ toast('Error: '+e.message); }
 }
 async function rescan(){
-  toast('Scanne erneut…');
+  toast('Rescanning…');
   try{ const r = await api('POST','/api/repos/rescan',{}); await load();
     const sum = (r||[]).reduce((a,x)=>({added:a.added+x.added,updated:a.updated+x.updated}),{added:0,updated:0});
-    toast(`Fertig: ${sum.added} neu, ${sum.updated} aktualisiert`);
-  }catch(e){ toast('Fehler: '+e.message); }
+    toast(`Done: ${sum.added} new, ${sum.updated} updated`);
+  }catch(e){ toast('Error: '+e.message); }
 }
 
 function switchView(v){
@@ -795,14 +802,14 @@ async function loadLibraries(){
     for(const l of libs){
       const tr = document.createElement('tr');
       tr.innerHTML = `<td><b>${esc(l.name)}</b></td><td class="small">${esc(l.version)}</td>`
-        + `<td><span class="dot ${cls[l.status]||''}"></span>${esc(l.status)}`
+        + `<td><span class="dot ${cls[l.status]||''}"></span>${esc(libStatusLabel(l.status))}`
         + `${l.vuln?` <span class="muted small">(${esc(l.vuln)})</span>`:''}${l.reason?` <span class="muted small">— ${esc(l.reason)}</span>`:''}`
         + `${l.outdated&&l.latest?` <span class="muted small">→ ${esc(l.latest)}</span>`:''}</td>`
         + `<td class="small muted">${(l.usedBy||[]).map(esc).join(', ')}</td>`;
       rows.appendChild(tr);
     }
     load(); // libWarning evtl. aktualisiert → Plugin-Übersicht neu zeichnen
-  }catch(e){ toast('Fehler: '+e.message); }
+  }catch(e){ toast('Error: '+e.message); }
 }
 
 // Build-Marker: muss mit BUILD in start.js übereinstimmen. Erkennt einen veralteten Backend-Prozess.
@@ -815,13 +822,21 @@ async function checkBackend(){
     const h = await r.json();
     if(h.build !== APP_BUILD){
       b.style.display='block';
-      b.innerHTML = `⚠ <b>Backend veraltet</b> — der laufende Dienst (Build ${esc(h.build||'?')}) passt nicht zur Oberfläche (Build ${APP_BUILD}). Bitte den Dienst neu starten (Start.cmd → automatisch), sonst sind Daten/Erkennung veraltet.`;
+      b.innerHTML = `⚠ <b>Backend out of date</b> — the running service (build ${esc(h.build||'?')}) does not match the UI (build ${APP_BUILD}). Please restart the service (Start.cmd → automatic), otherwise data/detection are stale.`;
     } else { b.style.display='none'; }
   }catch{
     b.style.display='block';
-    b.innerHTML = `⚠ <b>Backend veraltet</b> — kein /api/health. Bitte den Dienst über <b>Start.cmd</b> neu starten (beendet die alte Instanz automatisch).`;
+    b.innerHTML = `⚠ <b>Backend out of date</b> — no /api/health. Please restart the service via <b>Start.cmd</b> (stops the old instance automatically).`;
   }
 }
+
+// Esc schließt offene Dialoge bzw. den Drawer
+document.addEventListener('keydown', (e) => {
+  if (e.key !== 'Escape') return;
+  const m = document.querySelector('.modal-bg.open');
+  if (m) { m.classList.remove('open'); return; }
+  if ($('drawer').classList.contains('open')) closeDrawer();
+});
 
 checkBackend();
 loadSettings();
