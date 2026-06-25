@@ -28,7 +28,7 @@ describe('T-66 Vollautomatische Pflege = manuelle Pflege', () => {
     const store = setup();
     const calls = {};
     const r = await maintainComponent(store, store.get('c1'), baseDeps(calls));
-    expect(r.steps.map((s) => s.step)).toEqual(['prüfen', 'lib-check', 'autofix', 're-test']);
+    expect(r.steps.map((s) => s.step)).toEqual(['check', 'lib-check', 'autofix', 're-test']);
     expect(calls.autoFix).toBe(true);
     expect(store.get('c1').libsCheckedAt).toBe('t');
     expect(store.get('c1').libs[0].source).toBe('https://github.com/jquery/jquery');
@@ -78,7 +78,7 @@ describe('T-66 Vollautomatische Pflege = manuelle Pflege', () => {
     const r = await maintainComponent(store, store.get('c1'), { ...baseDeps({}), applyVendoredUpdates, ai: { kind: 'stub' } });
     const mig = r.steps.find((s) => s.step === 'migrate' && s.skipped);
     expect(mig).toBeTruthy();
-    expect(mig.reason).toMatch(/KI-Backend erforderlich/);
+    expect(mig.reason).toMatch(/AI backend is required/);
   });
 
   it('Regression nach sicherem Update → Rollback', async () => {

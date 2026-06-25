@@ -49,7 +49,7 @@ describe('T-44 lastLog + T-45 logSink/Format', () => {
     expect(after.lastLog).toMatchObject({ at: '2026-06-24T00:00:00Z' });
     expect(after.lastLog.entries.length).toBeGreaterThan(0);
     expect(sinkText).toContain('[retire.js]');
-    expect(sinkText).toContain('Prüfprotokoll');
+    expect(sinkText).toContain('Check protocol');
   });
 
   it('formatLog rendert Agent → Datei → Ergebnis', () => {

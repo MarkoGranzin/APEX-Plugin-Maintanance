@@ -28,7 +28,7 @@ export async function maintainComponent(store, comp, deps = {}) {
   const cur = () => store.get(comp.id) ?? comp;
 
   if (!exists(comp.path)) {
-    return { component: comp.name, skipped: true, reason: 'kein Repo zugeordnet', steps };
+    return { component: comp.name, skipped: true, reason: 'no repo assigned', steps };
   }
 
   const scan = deps.scan ?? scanRepo;
@@ -36,7 +36,7 @@ export async function maintainComponent(store, comp, deps = {}) {
 
   // 1) prüfen
   const r1 = runComponentOnce(store, cur(), runOpts);
-  steps.push({ step: 'prüfen', status: r1.status, summary: r1.summary });
+  steps.push({ step: 'check', status: r1.status, summary: r1.summary });
 
   // 2) Bibliotheken aus dem Web prüfen (Aktualität/Quelle) — stellt sicher, dass Updates erkannt werden
   try {
@@ -78,7 +78,7 @@ export async function maintainComponent(store, comp, deps = {}) {
   if (appliedLibs && r2.status === 'zu klären' && libBackups && libBackups.size) {
     rollbackUpdates(libBackups);
     r2 = runComponentOnce(store, cur(), runOpts);
-    steps.push({ step: 'lib-update', rolledBack: true, reason: 'Re-Test rot nach Update — zurückgerollt' });
+    steps.push({ step: 'lib-update', rolledBack: true, reason: 'regression on re-test after update — rolled back' });
   }
 
   // 4b) BREAKING-Updates (Major) werden NICHT still in die Baseline getauscht — ein statischer Test
@@ -89,8 +89,8 @@ export async function maintainComponent(store, comp, deps = {}) {
     steps.push({
       step: 'migrate', name: l.name, from: l.from, to: l.to, skipped: true,
       reason: can
-        ? 'Major-Update: die Software migriert per KI-Agent + Coded-UI-Test; Übernahme erst nach Review (Upload/PR)'
-        : 'Major-Update: KI-Backend erforderlich, damit die Software die Migration durchführt',
+        ? 'Major update: the software migrates via AI agent + coded UI test; adopted only after review (upload/PR)'
+        : 'Major update: an AI backend is required for the software to perform the migration',
     });
   }
 
