@@ -85,6 +85,7 @@ export async function metaApiHandler(method, pathname, body, ctx) {
       schedule: settings.schedule,
       scheduleEnabled: !!settings.scheduleEnabled,
       allowPush: !!settings.allowPush,
+      autoRepair: !!settings.autoRepair,
       smtp: settings.smtp,
       aiBackend: aiBackendView(settings),
     });
@@ -98,6 +99,7 @@ export async function metaApiHandler(method, pathname, body, ctx) {
         if (body?.schedule != null) setSchedule(settings, body.schedule);
         if (body?.scheduleEnabled != null) settings.scheduleEnabled = !!body.scheduleEnabled;
         if (body?.allowPush != null) settings.allowPush = !!body.allowPush;
+        if (body?.autoRepair != null) settings.autoRepair = !!body.autoRepair;
         return { status: 200, body: view() };
       } catch (err) {
         return { status: 400, body: { error: String(err?.message ?? err) } };

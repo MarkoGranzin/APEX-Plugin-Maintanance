@@ -202,6 +202,9 @@
     </div>
     <div class="inline" style="margin-top:8px"><button onclick="testAi()">🔌 Test connection</button><span id="aiTestOut" class="muted small"></span></div>
 
+    <h3 style="margin:18px 0 4px;font-size:1rem">Automation</h3>
+    <div class="chk"><input type="checkbox" id="autoRepair"><span><b>Auto-repair after a check</b> — when a check finds issues, run the full maintenance (safe fixes + safe lib updates + re-test). Breaking changes/push stay gated.</span></div>
+
     <h3 style="margin:18px 0 4px;font-size:1rem">Upload &amp; security</h3>
     <div class="chk"><input type="checkbox" id="allowPush"><span><b>Allow push to remote</b> — unchecked keeps it at local branch+commit (no upload, not even in the job)</span></div>
 
@@ -706,7 +709,7 @@ function openSettings(){
   $('workDir').value = s.workDir||'';
   $('aiKind').value = ai.kind||'stub'; $('aiCommand').value=ai.command||''; $('aiEndpoint').value=ai.endpoint||''; $('aiModel').value=ai.model||''; $('aiKey').value=''; $('aiKeyState').textContent=ai.hasKey?'(key stored)':''; $('aiTestOut').textContent='';
   $('schedEnabled').checked=!!s.scheduleEnabled; $('schedule').value=s.schedule||''; updateSchedHint();
-  $('allowPush').checked=!!s.allowPush;
+  $('allowPush').checked=!!s.allowPush; $('autoRepair').checked=!!s.autoRepair;
   $('smtpHost').value=sm.host||''; $('smtpPort').value=sm.port||587; $('smtpSecure').checked=!!sm.secure; $('smtpUser').value=sm.user||''; $('smtpFrom').value=sm.from||''; $('smtpPass').value=''; $('reportOut').textContent='';
   $('recipients').value=(s.recipients||[]).join(', ');
   toggleAi(); $('settingsBg').classList.add('open');
@@ -729,7 +732,7 @@ async function saveSettingsAll(){
     const ai = { kind:$('aiKind').value, command:$('aiCommand').value.trim()||undefined, endpoint:$('aiEndpoint').value.trim()||undefined, model:$('aiModel').value.trim()||undefined };
     const smtp = { host:$('smtpHost').value.trim(), port:Number($('smtpPort').value)||587, secure:$('smtpSecure').checked, user:$('smtpUser').value.trim(), from:$('smtpFrom').value.trim() };
     const recipients = $('recipients').value.split(',').map(x=>x.trim()).filter(Boolean);
-    await api('PUT','/api/settings',{ workDir:$('workDir').value.trim(), aiBackend:ai, smtp, recipients, schedule:$('schedule').value.trim(), scheduleEnabled:$('schedEnabled').checked, allowPush:$('allowPush').checked });
+    await api('PUT','/api/settings',{ workDir:$('workDir').value.trim(), aiBackend:ai, smtp, recipients, schedule:$('schedule').value.trim(), scheduleEnabled:$('schedEnabled').checked, allowPush:$('allowPush').checked, autoRepair:$('autoRepair').checked });
     if($('aiKey').value) await api('POST','/api/ai/key',{key:$('aiKey').value});
     if($('smtpPass').value) await api('POST','/api/smtp/pass',{pass:$('smtpPass').value});
     await loadSettings(); closeSettings(); toast('Settings saved');
@@ -766,13 +769,22 @@ async function runUpdate(){
   }catch(e){ toast('Error: '+e.message); }
 }
 async function runAll(){
-  toast('Checking all components…');
-  try{ const r = await api('POST','/api/run',{}); await load();
-    toast(`Checked: ${r.count} component(s)`);
+  try{
+    const r = await api('POST','/api/run',{}); await load();
+    if(settingsCache.autoRepair){
+      const list = await api('GET','/api/components');
+      const todo = list.filter(c=>c.source && c.status && c.status!=='ok' && c.status!=='neu');
+      toast(`Auto-repair: ${todo.length} component(s)…`);
+      for(const c of todo){ try{ await api('POST',`/api/components/${c.id}/maintain`,{}); }catch{} }
+      await load();
+      toast(`Checked + repaired (${todo.length})`);
+    } else { toast(`Checked: ${r.count} component(s)`); }
   }catch(e){ toast('Error: '+e.message); }
 }
 async function runOne(){
   if(!current) return;
+  // Auto-repair: ein Check stößt direkt die volle (sichere) Pflege an
+  if(settingsCache.autoRepair) return runMaintain();
   const id = current.id;
   toast('Checking…');
   try{ const r = await api('POST',`/api/components/${id}/run`,{}); await openDetail(id); load(); toast(`Checked: ${r.summary}`); }
@@ -815,7 +827,7 @@ async function loadLibraries(){
 }
 
 // Build-Marker: muss mit BUILD in start.js übereinstimmen. Erkennt einen veralteten Backend-Prozess.
-const APP_BUILD = '2026-06-25.5';
+const APP_BUILD = '2026-06-25.6';
 async function checkBackend(){
   const b = $('staleBanner');
   try{
