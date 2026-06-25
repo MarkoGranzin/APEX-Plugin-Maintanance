@@ -23,7 +23,7 @@ function toMap(results) {
   const m = new Map();
   const entries = results instanceof Map ? [...results.entries()].map(([k, v]) => ({ id: k, ...(typeof v === 'string' ? { status: v } : v) })) : (results ?? []);
   for (const r of entries) {
-    const key = r.id ?? r.title ?? r.name;
+    const key = r.id ?? r.scenario ?? r.title ?? r.name;
     if (key == null) continue;
     m.set(String(key), toStatus(r));
   }

@@ -75,7 +75,7 @@ export function createComponentStore(opts = {}) {
     update: (id, patch = {}) => {
       const c = find(id);
       if (!c) return null;
-      for (const k of ['name', 'type', 'repo', 'source', 'visibility', 'secretRef', 'path', 'critical', 'format', 'status', 'lastChange', 'lastLog', 'testPlan', 'coverage', 'codedTests', 'libs', 'libWarning', 'libsCheckedAt', 'uiTestUrl', 'reviewUrl', 'reviewBranch']) {
+      for (const k of ['name', 'type', 'repo', 'source', 'visibility', 'secretRef', 'path', 'critical', 'format', 'status', 'lastChange', 'lastLog', 'testPlan', 'coverage', 'codedTests', 'libs', 'libWarning', 'libsCheckedAt', 'uiTestUrl', 'reviewUrl', 'reviewBranch', 'baseline']) {
         if (k in patch) c[k] = patch[k];
       }
       persist();

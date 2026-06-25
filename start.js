@@ -32,6 +32,7 @@ import { buildSbom } from './src/sbom/sbom.js';
 import { autoFixComponent } from './src/service/autofix.js';
 import { maintainComponent } from './src/service/maintain.js';
 import { runUiTests } from './src/test/run-ui.js';
+import { captureBaseline } from './src/service/baseline.js';
 import { uploadFix } from './src/service/upload.js';
 import { slug as slugify } from './src/util/slug.js';
 import { resolveAiBackend, aiBackendView } from './src/ai/configure.js';
@@ -50,7 +51,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const DATA_DIR = process.env.AISPP_DATA_DIR || path.join(__dirname, 'data');
 // Build-Marker: muss mit APP_BUILD in public/app.html übereinstimmen. Bei Backend-Änderungen erhöhen.
 // Das Frontend vergleicht beide und warnt, wenn der laufende Dienst veraltet ist (Neustart nötig).
-const BUILD = '2026-06-25.8';
+const BUILD = '2026-06-25.9';
 const C = { reset: '\x1b[0m', bold: '\x1b[1m', dim: '\x1b[2m', green: '\x1b[32m', yellow: '\x1b[33m', red: '\x1b[31m', cyan: '\x1b[36m' };
 const c = (col, s) => `${C[col]}${s}${C.reset}`;
 
@@ -119,6 +120,11 @@ function cmdServe(portArg) {
   const sbomDir = path.join(DATA_DIR, 'sbom');
   const onSbom = (component, sbom) => {
     try { fs.mkdirSync(sbomDir, { recursive: true }); fs.writeFileSync(path.join(sbomDir, `${slugify(component.name)}.cdx.json`), JSON.stringify(sbom, null, 2)); } catch {}
+  };
+  // Charakterisierungs-Baseline je Plugin persistent ablegen (F-28/T-92)
+  const baselineDir = path.join(DATA_DIR, 'baseline');
+  const onBaseline = (component, baseline) => {
+    try { fs.mkdirSync(baselineDir, { recursive: true }); fs.writeFileSync(path.join(baselineDir, `${slugify(component.name)}.json`), JSON.stringify(baseline, null, 2)); } catch {}
   };
   // Report aus dem aktuellen Stand aller Komponenten bauen
   const buildReport = () => {
@@ -330,6 +336,16 @@ function cmdServe(portArg) {
       const hasPlaywright = fs.existsSync(path.join(__dirname, 'node_modules', '@playwright', 'test'));
       const r = await runUiTests(store.get(id), { pluginUrl: url, specsDir: path.join(DATA_DIR, 'ui-tests', slugify(c.name)), hasPlaywright });
       return json(res, r);
+    });
+
+    // Charakterisierungs-Baseline aufnehmen (F-28/T-92): Ist-Verhalten als Spec festnageln → async
+    if (p.startsWith('/api/components/') && p.endsWith('/baseline') && req.method === 'POST') return withComponent(async (c, id) => {
+      const body = await readBody(req);
+      const url = (body?.url || c.uiTestUrl || '').trim();
+      if (url && url !== c.uiTestUrl) store.update(id, { uiTestUrl: url });
+      const hasPlaywright = fs.existsSync(path.join(__dirname, 'node_modules', '@playwright', 'test'));
+      const b = await captureBaseline(store, store.get(id), { pluginUrl: url, specsDir: path.join(DATA_DIR, 'ui-tests', slugify(c.name)), hasPlaywright, onBaseline });
+      return json(res, b);
     });
 
     // SBOM (CycloneDX) der Komponente — für Review/Visualisierung (T-69) → GET
