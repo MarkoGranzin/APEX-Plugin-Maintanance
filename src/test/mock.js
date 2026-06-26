@@ -152,12 +152,16 @@ ${fns || '(none)'}
 Plugin source (excerpt):
 ${src}
 
+Goal: a FUNCTIONAL mock that actually RENDERS the plugin WITH realistic sample data — not an empty mount. Study the source to understand how the plugin gets its data and what it produces, then feed it that data so its visual output appears.
+
 Requirements for the page:
-- Provide a realistic apex.* shim covering the apex.* calls above (apex.item/$v/$s/apex.server.process/apex.jQuery/apex.message/apex.debug/apex.region/etc.) so the plugin does not crash at load.
-- Create the DOM elements the plugin needs (a visible <div id="mock-root"> mount plus elements for the detected selectors).
-- Load the libraries and plugin files via <script src> (NOT inline) using the exact paths above.
-- Initialize the plugin the way APEX would: call its entry point(s) with plausible attributes/options.
-- Wrap initialization in try/catch; collect any errors in window.__mockErrors (array). Set window.__ok = (window.__mockErrors.length === 0). Add window.onerror to push to window.__mockErrors.
+- STUDY THE DATA FLOW in the source: how does the plugin obtain data (apex.server.process / apex.jQuery.ajax / item values via $v/apex.item / plugin attributes/options / jsonpath over a JSON string)? What output does it build (e.g. an mxGraph flow chart, an SVG, a list)? Infer the exact data SHAPE it expects.
+- PROVIDE REALISTIC SAMPLE DATA matching that shape so the plugin renders real content (e.g. a flow chart with several nodes + edges). Make the apex shim return it: apex.server.process(name, opts) and apex.jQuery.ajax resolve/callback with a plausible response; set item values ($v/apex.item) and pass plausible plugin attributes/options to the init call. Embed the sample data inline.
+- Provide a realistic apex.* shim covering the apex.* calls above (apex.item/$v/$s/apex.server.process/apex.jQuery/apex.message/apex.debug/apex.region/apex.util/etc.) so the plugin does not crash.
+- Create the DOM the plugin needs: a visible <div id="mock-root"> mount (give it a real size, e.g. width:600px;height:400px) plus elements for the detected selectors. The plugin's rendered output MUST appear inside #mock-root.
+- Load libraries and plugin files via <script src> (NOT inline) using the exact paths above; then initialize the plugin the way APEX would.
+- Wrap initialization in try/catch; collect errors in window.__mockErrors (array); add window.onerror to push to it. Set window.__ok = (window.__mockErrors.length === 0). Also set window.__rendered = (document.querySelector('#mock-root') has non-trivial child content, i.e. the plugin produced output).
+- Show a short visible status line (e.g. #mock-status) reporting __ok / __rendered, so a human opening the page sees whether it worked.
 - Return ONLY the complete HTML document (no Markdown, no comments outside HTML).`;
 }
 
