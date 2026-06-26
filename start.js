@@ -24,7 +24,6 @@ import { createComponentStore } from './src/gui/store.js';
 import { apiHandler, metaApiHandler } from './src/gui/api.js';
 import { defaultGather } from './src/gui/components.js';
 import { syncRepo } from './src/service/workspace.js';
-import { runManaged } from './src/service/run-component.js';
 import { autoUpdateComponent } from './src/service/update-component.js';
 import { applyVendoredUpdates } from './src/service/lib-update.js';
 import { assignRepoToComponent } from './src/service/assign-repo.js';
@@ -55,7 +54,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const DATA_DIR = process.env.AISPP_DATA_DIR || path.join(__dirname, 'data');
 // Build-Marker: muss mit APP_BUILD in public/app.html übereinstimmen. Bei Backend-Änderungen erhöhen.
 // Das Frontend vergleicht beide und warnt, wenn der laufende Dienst veraltet ist (Neustart nötig).
-const BUILD = '2026-06-26.14';
+const BUILD = '2026-06-26.15';
 const C = { reset: '\x1b[0m', bold: '\x1b[1m', dim: '\x1b[2m', green: '\x1b[32m', yellow: '\x1b[33m', red: '\x1b[31m', cyan: '\x1b[36m' };
 const c = (col, s) => `${C[col]}${s}${C.reset}`;
 
@@ -215,12 +214,11 @@ function cmdServe(portArg) {
         record({ id: `run-${repo}-${history.runs.length + 1}`, status: 'red', failures: [{ artifact: repo, reason: String(err?.message ?? err) }], repo });
         return;
       }
-      // Vollautomatische Pflege = dieselbe Orchestrierung wie der manuelle „Vollständige Pflege"-Button (T-66)
-      const ai = resolveAiBackend(settings, secretStore);
+      // Vollautomatische Pflege = dieselbe Orchestrierung wie der manuelle „Full maintenance now"-Button
+      // (T-66): inkl. Mock + verifizierter Lib-Migration (B-17). Job committet/pusht bei grün (Push nur allowPush).
       for (const c of store.list().filter((x) => x.repo === repo)) {
         try {
-          // Job: automatisch committen/pushen, ABER nur wenn der Lauf grün ist (in maintainComponent gegated)
-          await maintainComponent(store, c, { ai, updateDeps: { push: localGitPush(c.path), registry: prRegistry, recordRun: record }, logSink: writeLog, onTestPlan, onSbom, recordRun: record, autoUpload: true, upload: uploadFor(true) });
+          await fullMaintain(c, { autoUpload: true });
         } catch (err) {
           record({ id: `maint-${repo}-${history.runs.length + 1}`, status: 'red', failures: [{ artifact: c.name, reason: String(err?.message ?? err) }], repo });
         }
@@ -266,6 +264,37 @@ function cmdServe(portArg) {
   // SICHERHEIT (T-76): tatsächlich gepusht wird NUR, wenn der Nutzer es in den Einstellungen erlaubt hat.
   // Ohne Erlaubnis bleibt es bei einem lokalen Branch+Commit (pushed:false).
   const uploadFor = (push) => async (comp) => uploadFix(comp, { git: gitFor(comp.path), push: !!(push && settings.allowPush), stamp: stampNow() });
+
+  // Vollständige Pflege-Orchestrierung (T-66) — EINE Quelle für den Button UND den autonomen Lauf
+  // (Scheduler/Cron), damit das Tool standalone wirklich pflegt: Mock sicherstellen → maintainComponent
+  // (check/safe-updates/autofix/re-test) → bei breaking Libs: Baseline gegen den Mock + verifizierte
+  // Migration (redevelopComponent, B-17 tauscht die Libs real) → adopt „wie zuvor" / sonst Rollback.
+  const fullMaintain = async (component, opts = {}) => {
+    const id = component.id;
+    const ai = resolveAiBackend(settings, secretStore);
+    const hasPlaywright = fs.existsSync(path.join(__dirname, 'node_modules', '@playwright', 'test'));
+    const specsDir = path.join(DATA_DIR, 'ui-tests', slugify(component.name));
+    await buildMockFor(store.get(id)); // Auto-Mock sicherstellen (Default-UI-Test-Ziel)
+    const maintainOpts = { ai, updateDeps: { push: localGitPush(component.path), registry: prRegistry, recordRun: record }, logSink: writeLog, onTestPlan, onSbom, recordRun: record };
+    if (opts.autoUpload) { maintainOpts.autoUpload = true; maintainOpts.upload = uploadFor(true); } // Job: bei grün auto-commit (Push nur bei allowPush)
+    const r = await maintainComponent(store, store.get(id), maintainOpts);
+    const breaking = (r.steps || []).filter((s) => s.step === 'migrate' && s.skipped);
+    if (breaking.length && r.skipped !== true) {
+      if (!hasPlaywright) r.migration = { skipped: true, reason: 'Playwright not installed — needed for the verified migration (Tests tab → Install Playwright)' };
+      else if (ai.kind === 'stub') r.migration = { skipped: true, reason: 'No AI backend — needed for the migration (Settings → Test connection)' };
+      else {
+        let comp = store.get(id);
+        if (!comp.baseline || !(comp.baseline.green > 0)) { await captureBaseline(store, comp, { specsDir, hasPlaywright, onBaseline }); comp = store.get(id); }
+        if (comp.baseline && comp.baseline.green > 0) {
+          r.migration = await redevelopComponent(store, store.get(id), { ai, specsDir, hasPlaywright, reviewFix: autoReviewFix, upload: uploadFor(true) });
+          const fresh = store.get(id); r.after = fresh.status; r.rebuilt = !!fresh.rebuilt;
+        } else {
+          r.migration = { skipped: true, reason: comp.baseline ? 'Mock baseline not green — migration cannot be verified “as before” (the mock does not load the plugin cleanly)' : 'No baseline could be captured' };
+        }
+      }
+    }
+    return r;
+  };
 
   // API-Kontexte (T-32/T-34, F-18, F-19)
   const apiCtx = { store, gather: defaultGather, opener: {}, scan: scanRepo, logSink: writeLog, onTestPlan, onSbom };
@@ -515,33 +544,7 @@ function cmdServe(portArg) {
 
     // Vollständige Pflege (manuell = automatisch) — eine Orchestrierung (T-66) → async
     if (p.startsWith('/api/components/') && p.endsWith('/maintain') && req.method === 'POST') return withComponentRunning(async (c, id) => {
-      const ai = resolveAiBackend(settings, secretStore);
-      const hasPlaywright = fs.existsSync(path.join(__dirname, 'node_modules', '@playwright', 'test'));
-      const sl = slugify(c.name);
-      const specsDir = path.join(DATA_DIR, 'ui-tests', sl);
-      // 0) Auto-Mock sicherstellen (vorhandenen wiederverwenden; sonst bauen) — Default-UI-Test-Ziel (T-97/T-101)
-      await buildMockFor(store.get(id));
-      // 1) Normale Pflege: check → web-libcheck → safe Lib-Updates → autofix → re-test → breaking melden → upload(gated)
-      const r = await maintainComponent(store, store.get(id), { ai, updateDeps: { push: localGitPush(c.path), registry: prRegistry, recordRun: record }, logSink: writeLog, onTestPlan, onSbom, recordRun: record });
-      // 2) Breaking Libs? → Baseline gegen den Mock + verifizierte Migration (works-as-before), sonst Rollback
-      const breaking = (r.steps || []).filter((s) => s.step === 'migrate' && s.skipped);
-      if (breaking.length && r.skipped !== true) {
-        if (!hasPlaywright) r.migration = { skipped: true, reason: 'Playwright not installed — needed for the verified migration (Tests tab → Install Playwright)' };
-        else if (ai.kind === 'stub') r.migration = { skipped: true, reason: 'No AI backend — needed for the migration (Settings → Test connection)' };
-        else {
-          let comp = store.get(id);
-          if (!comp.baseline || !(comp.baseline.green > 0)) {
-            await captureBaseline(store, comp, { specsDir, hasPlaywright, onBaseline });
-            comp = store.get(id);
-          }
-          if (comp.baseline && comp.baseline.green > 0) {
-            r.migration = await redevelopComponent(store, store.get(id), { ai, specsDir, hasPlaywright, reviewFix: autoReviewFix, upload: uploadFor(true) });
-            const fresh = store.get(id); r.before = r.before; r.after = fresh.status; r.rebuilt = !!fresh.rebuilt;
-          } else {
-            r.migration = { skipped: true, reason: comp.baseline ? 'Mock baseline not green — migration cannot be verified “as before” (the mock does not load the plugin cleanly)' : 'No baseline could be captured' };
-          }
-        }
-      }
+      const r = await fullMaintain(store.get(id)); // gleiche Orchestrierung wie der autonome Lauf
       return json(res, r, r?.error ? 400 : 200);
     });
 
@@ -601,8 +604,11 @@ function cmdServe(portArg) {
     console.log(c('dim', '  Beenden mit Strg+C.\n'));
   });
 
-  // Zeitplan: jede Minute prüfen, ob der automatische Check fällig ist (Cron, settings.schedule)
+  // Zeitplan: jede Minute prüfen, ob der automatische Lauf fällig ist (Cron, settings.schedule).
+  // STANDALONE-Pflege: der geplante Lauf macht die VOLLE Pflege (fullMaintain inkl. verifizierter
+  // Lib-Migration) für jede verwaltete Komponente — nicht nur scannen — und mailt danach den Report.
   let lastTick = '';
+  let scheduledRunning = false;
   setInterval(() => {
     try {
       if (!settings.scheduleEnabled || !settings.schedule) return;
@@ -610,13 +616,23 @@ function cmdServe(portArg) {
       const stamp = now.toISOString().slice(0, 16);
       if (stamp === lastTick || !cronMatches(settings.schedule, now)) return;
       lastTick = stamp;
-      console.log(c('dim', `  [${now.toLocaleString('de-DE')}] geplanter Check läuft …`));
-      runManaged({ store, scan: scanRepo, recordRun: record, logSink: writeLog, onTestPlan, onSbom });
-      if (settings.recipients?.length && settings.smtp?.host) {
-        let pass; try { pass = secretStore.get('smtp-pass'); } catch {}
-        sendReportMail(buildReport(), { smtp: settings.smtp, pass, recipients: settings.recipients }).catch(() => {});
-      }
-    } catch {}
+      if (scheduledRunning) return; // vorheriger geplanter Lauf noch aktiv → überspringen
+      scheduledRunning = true;
+      console.log(c('dim', `  [${now.toLocaleString('de-DE')}] geplanter Pflege-Lauf läuft …`));
+      (async () => {
+        try {
+          for (const comp of store.list()) {
+            if (!comp.path || !fs.existsSync(comp.path)) continue; // nur angebundene Komponenten
+            try { await fullMaintain(comp, { autoUpload: true }); }
+            catch (err) { record({ id: `sched-${comp.id}-${history.runs.length + 1}`, status: 'red', failures: [{ artifact: comp.name, reason: String(err?.message ?? err) }] }); }
+          }
+          if (settings.recipients?.length && settings.smtp?.host) {
+            let pass; try { pass = secretStore.get('smtp-pass'); } catch {}
+            await sendReportMail(buildReport(), { smtp: settings.smtp, pass, recipients: settings.recipients }).catch(() => {});
+          }
+        } finally { scheduledRunning = false; }
+      })();
+    } catch { scheduledRunning = false; }
   }, 60000);
 }
 
