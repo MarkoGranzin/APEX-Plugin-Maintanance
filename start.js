@@ -28,7 +28,7 @@ import { autoUpdateComponent } from './src/service/update-component.js';
 import { applyVendoredUpdates } from './src/service/lib-update.js';
 import { assignRepoToComponent } from './src/service/assign-repo.js';
 import { autoReviewFix } from './src/service/autoreview.js';
-import { checkLibrariesOnline } from './src/service/lib-check.js';
+import { checkLibrariesOnline, libWarningFrom } from './src/service/lib-check.js';
 import { buildSbom } from './src/sbom/sbom.js';
 import { autoFixComponent } from './src/service/autofix.js';
 import { maintainComponent } from './src/service/maintain.js';
@@ -54,7 +54,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const DATA_DIR = process.env.AISPP_DATA_DIR || path.join(__dirname, 'data');
 // Build-Marker: muss mit APP_BUILD in public/app.html übereinstimmen. Bei Backend-Änderungen erhöhen.
 // Das Frontend vergleicht beide und warnt, wenn der laufende Dienst veraltet ist (Neustart nötig).
-const BUILD = '2026-06-26.16';
+const BUILD = '2026-06-26.17';
 const C = { reset: '\x1b[0m', bold: '\x1b[1m', dim: '\x1b[2m', green: '\x1b[32m', yellow: '\x1b[33m', red: '\x1b[31m', cyan: '\x1b[36m' };
 const c = (col, s) => `${C[col]}${s}${C.reset}`;
 
@@ -294,6 +294,12 @@ function cmdServe(portArg) {
           r.migration = { skipped: true, reason: comp.baseline ? 'Mock baseline not green — migration cannot be verified “as before” (the mock does not load the plugin cleanly)' : 'No baseline could be captured' };
         }
       }
+    }
+    // B-19: nach erfolgreichem Adopt die Erkennung auffrischen, damit Libs/Status/Badges die NEUEN
+    // (getauschten) Versionen zeigen und „vulnerable/outdated" verschwindet (rebuilt-Flag bleibt).
+    if (r.rebuilt) {
+      try { runComponentOnce(store, store.get(id), { scan: scanRepo, logSink: writeLog, onTestPlan, onSbom }); } catch { /* egal */ }
+      try { const enr = await checkLibrariesOnline(store.get(id).libs || []); store.update(id, { libs: enr, libWarning: libWarningFrom(enr) }); } catch { /* offline → später */ }
     }
     return r;
     } finally { RUNNING.delete(id); }
