@@ -67,6 +67,13 @@ export async function redevelopComponent(store, comp, deps = {}) {
   catch (e) { return { error: 'Migration fehlgeschlagen: ' + (e?.message ?? e) }; }
   if (!mig?.changed) return { adopted: false, reason: mig?.summary || 'keine Änderung durch die Migration', migration: mig?.summary };
 
+  // 1b) Review + Rework-Loop: Security/Code-Gate → KI-Fix → Re-Review (bis grün/Limit), VOR dem UI-Gate.
+  let review = null;
+  if (deps.reviewFix && ai && ai.kind !== 'stub') {
+    try { const rv = await deps.reviewFix(store, store.get(comp.id) ?? comp, { ai }); review = { pass: !!rv?.pass, attempts: rv?.attempts ?? 0, error: rv?.error }; }
+    catch (e) { review = { pass: false, error: String(e?.message ?? e) }; }
+  }
+
   // 2) UI-Tests erneut gegen den migrierten Build
   const runDetailed = deps.runDetailed ?? runUiTestsDetailed;
   const cur = store.get(comp.id) ?? comp;
@@ -83,10 +90,10 @@ export async function redevelopComponent(store, comp, deps = {}) {
     const target = (store.get(comp.id)?.libs ?? comp.libs ?? []).filter((l) => l.latest).map((l) => `${l.name}@${l.latest}`).join(', ') || 'latest';
     store.update(comp.id, { rebuilt: true, rebuiltAt: now(), rebuiltTo: target, rebuiltSummary: mig.summary, verifiedAsBefore: true, reviewUrl: upload?.prUrl ?? (store.get(comp.id)?.reviewUrl ?? null), reviewBranch: upload?.branch ?? (store.get(comp.id)?.reviewBranch ?? null) });
     store.addReview?.(comp.id, { kind: 'redev', pass: true, migration: mig.summary });
-    return { adopted: true, at: now(), migration: mig.summary, rebuiltTo: target, gate, upload };
+    return { adopted: true, at: now(), migration: mig.summary, rebuiltTo: target, gate, review, upload };
   }
   // Regress → Rollback (nichts wird ohne „grün wie zuvor" übernommen)
   if (mig.rollback) await mig.rollback();
   store.addReview?.(comp.id, { kind: 'redev', pass: false, regressions: gate.regressions?.length ?? 0 });
-  return { adopted: false, at: now(), migration: mig.summary, gate, regressions: gate.regressions };
+  return { adopted: false, at: now(), migration: mig.summary, gate, review, regressions: gate.regressions };
 }

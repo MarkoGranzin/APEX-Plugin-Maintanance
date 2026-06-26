@@ -2,8 +2,9 @@ import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { detectArtifacts, sqlSignals } from '../src/inventory/inventory.js';
+import { detectArtifacts, sqlSignals, listFiles } from '../src/inventory/inventory.js';
 import { detectFormat, enrichWithFormat, FORMAT, TEST_PATH } from '../src/inventory/format.js';
+import { detectVendoredLibraries } from '../src/sbom/vendored.js';
 
 let repo;
 
@@ -72,6 +73,31 @@ describe('T-2 Plugin-/Komponenten-Erkennung', () => {
   it('sqlSignals erkennt Export- und Package-Signale', () => {
     expect(sqlSignals('wwv_flow_api.create_plugin(...)').isApexExport).toBe(true);
     expect(sqlSignals('CREATE OR REPLACE PACKAGE x AS END;').isPlSqlPackage).toBe(true);
+  });
+});
+
+describe('T-99 .maintenance wird ignoriert (erzeugte Artefakte committet, nicht erkannt)', () => {
+  let dir;
+  beforeAll(() => {
+    dir = fs.mkdtempSync(path.join(os.tmpdir(), 'maint-ign-'));
+    fs.mkdirSync(path.join(dir, '.maintenance', 'mock', 'js', 'lib'), { recursive: true });
+    fs.writeFileSync(path.join(dir, '.maintenance', 'mock', 'js', 'lib', 'three.js'), "var THREE={REVISION:'160'};");
+    fs.writeFileSync(path.join(dir, '.maintenance', 'mock', 'index.html'), '<html></html>');
+    fs.mkdirSync(path.join(dir, 'js', 'lib'), { recursive: true });
+    fs.writeFileSync(path.join(dir, 'js', 'lib', 'jquery.min.js'), '/*! jQuery v3.4.1 */');
+  });
+  afterAll(() => fs.rmSync(dir, { recursive: true, force: true }));
+
+  it('listFiles überspringt .maintenance', () => {
+    const files = listFiles(dir);
+    expect(files.some((f) => f.includes('.maintenance'))).toBe(false);
+    expect(files.some((f) => /jquery/.test(f))).toBe(true);
+  });
+
+  it('die kopierte Lib im Mock wird NICHT als zusätzliche Lib erkannt', () => {
+    const libs = detectVendoredLibraries(dir);
+    expect(libs.some((l) => l.name === 'three')).toBe(false); // nur im .maintenance-Mock → ignoriert
+    expect(libs.some((l) => l.name === 'jquery')).toBe(true);
   });
 });
 

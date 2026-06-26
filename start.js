@@ -55,7 +55,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const DATA_DIR = process.env.AISPP_DATA_DIR || path.join(__dirname, 'data');
 // Build-Marker: muss mit APP_BUILD in public/app.html übereinstimmen. Bei Backend-Änderungen erhöhen.
 // Das Frontend vergleicht beide und warnt, wenn der laufende Dienst veraltet ist (Neustart nötig).
-const BUILD = '2026-06-26.1';
+const BUILD = '2026-06-26.2';
 const C = { reset: '\x1b[0m', bold: '\x1b[1m', dim: '\x1b[2m', green: '\x1b[32m', yellow: '\x1b[33m', red: '\x1b[31m', cyan: '\x1b[36m' };
 const c = (col, s) => `${C[col]}${s}${C.reset}`;
 
@@ -134,15 +134,17 @@ function cmdServe(portArg) {
   const onBaseline = (component, baseline) => {
     try { fs.mkdirSync(baselineDir, { recursive: true }); fs.writeFileSync(path.join(baselineDir, `${slugify(component.name)}.json`), JSON.stringify(baseline, null, 2)); } catch {}
   };
-  // Auto-Mock je Plugin (F-28/T-97): self-contained Testseite nach dem Clone bauen, statisch ausliefern,
-  // als Default-UI-Test-URL setzen → manuell testbar + Grundlage für Baseline/Migration.
-  const mocksDir = path.join(DATA_DIR, 'mocks');
+  // Auto-Mock je Plugin (F-28/T-97/T-99): self-contained Testseite + generierte Tests INS REPO schreiben
+  // (unter <repo>/.maintenance/), damit sie beim Upload mitcommittet werden; von dort statisch ausliefern.
   const buildMockFor = (component) => {
     try {
       if (!component?.path || !fs.existsSync(component.path)) return null;
       const sl = slugify(component.name);
       const gen = generateMock(component.path, { name: component.name });
-      writeMock(path.join(mocksDir, sl), component.path, gen);
+      writeMock(path.join(component.path, '.maintenance', 'mock'), component.path, gen); // committet (git add .)
+      const testsDir = path.join(component.path, '.maintenance', 'tests');
+      fs.mkdirSync(testsDir, { recursive: true });
+      fs.writeFileSync(path.join(testsDir, gen.spec.name), gen.spec.content);
       const mockUrl = `http://localhost:${port}/mock/${sl}/index.html`;
       const cur = store.get(component.id) || {};
       const patch = { mockUrl, codedTests: [...(cur.codedTests || []).filter((t) => t.name !== gen.spec.name), gen.spec] };
@@ -259,12 +261,16 @@ function cmdServe(portArg) {
     // Web-GUI + Doku
     if (p === '/' || p === '/app.html') return serveFile(res, path.join(__dirname, 'public', 'app.html'), 'text/html');
 
-    // Auto-Mock-Seiten statisch ausliefern (F-28/T-97): /mock/<slug>/... → DATA_DIR/mocks/<slug>/...
+    // Auto-Mock-Seiten statisch ausliefern (F-28/T-97/T-99): /mock/<slug>/... → <repo>/.maintenance/mock/...
     if (p.startsWith('/mock/')) {
-      const rel = decodeURIComponent(p.slice('/mock/'.length));
-      const file = path.normalize(path.join(mocksDir, rel));
-      if (!file.startsWith(path.normalize(mocksDir))) { res.writeHead(403); return res.end('forbidden'); }
-      const target = file.endsWith(path.sep) || p.endsWith('/') ? path.join(file, 'index.html') : file;
+      const rest = decodeURIComponent(p.slice('/mock/'.length));
+      const sl = rest.split('/')[0];
+      const sub = rest.slice(sl.length + 1) || 'index.html';
+      const comp = store.list().find((x) => slugify(x.name) === sl);
+      if (!comp?.path) { res.writeHead(404, { 'Content-Type': 'text/plain' }); return res.end('mock not found'); }
+      const base = path.normalize(path.join(comp.path, '.maintenance', 'mock'));
+      const target = path.normalize(path.join(base, sub || 'index.html'));
+      if (!target.startsWith(base)) { res.writeHead(403); return res.end('forbidden'); }
       if (!fs.existsSync(target)) { res.writeHead(404, { 'Content-Type': 'text/plain' }); return res.end('mock not found'); }
       const ext = path.extname(target).toLowerCase();
       const ct = ext === '.html' ? 'text/html' : ext === '.js' ? 'text/javascript' : ext === '.css' ? 'text/css' : 'application/octet-stream';
@@ -480,7 +486,7 @@ function cmdServe(portArg) {
             comp = store.get(id);
           }
           if (comp.baseline && comp.baseline.green > 0) {
-            r.migration = await redevelopComponent(store, store.get(id), { ai, specsDir, hasPlaywright, upload: uploadFor(true) });
+            r.migration = await redevelopComponent(store, store.get(id), { ai, specsDir, hasPlaywright, reviewFix: autoReviewFix, upload: uploadFor(true) });
             const fresh = store.get(id); r.before = r.before; r.after = fresh.status; r.rebuilt = !!fresh.rebuilt;
           } else {
             r.migration = { skipped: true, reason: comp.baseline ? 'Mock baseline not green — migration cannot be verified “as before” (the mock does not load the plugin cleanly)' : 'No baseline could be captured' };

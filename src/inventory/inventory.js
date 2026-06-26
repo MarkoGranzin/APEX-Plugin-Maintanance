@@ -12,7 +12,9 @@
 import fs from 'node:fs';
 import path from 'node:path';
 
-const IGNORED_DIRS = new Set(['.git', 'node_modules', 'dist', 'build', '.idea', '.vscode']);
+// '.maintenance' = von der App erzeugte Artefakte (Mock + generierte Tests) — committet, aber NICHT
+// als Plugin-Code/Libs erkennen (sonst doppelte Lib-Detektion). (F-28/T-99)
+const IGNORED_DIRS = new Set(['.git', 'node_modules', 'dist', 'build', '.idea', '.vscode', '.maintenance']);
 
 /** Liest alle Dateien (rekursiv) als relative Pfade. */
 export function listFiles(rootDir) {

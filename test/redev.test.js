@@ -30,6 +30,22 @@ describe('F-28 T-93 redevelopComponent (Spec-gesicherte Migration)', () => {
     expect(after.rebuiltAt).toBeTruthy();
   });
 
+  it('Review+Rework-Loop laeuft VOR dem UI-Gate; Ergebnis im Resultat (T-100)', async () => {
+    const store = mkStore();
+    const id = withBaseline(store, [{ scenario: 'A', status: 'passed' }]);
+    const order = [];
+    const r = await redevelopComponent(store, store.get(id), {
+      ai: { kind: 'cli' },
+      migrate: async () => { order.push('migrate'); return { changed: true, summary: 'm', backups: new Map(), rollback: () => {} }; },
+      reviewFix: async () => { order.push('review'); return { pass: true, attempts: 2 }; },
+      runDetailed: async () => { order.push('ui'); return { ran: true, scenarios: [{ scenario: 'A', status: 'passed' }] }; },
+      upload: async () => ({ ok: true }),
+    });
+    expect(order).toEqual(['migrate', 'review', 'ui']); // Loop vor dem UI-Gate
+    expect(r.review).toMatchObject({ pass: true, attempts: 2 });
+    expect(r.adopted).toBe(true);
+  });
+
   it('Regress (vorher gruen, jetzt rot) → verworfen + Rollback + Bericht', async () => {
     const store = mkStore();
     const id = withBaseline(store, [{ scenario: 'A', status: 'passed' }]);
