@@ -94,6 +94,11 @@ describe('F-28 T-97 Auto-Mock', () => {
       expect(p).toMatch(/window\.__features/);
       expect(p).toMatch(/window\.__selftested/);
       expect(p).toMatch(/window\.__rendered/);
+      // "works as before": Self-Tests charakterisieren NUR das Ist-Verhalten → müssen am unveränderten Plugin grün sein
+      expect(p).toMatch(/CHARACTERIZE THE PLUGIN AS IT IS/);
+      expect(p).toMatch(/MUST PASS right now/);
+      expect(p).toMatch(/Do NOT invent aspirational/);
+      expect(p).toMatch(/__ok MUST be true for the unmodified plugin/);
       // T-106: Optik realistisch + Self-Tests nicht-destruktiv (sichtbarer Stand bleibt sauber)
       expect(p).toMatch(/VISUAL QUALITY MATTERS/);
       expect(p).toMatch(/HUMAN-READABLE/);
