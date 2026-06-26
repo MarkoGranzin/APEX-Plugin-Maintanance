@@ -87,5 +87,21 @@ describe('F-28 T-97 Auto-Mock', () => {
       expect(gen.mode).toBe('static');
       expect(gen.fallbackReason).toMatch(/AI error.*ENOENT/);
     });
+
+    it('generateAiMock: Prosa-Vorspann der KI wird entfernt (sauberes <!DOCTYPE…</html>)', async () => {
+      const ai = { kind: 'cli', complete: async () => 'I now understand the data flow.\n<!DOCTYPE html>\n<html><body><div id="mock-root"></div><script>window.__ok=true;</script></body></html>\nDone.' };
+      const gen = await generateAiMock(dir, { ai, name: 'Widget' });
+      expect(gen.mode).toBe('ai');
+      expect(gen.html.startsWith('<!DOCTYPE html>')).toBe(true);
+      expect(gen.html.trimEnd().endsWith('</html>')).toBe(true);
+      expect(gen.html).not.toMatch(/I now understand|Done\./);
+    });
+
+    it('generateAiMock: gültige HTML ohne __ok → Vertrag wird injiziert (kein Fallback)', async () => {
+      const ai = { kind: 'cli', complete: async () => '<html><body><div id="mock-root">x</div></body></html>' };
+      const gen = await generateAiMock(dir, { ai, name: 'Widget' });
+      expect(gen.mode).toBe('ai');
+      expect(gen.html).toMatch(/window\.__ok/);
+    });
   });
 });

@@ -162,7 +162,7 @@ Requirements for the page:
 - Load libraries and plugin files via <script src> (NOT inline) using the exact paths above; then initialize the plugin the way APEX would.
 - Wrap initialization in try/catch; collect errors in window.__mockErrors (array); add window.onerror to push to it. Set window.__ok = (window.__mockErrors.length === 0). Also set window.__rendered = (document.querySelector('#mock-root') has non-trivial child content, i.e. the plugin produced output).
 - Show a short visible status line (e.g. #mock-status) reporting __ok / __rendered, so a human opening the page sees whether it worked.
-- Return ONLY the complete HTML document (no Markdown, no comments outside HTML).`;
+- Return ONLY the complete HTML document. Start the response DIRECTLY with <!DOCTYPE html> and end with </html>. Do NOT write any explanation, preamble or prose before or after the HTML, and no Markdown fences.`;
 }
 
 /**
@@ -178,10 +178,21 @@ export async function generateAiMock(dir, deps = {}) {
   let html = '';
   try { html = String(await ai.complete(aiMockPrompt(name, c), {})); }
   catch (e) { return fallback('AI error: ' + (e?.message ?? e)); }
-  html = html.replace(/^```[a-z]*\n?|```\s*$/gi, '').trim();
+  html = html.replace(/```[a-z]*\n?/gi, '').replace(/```/g, '');
+  // Die KI stellt der HTML manchmal Prosa voran ("I now understand…"). Sauber das Dokument extrahieren:
+  // vom ersten <!doctype>/<html> bis zum letzten </html>.
+  const low = html.toLowerCase();
+  let s = low.indexOf('<!doctype'); if (s < 0) s = low.indexOf('<html');
+  if (s > 0) html = html.slice(s);
+  const e = html.toLowerCase().lastIndexOf('</html>');
+  if (e >= 0) html = html.slice(0, e + 7);
+  html = html.trim();
   if (!html) return fallback('AI returned empty');
   if (!/<html[\s>]/i.test(html)) return fallback('AI response was not an HTML document');
-  if (!/__ok/.test(html)) return fallback('AI HTML missing the window.__ok contract');
+  if (!/__ok/.test(html)) { // gültige HTML ohne Vertrag → Vertrag injizieren statt verwerfen
+    html = html.replace(/<\/body>/i, '<script>window.__mockErrors=window.__mockErrors||[];window.addEventListener("error",function(ev){window.__mockErrors.push(String(ev.message||ev));});if(typeof window.__ok==="undefined")window.__ok=(window.__mockErrors.length===0);</script></body>');
+    if (!/__ok/.test(html)) return fallback('AI HTML missing the window.__ok contract');
+  }
   return { html, spec: { name: `${slug(name)}.ui.spec.js`, content: buildMockSpec(name) }, libFiles: c.libFiles, pluginFiles: c.pluginFiles, selectors: c.selectors, entryPoints: c.entryPoints, mode: 'ai' };
 }
 
