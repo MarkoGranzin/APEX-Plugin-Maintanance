@@ -35,4 +35,10 @@ describe('T-62 Tiefen-Analyzer', () => {
     expect(r.ok).toBe(false);
     expect(r.functions).toEqual([]);
   });
+
+  it('$("<span>") ist Element-Erzeugung, kein Selektor (B-16)', () => {
+    const r = analyzeDeep("function make(){ var el = $('<span></span>'); $('#real').append(el); }");
+    expect(r.selectors).not.toContain('<span></span>');   // HTML-Fragment NICHT als Selektor
+    expect(r.selectors).toContain('#real');               // echter Selektor schon
+  });
 });

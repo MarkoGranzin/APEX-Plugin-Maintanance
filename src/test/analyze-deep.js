@@ -43,6 +43,7 @@ function selectorOf(o) {
   const arg = o.arguments?.[0];
   const lit = arg?.type === 'Literal' ? String(arg.value) : null;
   if (!lit) return null;
+  if (/[<>]/.test(lit)) return null; // $('<span>') ist Element-ERZEUGUNG, kein Selektor (B-16)
   if (c?.type === 'Identifier' && (c.name === '$' || c.name === 'jQuery')) return lit;
   if (c?.type === 'MemberExpression') {
     const m = c.property?.name;

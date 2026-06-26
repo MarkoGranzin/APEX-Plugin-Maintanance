@@ -51,4 +51,18 @@ describe('T-64 Coded-UI- & Unit-Generierung', () => {
     const titles = [...spec.matchAll(/test\((["'])((?:\\.|(?!\1).)*)\1/g)].map((m) => m[2]);
     expect(titles.length).toBe(new Set(titles).size); // alle Titel eindeutig
   });
+
+  it('HTML-Fragmente werden nicht zu Selektor-Tests, gültige Selektoren bleiben (B-16)', () => {
+    const deep2 = {
+      functions: [],
+      selectors: ['<span></span>', '<i></i>', '<div></div>', '#t_TreeNav', '.box'],
+      events: [{ type: 'click', selector: '<span>' }, { type: 'click', selector: '#btn' }],
+    };
+    const spec = buildPlaywrightSpec('Frag', deep2);
+    expect(parses(spec)).toBe(true);
+    expect(spec).not.toMatch(/<span>|<i>|<div>/);       // keine HTML-Fragmente als locator
+    expect(spec).toContain('#t_TreeNav');               // gültige Selektoren bleiben
+    expect(spec).toContain('.box');
+    expect(spec).toContain('#btn');
+  });
 });
