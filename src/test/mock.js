@@ -15,7 +15,8 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { detectVendoredLibraries } from '../sbom/vendored.js';
-import { inspectAssets } from '../extract/assets.js';
+import { inspectAssets, parseOk } from '../extract/assets.js';
+import { isLibraryFile } from '../inventory/format.js';
 import { analyzeDeep } from './analyze-deep.js';
 
 const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
@@ -28,12 +29,17 @@ function domFor(sel) {
   return '';
 }
 
-/** Self-contained Mock-Seite (rein). libFiles relativ zur Seite; pluginScripts inline. */
-export function buildMockPage({ name = 'plugin', libFiles = [], pluginScripts = [], selectors = [], entryPoints = [] } = {}) {
+/** Self-contained Mock-Seite (rein). libFiles + pluginFiles werden via <script src> geladen (relativ). */
+export function buildMockPage({ name = 'plugin', libFiles = [], pluginFiles = [], selectors = [], entryPoints = [] } = {}) {
   const dom = [...new Set(selectors.map(domFor).filter(Boolean))].join('\n      ');
   const libTags = libFiles.map((f) => `<script src="${esc(f)}"></script>`).join('\n    ');
-  const plugin = pluginScripts.map((code) => `<script>\ntry{\n${code}\n}catch(e){ window.__mockErrors.push('plugin: '+(e&&e.message||e)); }\n</script>`).join('\n');
-  const entry = entryPoints.map((fn) => `  try{ if(typeof ${fn}==='function'){ ${fn}(); } }catch(e){ window.__mockErrors.push('${esc(fn)}: '+(e&&e.message||e)); }`).join('\n');
+  // Plugin-Code als EXTERNE Dateien laden (kein Inlining → keine HTML-Kontext-/Encoding-Brüche;
+  // ein fehlerhaftes Skript bricht nur sich selbst, sichtbar als pageerror).
+  const plugin = pluginFiles.map((f) => `  <script src="${esc(f)}"></script>`).join('\n');
+  // Einstiegspunkt-Aufrufe sind NICHT fatal: ohne echte APEX-Config scheitern sie oft — das soll die
+  // „lädt sauber"-Baseline nicht rot machen. Erfolge/Fehler je Entry werden separat erfasst (Info bzw.
+  // zusätzliche grüne Szenarien, die eine Migration dann doch schützen, wenn ein Entry hier läuft).
+  const entry = entryPoints.map((fn) => `  try{ if(typeof ${fn}==='function'){ ${fn}(); window.__mockEntry.push({fn:'${esc(fn)}',ok:true}); } }catch(e){ window.__mockEntry.push({fn:'${esc(fn)}',ok:false,error:(e&&e.message||String(e))}); }`).join('\n');
   return `<!doctype html>
 <html><head><meta charset="utf-8"><title>Mock — ${esc(name)}</title></head>
 <body>
@@ -41,22 +47,27 @@ export function buildMockPage({ name = 'plugin', libFiles = [], pluginScripts = 
   <p class="muted">Self-contained test page (apex shim + libs + plugin). For manual testing &amp; the works-as-before baseline.</p>
   <div id="mock-root" style="width:200px;height:60px;border:1px solid #888">plugin mount</div>
       ${dom}
-  <script>window.__mockErrors=[]; window.onerror=function(m){ window.__mockErrors.push(String(m)); };</script>
+  <script>window.__mockErrors=[]; window.__mockEntry=[]; window.onerror=function(m){ window.__mockErrors.push(String(m)); };</script>
     ${libTags}
   <script>
-    // Minimaler apex-Shim (nach den Libs, damit jQuery verfügbar ist)
+    // apex-Shim (nach den Libs, damit jQuery verfügbar ist) — breit genug, damit Plugins beim Laden nicht stolpern
     window.apex = window.apex || {};
     apex.jQuery = window.jQuery || window.$ || undefined; window.$ = window.$ || window.jQuery;
-    apex.item = function(){ return { getValue:function(){return '';}, setValue:function(){}, hide:function(){}, show:function(){} }; };
-    apex.region = function(){ return { refresh:function(){}, widget:function(){return {};} }; };
-    apex.submit = function(){}; apex.debug = function(){}; apex.message = { clearErrors:function(){}, showErrors:function(){}, alert:function(){}, confirm:function(){} };
-    apex.server = { process:function(){ return Promise.resolve({}); }, plugin:function(){ return Promise.resolve({}); } };
-    apex.util = { escapeHTML:function(s){return String(s==null?'':s);}, debounce:function(f){return f;} };
-    apex.env = {}; apex.theme = { defaultStickyTop:function(){return 0;} }; apex.widget = {};
+    var _item = { getValue:function(){return '';}, setValue:function(){}, hide:function(){}, show:function(){}, disable:function(){}, enable:function(){}, isEmpty:function(){return true;}, node:null };
+    apex.item = function(){ return _item; }; apex.items = {}; apex.fileURL = function(p){ return p; };
+    window.$v = function(){ return ''; }; window.$s = function(){}; window.$x = function(){ return null; };
+    apex.region = function(){ return { refresh:function(){}, widget:function(){return {};}, call:function(){} }; };
+    apex.submit = function(){}; apex.debug = Object.assign(function(){}, { info:function(){}, error:function(){}, trace:function(){}, log:function(){} });
+    apex.message = { clearErrors:function(){}, showErrors:function(){}, alert:function(){}, confirm:function(){}, showPageSuccess:function(){} };
+    apex.server = { process:function(){ return Promise.resolve({}); }, plugin:function(){ return Promise.resolve({}); }, url:function(){ return ''; } };
+    apex.util = { escapeHTML:function(s){return String(s==null?'':s);}, debounce:function(f){return f;}, htmlBuilder:function(){ return { markup:function(){return this;}, toString:function(){return '';} }; }, applyTemplate:function(s){return s;} };
+    apex.env = {}; apex.theme = { defaultStickyTop:function(){return 0;} }; apex.widget = {}; apex.lang = { getMessage:function(k){return k;}, formatMessage:function(k){return k;} };
+    apex.actions = { add:function(){}, lookup:function(){}, invoke:function(){} }; apex.navigation = { dialog:function(){}, redirect:function(){} }; apex.clipboard = {};
   </script>
 ${plugin}
   <script>
 ${entry}
+    // Baseline „lädt sauber" = nur Lade-/Top-Level-Fehler zählen (Entry-Aufrufe ohne Config sind nicht fatal)
     window.__ok = (window.__mockErrors.length === 0);
   </script>
 </body></html>`;
@@ -87,22 +98,31 @@ export function generateMock(dir, opts = {}) {
   const libs = detectVendoredLibraries(dir).filter((l) => l.evidence && /\.js$/i.test(l.evidence));
   const libFiles = libs.map((l) => l.evidence);
   const libSet = new Set(libFiles);
-  // Plugin-Eigencode = extrahierte JS/Inline-Assets, die KEINE vendored Lib-Datei sind
-  let pluginScripts = [];
+  // Plugin-Eigencode = extrahierte JS/Inline-Assets, die KEINE vendored Lib sind. WICHTIG: Lib-Kopien
+  // (auch .min, auch wenn nicht die kanonische Evidenz) NICHT inlinen — sie werden via <script src> geladen
+  // (sonst Doppel-Deklaration → Fehler). min/non-min derselben Datei dedupen; nur valides JS aufnehmen.
+  const pluginFiles = []; // [{name, code}] → als externe Dateien plugin/<name> geschrieben + geladen
   const selectors = new Set();
   const entryPoints = new Set();
+  const seen = new Set();
+  let n = 0;
   try {
     for (const a of inspectAssets(dir)) {
-      const isLib = a.origin?.type === 'file' && libSet.has(String(a.origin.path).replace(/\\/g, '/'));
-      if (isLib) continue;
-      if (a.code && a.code.length < 200000) pluginScripts.push(a.code); // riesige Bundles auslassen
+      const rel = a.origin?.type === 'file' ? String(a.origin.path).replace(/\\/g, '/') : '';
+      if (rel && (libSet.has(rel) || isLibraryFile(rel) || /(^|\/)(lib|libs|vendor|vendors|dist)\//i.test(rel))) continue; // Lib → schon als <script src>
+      const base = (rel || a.name || '').replace(/\.min\.js$/i, '.js'); // min/non-min zusammenführen
+      if (base && seen.has(base)) continue; if (base) seen.add(base);
+      if (a.code && parseOk(a.code) && a.code.length < 200000) {
+        const fname = `plugin/${String((rel ? rel.split('/').pop() : a.name) || `inline-${++n}.js`).replace(/[^\w.-]/g, '_').replace(/\.min\.js$/i, '.js')}`;
+        pluginFiles.push({ name: fname, code: a.code });
+      }
       const deep = analyzeDeep(a.code || '');
       for (const s of deep.selectors || []) selectors.add(s);
       for (const f of deep.functions || []) if (f.name && /^(init|refresh|render|draw|setup|load|create|destroy)/i.test(f.name)) entryPoints.add(f.name);
     }
   } catch { /* best effort */ }
-  const html = buildMockPage({ name, libFiles, pluginScripts, selectors: [...selectors], entryPoints: [...entryPoints] });
-  return { html, spec: { name: `${slug(name)}.ui.spec.js`, content: buildMockSpec(name) }, libFiles, selectors: [...selectors], entryPoints: [...entryPoints] };
+  const html = buildMockPage({ name, libFiles, pluginFiles: pluginFiles.map((p) => p.name), selectors: [...selectors], entryPoints: [...entryPoints] });
+  return { html, spec: { name: `${slug(name)}.ui.spec.js`, content: buildMockSpec(name) }, libFiles, pluginFiles, selectors: [...selectors], entryPoints: [...entryPoints] };
 }
 
 const slug = (s) => String(s).toLowerCase().replace(/[^a-z0-9.-]+/g, '-').replace(/^-|-$/g, '') || 'plugin';
@@ -117,6 +137,9 @@ export function writeMock(mockDir, repoDir, gen) {
       fs.mkdirSync(path.dirname(dst), { recursive: true });
       fs.copyFileSync(src, dst);
     } catch { /* Lib fehlt → Mock lädt sie eben nicht */ }
+  }
+  for (const pf of gen.pluginFiles || []) {
+    try { const dst = path.join(mockDir, pf.name); fs.mkdirSync(path.dirname(dst), { recursive: true }); fs.writeFileSync(dst, pf.code); } catch { /* skip */ }
   }
   fs.writeFileSync(path.join(mockDir, 'index.html'), gen.html);
   return path.join(mockDir, 'index.html');
