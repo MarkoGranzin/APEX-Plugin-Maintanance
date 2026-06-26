@@ -1,4 +1,7 @@
 import { describe, it, expect } from 'vitest';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 import { redevelopComponent } from '../src/service/redev.js';
 import { createComponentStore } from '../src/gui/store.js';
 
@@ -86,5 +89,57 @@ describe('F-28 T-93 redevelopComponent (Spec-gesicherte Migration)', () => {
     });
     expect(r.adopted).toBe(false);
     expect(rolledBack).toBe(true);
+  });
+
+  // B-17: die echte defaultMigrate muss die vendored Lib WIRKLICH tauschen (nicht nur Code anpassen)
+  const mkRepo = (jqContent) => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'redev-'));
+    fs.mkdirSync(path.join(dir, 'lib'), { recursive: true });
+    fs.mkdirSync(path.join(dir, '.maintenance', 'mock', 'lib'), { recursive: true });
+    fs.writeFileSync(path.join(dir, 'lib', 'jquery.min.js'), jqContent);
+    fs.writeFileSync(path.join(dir, '.maintenance', 'mock', 'lib', 'jquery.min.js'), jqContent);
+    return dir;
+  };
+  const fakeSwap = async (d) => {
+    const abs = path.join(d, 'lib', 'jquery.min.js');
+    const backups = new Map([[abs, fs.readFileSync(abs, 'utf8')]]);
+    fs.writeFileSync(abs, '/*! jQuery v4.0.0 */');
+    return { results: [{ name: 'jquery', from: '1.12.4', to: '4.0.0', applied: true, file: 'lib/jquery.min.js' }], backups };
+  };
+  const repoComp = (store, dir) => {
+    const id = store.add({ name: 'P', path: dir, uiTestUrl: 'http://x', codedTests: [{ name: 'p.ui.spec.js', content: 'x' }], libs: [{ name: 'jquery', version: '1.12.4', latest: '4.0.0', outdated: true }] }).id;
+    store.update(id, { baseline: { mode: 'ui', specHash: 'h', scenarios: [{ scenario: 'A', status: 'passed' }] } });
+    return id;
+  };
+
+  it('B-17: tauscht die vendored Lib real, spiegelt sie in den Mock, rebuiltTo = real getauscht', async () => {
+    const dir = mkRepo('/*! jQuery v1.12.4 */');
+    const store = mkStore();
+    const id = repoComp(store, dir);
+    const r = await redevelopComponent(store, store.get(id), {
+      ai: { kind: 'cli', complete: async () => '' }, // keine Code-Änderung nötig
+      applyVendoredUpdates: fakeSwap,
+      runDetailed: async () => ({ ran: true, ok: true, scenarios: [{ scenario: 'A', status: 'passed' }] }),
+    });
+    expect(r.adopted).toBe(true);
+    expect(r.rebuiltTo).toContain('jquery@4.0.0');
+    expect(fs.readFileSync(path.join(dir, 'lib', 'jquery.min.js'), 'utf8')).toContain('v4.0.0');                              // echte Lib getauscht
+    expect(fs.readFileSync(path.join(dir, '.maintenance', 'mock', 'lib', 'jquery.min.js'), 'utf8')).toContain('v4.0.0');     // in den Mock gespiegelt
+    fs.rmSync(dir, { recursive: true, force: true });
+  });
+
+  it('B-17: Regress → Rollback stellt Lib UND Mock wieder her', async () => {
+    const dir = mkRepo('OLD');
+    const store = mkStore();
+    const id = repoComp(store, dir);
+    const r = await redevelopComponent(store, store.get(id), {
+      ai: { kind: 'cli', complete: async () => '' },
+      applyVendoredUpdates: fakeSwap,
+      runDetailed: async () => ({ ran: true, ok: true, scenarios: [{ scenario: 'A', status: 'failed' }] }), // Regress
+    });
+    expect(r.adopted).toBe(false);
+    expect(fs.readFileSync(path.join(dir, 'lib', 'jquery.min.js'), 'utf8')).toBe('OLD');                              // Lib zurückgerollt
+    expect(fs.readFileSync(path.join(dir, '.maintenance', 'mock', 'lib', 'jquery.min.js'), 'utf8')).toBe('OLD');      // Mock zurückgerollt
+    fs.rmSync(dir, { recursive: true, force: true });
   });
 });

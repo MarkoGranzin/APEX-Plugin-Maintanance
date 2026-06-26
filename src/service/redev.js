@@ -10,19 +10,47 @@
  */
 
 import fs from 'node:fs';
+import path from 'node:path';
 import { inspectAssets, parseOk } from '../extract/assets.js';
 import { reinjectAsset } from '../extract/reinject.js';
 import { runUiTestsDetailed } from '../test/run-ui.js';
 import { compareToBaseline } from './baseline.js';
+import { applyVendoredUpdates } from './lib-update.js';
 
-/** Default-Migration: KI schreibt jedes beschreibbare Asset auf die neueste stabile Lib um (Backups fuer Rollback). */
+/**
+ * Default-Migration (B-17): ZUERST die vendored Lib-Dateien wirklich auf die neueste stabile Version
+ * tauschen (breaking → force) UND in den Mock spiegeln, DANN die KI die aufrufenden Plugin-Assets an
+ * die neue Lib-API anpassen. Ohne den realen Tausch „migriert" die KI nur den Code, die Bibliothek
+ * selbst bliebe alt (jquery 1.12.4 etc.). Backups (Lib + Mock + Code) erlauben vollständigen Rollback.
+ */
 async function defaultMigrate(store, comp, deps = {}) {
   const ai = deps.ai;
   const dir = comp.path;
   const libs = (store.get(comp.id)?.libs ?? comp.libs ?? []);
   const target = libs.map((l) => `${l.name} → ${l.latest || 'neueste stabile Version'}`).join(', ') || 'die neueste stabile Version der verwendeten Bibliothek(en)';
   const backups = new Map();
-  let changed = 0;
+
+  // 1) Vendored Libs real tauschen (breaking → force) + in den Mock spiegeln, damit das
+  //    works-as-before-Gate gegen die NEUE Lib verifiziert (nicht gegen die alte Mock-Kopie).
+  const applyFn = deps.applyVendoredUpdates ?? applyVendoredUpdates;
+  let vend = { results: [], backups: new Map() };
+  try { vend = await applyFn(dir, libs, { force: true, fetchFile: deps.fetchFile }); }
+  catch { /* offline → KI-Code-Migration läuft trotzdem, Lib bliebe dann alt */ }
+  for (const [abs, content] of vend.backups) if (!backups.has(abs)) backups.set(abs, content);
+  const swapped = vend.results.filter((r) => r.applied && r.file);
+  const mockDir = path.join(dir, '.maintenance', 'mock');
+  for (const r of swapped) {
+    const mockTgt = path.join(mockDir, r.file);
+    try {
+      if (fs.existsSync(mockTgt)) {
+        if (!backups.has(mockTgt)) backups.set(mockTgt, fs.readFileSync(mockTgt, 'utf8'));
+        fs.copyFileSync(path.join(dir, r.file), mockTgt);
+      }
+    } catch { /* Mock-Spiegelung best effort */ }
+  }
+
+  // 2) KI passt die aufrufenden Plugin-Assets an die neue Lib-API an
+  let aiChanged = 0;
   for (const asset of inspectAssets(dir)) {
     if (!asset.origin) continue;
     let out = '';
@@ -34,11 +62,16 @@ async function defaultMigrate(store, comp, deps = {}) {
     const tgt = asset.origin.type === 'file' ? `${dir}/${asset.origin.path}` : `${dir}/${asset.origin.sqlFile}`;
     if (!backups.has(tgt) && fs.existsSync(tgt)) backups.set(tgt, fs.readFileSync(tgt, 'utf8'));
     reinjectAsset(asset.origin, out, { rootDir: dir });
-    changed++;
+    aiChanged++;
   }
+
+  const applied = swapped.map((r) => ({ name: r.name, to: r.to }));
+  const changed = swapped.length + aiChanged;
+  const swapTxt = swapped.length ? `swapped ${swapped.map((r) => `${r.name}@${r.to}`).join(', ')}` : 'no lib swap';
   return {
     changed: changed > 0,
-    summary: changed ? `AI migrated ${changed} asset(s) to ${target}` : 'AI produced no usable migration',
+    applied, // tatsächlich getauschte Libs → rebuiltTo
+    summary: changed ? `Migrated: ${swapTxt}; AI-adapted ${aiChanged} asset(s)` : 'AI produced no usable migration',
     backups,
     rollback: () => { for (const [t, content] of backups) { try { fs.writeFileSync(t, content); } catch { /* ignore */ } } },
   };
@@ -86,8 +119,10 @@ export async function redevelopComponent(store, comp, deps = {}) {
   if (gate.pass) {
     let upload = null;
     if (deps.upload) { try { upload = await deps.upload(store.get(comp.id) ?? comp); } catch (e) { upload = { error: String(e?.message ?? e) }; } }
-    // T-94: Komponente als neu gebaut/migriert kennzeichnen (GUI-Badge + E-Mail-Report)
-    const target = (store.get(comp.id)?.libs ?? comp.libs ?? []).filter((l) => l.latest).map((l) => `${l.name}@${l.latest}`).join(', ') || 'latest';
+    // T-94/B-17: Kennzeichnung aus den TATSÄCHLICH getauschten Libs (nicht aus l.latest = Ziel).
+    const target = (mig.applied && mig.applied.length)
+      ? mig.applied.map((l) => `${l.name}@${l.to}`).join(', ')
+      : ((store.get(comp.id)?.libs ?? comp.libs ?? []).filter((l) => l.latest).map((l) => `${l.name}@${l.latest}`).join(', ') || 'latest');
     store.update(comp.id, { rebuilt: true, rebuiltAt: now(), rebuiltTo: target, rebuiltSummary: mig.summary, verifiedAsBefore: true, reviewUrl: upload?.prUrl ?? (store.get(comp.id)?.reviewUrl ?? null), reviewBranch: upload?.branch ?? (store.get(comp.id)?.reviewBranch ?? null) });
     store.addReview?.(comp.id, { kind: 'redev', pass: true, migration: mig.summary });
     return { adopted: true, at: now(), migration: mig.summary, rebuiltTo: target, gate, review, upload };
