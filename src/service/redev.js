@@ -18,6 +18,7 @@ import { compareToBaseline } from './baseline.js';
 import { applyVendoredUpdates } from './lib-update.js';
 import { analyzeDeep } from '../test/analyze-deep.js';
 import { captureShot, aiVisualCheck } from '../test/visual.js';
+import { collectMock } from '../test/mock.js';
 
 // T-103: konkrete Breaking-Change-Hinweise je Bibliothek, damit die KI Aufrufstellen PORTIERT
 // (Markup/Klassen/APIs) statt nicht-kompilierenden Code zu löschen — sonst gehen Optik & Features verloren.
@@ -126,6 +127,21 @@ async function defaultMigrate(store, comp, deps = {}) {
     if (!backups.has(tgt) && fs.existsSync(tgt)) backups.set(tgt, fs.readFileSync(tgt, 'utf8'));
     reinjectAsset(asset.origin, out, { rootDir: dir });
     aiChanged++;
+  }
+
+  // Mock-Update: die Plugin-Code-Kopien des Mocks auf den MIGRIERTEN Code aktualisieren (Libs wurden
+  // oben bereits gespiegelt). Sonst lädt der Mock alten Plugin-Code → das Gate/Optik-Gate verifiziert
+  // nicht den tatsächlich migrierten Stand, und der Mock zeigt am Ende Altes. Mit Backup → Rollback.
+  if (aiChanged > 0) {
+    try {
+      for (const pf of collectMock(dir).pluginFiles) {
+        const tgt = path.join(mockDir, pf.name); // pf.name = 'plugin/<file>'
+        if (fs.existsSync(tgt)) {
+          if (!backups.has(tgt)) backups.set(tgt, fs.readFileSync(tgt, 'utf8'));
+          fs.writeFileSync(tgt, pf.code);
+        }
+      }
+    } catch { /* Mock-Spiegelung best effort */ }
   }
 
   const applied = swapped.map((r) => ({ name: r.name, to: r.to }));

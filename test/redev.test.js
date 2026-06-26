@@ -203,4 +203,26 @@ describe('F-28 T-93 redevelopComponent (Spec-gesicherte Migration)', () => {
     expect(r.visual).toMatchObject({ ran: true, looksSame: true });
     expect(store.get(id).rebuilt).toBe(true);
   });
+
+  it('Mock-Update: nach der Migration wird die Plugin-Code-Kopie des Mocks auf den migrierten Code aktualisiert', async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'redev-'));
+    fs.mkdirSync(path.join(dir, 'js'), { recursive: true });
+    fs.mkdirSync(path.join(dir, '.maintenance', 'mock', 'plugin'), { recursive: true });
+    fs.writeFileSync(path.join(dir, 'js', 'script.js'), 'function init(){ var x=1; /* OLDCODE */ return x; }');
+    fs.writeFileSync(path.join(dir, '.maintenance', 'mock', 'plugin', 'script.js'), 'function init(){ var x=1; /* OLDCODE */ return x; }');
+    const store = mkStore();
+    const id = store.add({ name: 'P', path: dir, uiTestUrl: 'http://x', codedTests: [{ name: 'p.ui.spec.js', content: 'x' }], libs: [] }).id;
+    store.update(id, { baseline: { mode: 'ui', specHash: 'h', scenarios: [{ scenario: 'A', status: 'passed' }] } });
+    const r = await redevelopComponent(store, store.get(id), {
+      ai: { kind: 'cli', complete: async () => 'function init(){ var x=2; /* MIGRATED */ return x; }' },
+      applyVendoredUpdates: async () => ({ results: [], backups: new Map() }), // kein Lib-Swap, Fokus: Plugin-Code
+      runDetailed: async () => ({ ran: true, ok: true, scenarios: [{ scenario: 'A', status: 'passed' }] }),
+      hasPlaywright: true,
+    });
+    expect(r.adopted).toBe(true);
+    const mockCopy = fs.readFileSync(path.join(dir, '.maintenance', 'mock', 'plugin', 'script.js'), 'utf8');
+    expect(mockCopy).toContain('MIGRATED');     // Mock-Kopie zeigt den migrierten Code
+    expect(mockCopy).not.toContain('OLDCODE');
+    fs.rmSync(dir, { recursive: true, force: true });
+  });
 });
