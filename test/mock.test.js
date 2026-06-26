@@ -60,6 +60,8 @@ describe('F-28 T-97 Auto-Mock', () => {
       fs.writeFileSync(path.join(dir, 'css', 'style.css'), ".kb-col-header-content{min-height:48px}\n@font-face{font-family:i;src:url(../fonts/icon.woff)}");
       fs.writeFileSync(path.join(dir, 'css', 'style.min.css'), ".kb-col-header-content{min-height:48px}"); // min-Zwilling → wird entdoppelt
       fs.writeFileSync(path.join(dir, 'css', 'bootstrap.min.css'), ".row{display:flex}");
+      // APEX-SQL-Export deklariert den Funktionsumfang als Attribut-Prompts → Basis für mehrere geplante Sichten
+      fs.writeFileSync(path.join(dir, 'region_type_plugin_widget.sql'), "...,p_prompt=>'Selection Mode',...\n...,p_prompt=>'Use Client Side Caching',p_attribute_type=>'YES_NO'\n...,p_prompt=>'Search Item',...");
       mockDir = fs.mkdtempSync(path.join(os.tmpdir(), 'mockout-'));
     });
     afterAll(() => { fs.rmSync(dir, { recursive: true, force: true }); fs.rmSync(mockDir, { recursive: true, force: true }); });
@@ -92,6 +94,20 @@ describe('F-28 T-97 Auto-Mock', () => {
       const aigen = await generateAiMock(dir, { ai, name: 'Widget' });
       expect(aigen.html).toMatch(/id="harness-reset"/);
       expect(aigen.html.indexOf('harness-reset')).toBeLessThan(aigen.html.indexOf('style.min.css'));
+    });
+
+    it('Mehrere Sichten: collectMock liest deklarierte Plugin-Attribute (SQL), Prompt plant Views pro Modus', () => {
+      const c = collectMock(dir);
+      expect(c.attributes).toContain('Selection Mode');
+      expect(c.attributes).toContain('Use Client Side Caching');
+      expect(c.attributes).toContain('Search Item');
+      const p = aiMockPrompt('Widget', c);
+      expect(p).toMatch(/DECLARED PLUGIN OPTIONS\/ATTRIBUTES/);      // Attribut-Umfang gelistet
+      expect(p).toMatch(/Selection Mode/);                          // konkretes Attribut im Prompt
+      expect(p).toMatch(/PLAN MULTIPLE VIEWS \/ TEST SCENARIOS/);   // mehrere Sichten planen
+      expect(p).toMatch(/Render the plugin SEPARATELY for EACH planned view/);
+      expect(p).toMatch(/window\.__views/);                         // Plan explizit
+      expect(p).toMatch(/\{ view, feature, ok, detail \}/);         // Self-Test je View+Feature
     });
 
     it('CSS generisch: collectMock sammelt echte CSS (min entdoppelt), Mock verlinkt sie, statt Optik nachzubauen', () => {

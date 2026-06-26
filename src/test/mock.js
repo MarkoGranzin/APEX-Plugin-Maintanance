@@ -190,8 +190,27 @@ function scanCssFiles(dir) {
 }
 
 /**
+ * Liest den DEKLARIERTEN Funktionsumfang eines APEX-Plugins aus dem SQL-Export: die Attribut-Prompts
+ * (p_prompt=>'…'). Das ist der Vertrag des Plugins über seine Optionen/Modi — generische Basis dafür,
+ * dass die KI MEHRERE Sichten/Testfälle (je Modus/Option) plant und charakterisiert, statt nur einer
+ * Default-Konfiguration. Kein plugin-spezifisches Wissen nötig — kommt aus dem Plugin selbst.
+ */
+function scanPluginAttributes(dir) {
+  const out = new Set();
+  walkRepoFiles(dir, (rel, abs) => {
+    if (!/\.sql$/i.test(rel) || tooBig(abs)) return;
+    let txt = ''; try { txt = fs.readFileSync(abs, 'utf8'); } catch { return; }
+    for (const m of txt.matchAll(/p_prompt\s*=>\s*'((?:[^']|'')+)'/gi)) {
+      const label = m[1].replace(/''/g, "'").trim();
+      if (label && label.length <= 60) out.add(label);
+    }
+  });
+  return [...out];
+}
+
+/**
  * Sammelt aus dem Repo, was der Mock braucht: Lib-Dateien (erkannt + extra/nicht-erkannt), Plugin-Dateien, CSS, Analyse.
- * @returns {{libFiles:string[], extraLibFiles:string[], cssFiles:string[], pluginFiles:{name:string,code:string}[], selectors:string[], entryPoints:string[], functions:object[], events:object[]}}
+ * @returns {{libFiles:string[], extraLibFiles:string[], cssFiles:string[], attributes:string[], pluginFiles:{name:string,code:string}[], selectors:string[], entryPoints:string[], functions:object[], events:object[]}}
  */
 export function collectMock(dir) {
   const libs = detectVendoredLibraries(dir).filter((l) => l.evidence && /\.js$/i.test(l.evidence));
@@ -201,6 +220,8 @@ export function collectMock(dir) {
   const extraLibFiles = scanExtraLibFiles(dir, libSet);
   // Echte CSS des Plugins laden statt von der KI nachbauen lassen (Optik = „wie zuvor", generisch).
   const cssFiles = scanCssFiles(dir);
+  // Deklarierter Funktionsumfang (APEX-Plugin-Attribute) → Basis für mehrere geplante Sichten/Testfälle.
+  const attributes = scanPluginAttributes(dir);
   const pluginFiles = [];
   const selectors = new Set();
   const entryPoints = new Set();
@@ -224,7 +245,7 @@ export function collectMock(dir) {
       for (const f of deep.functions || []) { functions.push(f); if (f.name && /^(init|refresh|render|draw|setup|load|create|destroy)/i.test(f.name)) entryPoints.add(f.name); }
     }
   } catch { /* best effort */ }
-  return { libFiles, extraLibFiles, cssFiles, pluginFiles, selectors: [...selectors], entryPoints: [...entryPoints], functions, events: [...events.values()] };
+  return { libFiles, extraLibFiles, cssFiles, attributes, pluginFiles, selectors: [...selectors], entryPoints: [...entryPoints], functions, events: [...events.values()] };
 }
 
 /**
@@ -258,6 +279,7 @@ ${(c.cssFiles || []).map((f) => '  ' + f).join('\n') || '  (none)'}
 Detected DOM selectors the plugin uses: ${(c.selectors || []).join(', ') || '(none)'}
 Likely entry points: ${(c.entryPoints || []).join(', ') || '(none)'}
 Detected interactions/events the plugin binds (trigger EACH on its element): ${(c.events || []).map((e) => e.type + '→' + e.selector).join(', ') || '(none)'}
+DECLARED PLUGIN OPTIONS/ATTRIBUTES (the plugin's own capability contract — each is a configurable mode/feature to characterize): ${(c.attributes || []).join(' · ') || '(none)'}
 Functions/signatures (with apex.* usage):
 ${fns || '(none)'}
 
@@ -284,14 +306,15 @@ Requirements for the page:
 - Load libraries and plugin files via <script src> (NOT inline) using the exact paths above; then initialize the plugin the way APEX would.
 - Wrap initialization in try/catch; collect errors in window.__mockErrors (array); add window.onerror to push to it. Set window.__ok = (window.__mockErrors.length === 0). Also set window.__rendered = (document.querySelector('#mock-root') has non-trivial child content, i.e. the plugin produced output).
 - CHARACTERIZE THE PLUGIN AS IT IS — NOT AS IT SHOULD BE. This page is the "works EXACTLY as before" spec: after the libraries are updated the plugin must do the SAME — no more, no less. Therefore EVERY self-test must describe the CURRENT behavior of the unmodified plugin and MUST PASS right now. Do NOT invent aspirational/robustness checks the current plugin does not already satisfy (e.g. "handles missing/undefined input gracefully", error-handling or edge cases it was never built for). If a check would be RED against the current unmodified plugin, it is NOT a valid characterization — drop it, or if the behavior matters record the plugin's ACTUAL current result as the expected value (e.g. if it currently throws on bad input, that IS the characterized behavior). window.__ok MUST be true for the unmodified plugin; a failing self-test here means you mis-characterized, not that the plugin is broken.
-- FIRST UNDERSTAND the plugin from the source: what it is, EVERY feature it offers, and how each one works. THEN make this page a SELF-TEST HARNESS that characterizes those features as the spec a future migration must preserve. For EACH feature, run a check that ASSERTS its REAL EFFECT (not merely that code ran), e.g.:
+- PLAN MULTIPLE VIEWS / TEST SCENARIOS — one configuration is NOT enough. A real plugin has many modes and option combinations; characterizing only the default leaves most behavior unprotected. From the DECLARED PLUGIN OPTIONS/ATTRIBUTES above PLUS the source, PLAN a SET of distinct views that together cover the plugin's capabilities — e.g. each selection/display mode, each major option on vs off, async/lazy vs static data, filtered vs unfiltered, read-only/cached vs editable, empty/error state. Derive the views from THIS plugin's own option surface (do not invent capabilities it lacks, do not skip ones it has). Render the plugin SEPARATELY for EACH planned view (its own mount/container with that view's config + data) so all views are visible on the page, and self-test EACH view's behavior independently. Expose the plan as window.__views = array of { view, config } so the set of scenarios is explicit.
+- FIRST UNDERSTAND the plugin from the source: what it is, EVERY feature it offers, and how each one works. THEN make this page a SELF-TEST HARNESS that characterizes those features (ACROSS ALL planned views) as the spec a future migration must preserve. For EACH feature IN EACH view, run a check that ASSERTS its REAL EFFECT (not merely that code ran), e.g.:
    • render: #mock-root actually contains the expected output (the right number of nodes/cards/rows/svg etc.).
    • each interaction/event above: perform it and verify the resulting DOM change — e.g. a click toggles/opens the expected element; selection/sort/filter changes what is shown.
    • DRAG & DROP (and other pointer-driven gestures): inspect the source to see which mechanism the plugin actually listens for and reproduce EXACTLY that full sequence — HTML5 DnD (dragstart → dragenter → dragover → drop → dragend, all sharing ONE DataTransfer object) OR pointer/mouse events (pointerdown → pointermove(s) → pointerup, or mousedown → mousemove → mouseup, with realistic clientX/clientY on the right elements). Then verify the item really moved containers. IMPORTANT: synthetic drag is often NOT reliably triggerable in a headless harness even though it works for a real user. So if — after faithfully reproducing the real sequence — the move still cannot be observed, record this check as ok:true with detail "works for a real user; not reliably simulable headlessly — verify manually" — do NOT mark it failed. A feature that genuinely works must never be a red characterization.
    • ANIMATION (if the plugin animates, e.g. canvas/WebGL/SVG/CSS): verify it REALLY runs over time — capture the canvas/element state, wait ~300ms, capture again, and assert it CHANGED (a frozen/static frame = FAIL). The real library must be driving it, not a screenshot.
    • BUTTONS / mode switches (if present, e.g. type tabs like net/waves/clouds): click EACH button and assert it actually switches AND the new mode then animates/renders — not merely that the button exists.
    • each entry point and each main option/mode produces its expected result.
-  Wrap every check in try/catch (non-fatal) and push ONE result per feature to window.__features = array of { feature, ok, detail } where ok is TRUE only if the effect really happened (false + detail otherwise). Then set window.__selftested = true. These window.__features entries ARE the test cases the migration must keep green — make them concrete and meaningful, covering drag & drop and the plugin's other real features.
+  Wrap every check in try/catch (non-fatal) and push ONE result per feature-and-view to window.__features = array of { view, feature, ok, detail } where ok is TRUE only if the effect really happened (false + detail otherwise) and view names which planned scenario it belongs to. Then set window.__selftested = true. These window.__features entries (across ALL views) ARE the test cases the migration must keep green — make them concrete and meaningful, covering every planned view and the plugin's real features (selection modes, filter, async, caching, drag & drop, etc.).
 - KEEP THE VISIBLE STATE CLEAN: the self-tests must be NON-DESTRUCTIVE to the view. After all checks, the visible page MUST show the clean, correctly-rendered plugin with the original sample data — exactly what a user would see. Undo any mutation your tests caused (remove test-added cards/groups, restore toggles/collapses, move dragged items back), or run the checks on cloned/detached nodes. A screenshot taken at the end (for the visual "looks-as-before" gate) must show the tidy plugin, NOT a cluttered post-test board.
 - Show a short visible status line (e.g. #mock-status) reporting __ok / __rendered, so a human opening the page sees whether it worked.
 - Return ONLY the complete HTML document. Start the response DIRECTLY with <!DOCTYPE html> and end with </html>. Do NOT write any explanation, preamble or prose before or after the HTML, and no Markdown fences.`;
