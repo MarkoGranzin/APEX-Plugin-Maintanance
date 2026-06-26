@@ -166,19 +166,21 @@ describe('F-28 T-93 redevelopComponent (Spec-gesicherte Migration)', () => {
     expect(p).toMatch(/js\/script\.js/);            // Datei
   });
 
-  it('buildMigrationPrompt: unmaintained → permissiver Ersatz bzw. MIT-Self-Build, nie Copyleft', () => {
+  it('buildMigrationPrompt: unmaintained → SELBST neu entwickeln (kein API-Mapping vorgegeben), permissiv/MIT, nie Copyleft', () => {
     const p = buildMigrationPrompt({ name: 'js/script.js', code: 'x' }, {
       replacements: [
-        { from: 'moment', to: 'dayjs', license: 'MIT', cdn: 'https://cdn/dayjs.js', note: 'dayjs API', attribution: false, strategy: 'replace' },
+        { from: 'moment', to: 'dayjs', license: 'MIT', cdn: 'https://cdn/dayjs.js', attribution: false, strategy: 'replace' },
         { from: 'yui', to: null, strategy: 'self-build' },
       ],
     });
-    expect(p).toMatch(/Replace UNMAINTAINED/);
-    expect(p).toMatch(/dayjs/);                       // Nachfolger genannt
-    expect(p).toMatch(/cdn\/dayjs\.js/);             // echte Lib via CDN laden
+    expect(p).toMatch(/RE-DEVELOP/);                          // neu entwickeln, nicht portieren
+    expect(p).toMatch(/RE-IMPLEMENT it from scratch/);
+    expect(p).toMatch(/do not expect a 1:1 API mapping/);    // keine konkrete Mapping-Hilfe
+    expect(p).toMatch(/YOU decide the approach/);            // KI entscheidet selbst
+    expect(p).toMatch(/dayjs/);                               // permissiver Nachfolger nur als Option
     expect(p).toMatch(/NEVER GPL\/AGPL\/LGPL\/other copyleft/); // Lizenz-Leitplanke
-    expect(p).toMatch(/BUILD a minimal self-contained replacement/); // Self-Build-Fallback
-    expect(p).toMatch(/license it MIT/);
+    expect(p).toMatch(/self-built under MIT/);               // Self-Build-Pfad
+    expect(p).toMatch(/There is no drop-in successor; build your own/); // ohne Nachfolger
   });
 
   // T-104: optisches Abschluss-Gate (AI-UI-Prüfung „sieht aus wie zuvor")

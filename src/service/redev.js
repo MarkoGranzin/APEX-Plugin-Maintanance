@@ -61,11 +61,15 @@ export function buildMigrationPrompt(asset, ctx = {}) {
   if (inventory.events?.length) inv.push('Interactions/events to PRESERVE (re-bind so they still work — includes drag & drop / sortable): ' + inventory.events.slice(0, 40).join(', '));
   if (inventory.fns?.length) inv.push('Functions/behaviors to keep working: ' + inventory.fns.slice(0, 40).join(', '));
   if (inventory.apexCalls?.length) inv.push('apex.* integration to keep: ' + [...new Set(inventory.apexCalls)].slice(0, 30).join(', '));
-  // Unmaintained Libs ERSETZEN (nicht nur updaten): permissiver Nachfolger oder MIT-Self-Build, nie Copyleft.
+  // Unmaintained Libs: die SOFTWARE erkennt selbst, dass sie die Funktionalität NEU ENTWICKELN muss
+  // (keine vorgegebenen API-Mappings). Die KI leitet das Verhalten aus der Charakterisierung ab und
+  // baut es neu — auf einem selbst gewählten permissiven Nachfolger ODER selbst (MIT). Nie Copyleft.
   const repl = [];
   for (const r of replacements || []) {
-    if (r.strategy === 'replace') repl.push(`- Replace UNMAINTAINED "${r.from}" with the maintained, permissively-licensed "${r.to}" (${r.license}${r.attribution ? ', attribution required — keep its license/NOTICE' : ', no obligations'}). Load the REAL replacement${r.cdn ? ` from its official CDN: ${r.cdn}` : ''} and port the call sites: ${r.note}`);
-    else repl.push(`- "${r.from}" is UNMAINTAINED and has no known permissive successor → BUILD a minimal self-contained replacement yourself, implementing ONLY the functionality this plugin actually uses, and license it MIT (add a short MIT header). Do not pull in any new dependency.`);
+    const base = (r.strategy === 'replace' && r.to)
+      ? `A maintained, permissively-licensed successor exists (${r.to}, ${r.license}${r.attribution ? ', attribution' : ', no obligations'})${r.cdn ? ` — e.g. ${r.cdn}` : ''}; you MAY build on it OR write your own.`
+      : `There is no drop-in successor; build your own.`;
+    repl.push(`- "${r.from}" is UNMAINTAINED — recognize that it cannot just be version-bumped or mechanically API-ported. RE-DEVELOP the capability this plugin uses it for: from the characterized behavior above, RE-IMPLEMENT it from scratch so the plugin behaves and LOOKS exactly as before. ${base} YOU decide the approach and derive the entire implementation yourself — do not expect a 1:1 API mapping. License constraint: commercially usable, NO copyleft (permissive successor) or self-built under MIT.`);
   }
   return `You are an expert front-end engineer migrating an Oracle APEX plugin to ${target}. Migrate THIS file so the plugin keeps working on the new library versions WITHOUT changing what the user sees or can do.
 
@@ -76,7 +80,7 @@ NON-NEGOTIABLE — preserve 1:1:
 
 Library breaking changes to apply (port call sites; do not remove functionality):
 ${breaking || "(consult each library's migration guide)"}
-${repl.length ? '\nReplace UNMAINTAINED libraries (keep behavior 1:1; only commercially-usable permissive licenses, NEVER GPL/AGPL/LGPL/other copyleft):\n' + repl.join('\n') + '\n' : ''}
+${repl.length ? '\nUNMAINTAINED libraries — RE-DEVELOP, do not just port (keep behavior 1:1; only commercially-usable permissive licenses, NEVER GPL/AGPL/LGPL/other copyleft):\n' + repl.join('\n') + '\n' : ''}
 ${inv.join('\n')}
 
 If something cannot be preserved perfectly, keep the closest WORKING equivalent rather than removing it. Return EXCLUSIVELY the full updated file content (no Markdown, no explanation).
