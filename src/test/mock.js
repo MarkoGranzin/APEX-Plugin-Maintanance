@@ -21,6 +21,15 @@ import { analyzeDeep } from './analyze-deep.js';
 
 const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 
+/**
+ * Minimaler CSS-Reset, den JEDE Mock-Seite bekommt. Plugins werden für die APEX-Umgebung geschrieben,
+ * die (wie jedes Framework) Browser-Defaults normalisiert — v.a. die Element-Margins (p/h1.. /ul/figure).
+ * Ohne diesen Reset brechen Plugin-Layouts, die margin-freie Block-Elemente voraussetzen (z.B. ein
+ * <p class="title"> in einer fix hohen Kopfzeile läuft durch den UA-Default-Margin über). Generisch,
+ * NICHT plugin-spezifisch; lädt VOR der echten Plugin-CSS, damit diese gewinnt. KEINE Optik nachbauen.
+ */
+export const HARNESS_RESET = '*,*::before,*::after{box-sizing:border-box}html,body{margin:0;padding:0}body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;font-size:14px;line-height:1.4;color:#333;background:#fff}h1,h2,h3,h4,h5,h6,p,figure,blockquote,dl,dd,ul,ol,pre{margin:0}ul,ol{padding:0}';
+
 /** Erzeugt ein DOM-Element für einen erkannten Selektor (#id bzw. .class), sichtbar. */
 function domFor(sel) {
   const s = String(sel || '').trim();
@@ -46,6 +55,7 @@ export function buildMockPage({ name = 'plugin', libFiles = [], cssFiles = [], p
   const evDispatch = (events || []).map((ev) => `  try{ var el=document.querySelector(${JSON.stringify(ev.selector)}); if(el){ el.dispatchEvent(new Event(${JSON.stringify(ev.type)},{bubbles:true})); window.__mockEvents.push({type:${JSON.stringify(ev.type)},selector:${JSON.stringify(ev.selector)},ok:true}); } else { window.__mockEvents.push({type:${JSON.stringify(ev.type)},selector:${JSON.stringify(ev.selector)},ok:true,skipped:true}); } }catch(e){ window.__mockEvents.push({type:${JSON.stringify(ev.type)},selector:${JSON.stringify(ev.selector)},ok:false,error:(e&&e.message||String(e))}); }`).join('\n');
   return `<!doctype html>
 <html><head><meta charset="utf-8"><title>Mock — ${esc(name)}</title>
+  <style id="harness-reset">${HARNESS_RESET}</style>
   ${cssTags}
 </head>
 <body>
@@ -270,6 +280,7 @@ Requirements for the page:
 - Provide a realistic apex.* shim covering the apex.* calls above (apex.item/$v/$s/apex.server.process/apex.jQuery/apex.message/apex.debug/apex.region/apex.util/etc.) so the plugin does not crash.
 - Create the DOM the plugin needs: a visible <div id="mock-root"> mount (give it a real size, e.g. width:900px;height:560px) plus elements for the detected selectors. The plugin's rendered output MUST appear inside #mock-root.
 - VISUAL QUALITY MATTERS: the page must LOOK like the plugin in real production use — correct layout, sensible spacing, the plugin's normal styling/colors, no overlapping/cramped/cut-off elements. If the plugin needs a CSS file, load it; if it relies on theme/host CSS that isn't present, add minimal styles so it looks clean and presentable (like a screenshot you'd show a stakeholder). Aim for a realistic, tidy result — not a raw/broken-looking dump.
+- A generic CSS reset (box-sizing + margin reset on p/headings/lists, like APEX's theme) is AUTOMATICALLY injected into the <head> before your stylesheets — so the plugin renders in a normalized environment as it would inside APEX. Rely on it; do not re-add your own reset and do not fight it with plugin-specific overrides.
 - THE PLUGIN MUST LOOK RIGHT BECAUSE ITS REAL CSS IS LOADED — NOT BECAUSE YOU PATCHED IT: clipped/overlapping headers, wrong spacing or a broken layout almost always mean the plugin's real stylesheet(s) did not load. So: load EVERY real CSS file listed above via <link> with the exact relative paths (a wrong path → 404 → the plugin falls back to unstyled/half-styled and looks broken). Do NOT "fix" the look by hand-writing CSS for the plugin's own classes — that is faking the appearance. Your ONLY layout job is the harness container: give #mock-root a sensible size and enough page height (the page may be tall and scroll) so the WHOLE plugin is visible; do not constrain the plugin into a box too small for it. With the real CSS loaded and a roomy container, headers like "To Do"/"In Progress"/"Done" render fully on their own.
 - Load libraries and plugin files via <script src> (NOT inline) using the exact paths above; then initialize the plugin the way APEX would.
 - Wrap initialization in try/catch; collect errors in window.__mockErrors (array); add window.onerror to push to it. Set window.__ok = (window.__mockErrors.length === 0). Also set window.__rendered = (document.querySelector('#mock-root') has non-trivial child content, i.e. the plugin produced output).
@@ -336,6 +347,13 @@ export async function generateAiMock(dir, deps = {}) {
   if (!html) return fallback('AI returned empty');
   if (!/<html[\s>]/i.test(html)) return fallback('AI response was not an HTML document');
   html = normalizeLibPaths(html, [...(c.libFiles || []), ...(c.extraLibFiles || []), ...(c.cssFiles || [])]); // B-21: lokale Lib-/CSS-Pfade auf die kopierten Dateien zurücksetzen
+  // Generischer CSS-Reset (wie APEX/Frameworks) als ERSTES im <head>, vor der echten Plugin-CSS → diese gewinnt.
+  if (!/id=["']harness-reset["']/.test(html)) {
+    const resetTag = `<style id="harness-reset">${HARNESS_RESET}</style>`;
+    if (/<head[^>]*>/i.test(html)) html = html.replace(/<head[^>]*>/i, (m) => m + '\n  ' + resetTag);
+    else if (/<html[^>]*>/i.test(html)) html = html.replace(/<html[^>]*>/i, (m) => m + '\n<head>' + resetTag + '</head>');
+    else html = resetTag + html;
+  }
   if (!/__ok/.test(html)) { // gültige HTML ohne Vertrag → Vertrag injizieren statt verwerfen
     html = html.replace(/<\/body>/i, '<script>window.__mockErrors=window.__mockErrors||[];window.addEventListener("error",function(ev){window.__mockErrors.push(String(ev.message||ev));});if(typeof window.__ok==="undefined")window.__ok=(window.__mockErrors.length===0);</script></body>');
     if (!/__ok/.test(html)) return fallback('AI HTML missing the window.__ok contract');

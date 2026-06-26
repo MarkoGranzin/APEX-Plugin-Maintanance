@@ -2,7 +2,7 @@ import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { buildMockPage, buildMockSpec, generateMock, writeMock, generateAiMock, aiMockPrompt, collectMock, normalizeLibPaths } from '../src/test/mock.js';
+import { buildMockPage, buildMockSpec, generateMock, writeMock, generateAiMock, aiMockPrompt, collectMock, normalizeLibPaths, HARNESS_RESET } from '../src/test/mock.js';
 
 describe('F-28 T-97 Auto-Mock', () => {
   it('buildMockPage: self-contained HTML mit Shim, Libs (src), Plugin-Dateien (src), DOM, Entry-Calls, Events, __rendered/__features', () => {
@@ -79,6 +79,19 @@ describe('F-28 T-97 Auto-Mock', () => {
       expect(fs.existsSync(path.join(mockDir, gen.libFiles[0]))).toBe(true);
       expect(fs.existsSync(path.join(mockDir, gen.pluginFiles[0].name))).toBe(true);
       expect(fs.readFileSync(idx, 'utf8')).toMatch(/<script src=/);
+    });
+
+    it('Harness-Reset generisch: vor der echten Plugin-CSS, im statischen + KI-Mock (mirror APEX)', async () => {
+      expect(HARNESS_RESET).toMatch(/margin:0/); // resettet u.a. p/headings/lists
+      const gen = generateMock(dir, { name: 'Widget' });
+      expect(gen.html).toMatch(/id="harness-reset"/);
+      // Reset MUSS vor der echten Plugin-CSS stehen, damit diese gewinnt
+      expect(gen.html.indexOf('harness-reset')).toBeLessThan(gen.html.indexOf('style.min.css'));
+      // KI-Mock ohne eigenen Reset → wird deterministisch injiziert
+      const ai = { kind: 'cli', complete: async () => '<!DOCTYPE html><html><head><link rel="stylesheet" href="css/style.min.css"></head><body><div id="mock-root">x</div><script>window.__ok=true;</script></body></html>' };
+      const aigen = await generateAiMock(dir, { ai, name: 'Widget' });
+      expect(aigen.html).toMatch(/id="harness-reset"/);
+      expect(aigen.html.indexOf('harness-reset')).toBeLessThan(aigen.html.indexOf('style.min.css'));
     });
 
     it('CSS generisch: collectMock sammelt echte CSS (min entdoppelt), Mock verlinkt sie, statt Optik nachzubauen', () => {
