@@ -26,9 +26,11 @@ describe('F-28 T-97 Auto-Mock', () => {
     expect(s).toMatch(/#mock-root/);
     expect(s).toMatch(/__ok === true/);
     expect(s).toMatch(/@playwright\/test/);
-    // T-102: separates Szenario, das verifiziert, dass das Plugin Output rendert
+    // T-102/T-105: separates Szenario, das Render-Output UND self-getestete Features schützt
     expect(s).toMatch(/renders output and exercises its features/);
     expect(s).toMatch(/__rendered/);
+    expect(s).toMatch(/__selftested/);
+    expect(s).toMatch(/characterized features regressed/);
   });
 
   it('buildMockSpec wartet auf den FINALEN __ok-Zustand (kein Race gegen die Charakterisierung)', () => {
@@ -78,12 +80,16 @@ describe('F-28 T-97 Auto-Mock', () => {
       expect(p).toMatch(/apex/i);                 // Shim-Anforderung
     });
 
-    it('aiMockPrompt fordert das Ausüben ALLER Features + window.__features (T-102)', () => {
+    it('aiMockPrompt: KI versteht Features + baut Self-Test-Harness (T-102/T-105)', () => {
       const c = collectMock(dir);
       const p = aiMockPrompt('Widget', c);
-      expect(p).toMatch(/interactions\/events/i);   // Events werden gelistet
-      expect(p).toMatch(/EXERCISE EVERY RELEVANT FEATURE/);
+      expect(p).toMatch(/interactions\/events/i);     // Events werden gelistet
+      expect(p).toMatch(/UNDERSTAND the plugin/);     // erst verstehen
+      expect(p).toMatch(/SELF-TEST HARNESS/);         // dann Self-Test-Harness
+      expect(p).toMatch(/REAL EFFECT/);               // Wirkung prüfen, nicht nur ausführen
+      expect(p).toMatch(/drag & drop/i);              // Drag&Drop ausdrücklich
       expect(p).toMatch(/window\.__features/);
+      expect(p).toMatch(/window\.__selftested/);
       expect(p).toMatch(/window\.__rendered/);
     });
 

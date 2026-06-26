@@ -115,9 +115,15 @@ test('plugin renders output and exercises its features', async ({ page }) => {
     var r = document.querySelector('#mock-root');
     var dom = !!(r && (r.querySelector('svg,canvas') || (r.children.length > 0 && r.innerHTML.replace(/\\s/g, '').length > 40)));
     var rendered = (window.__rendered === true) || (window.__rendered !== false && dom);
-    return { rendered: rendered, features: window.__features || [] };
+    var features = window.__features || [];
+    return { rendered: rendered, selftested: window.__selftested === true, failed: features.filter(function (f) { return f && f.ok === false; }), features: features };
   });
   expect(info.rendered, 'plugin produced no visible output in #mock-root; features=' + JSON.stringify(info.features)).toBe(true);
+  // When the mock self-tested its features (AI harness), EVERY characterized feature must work — this
+  // is what makes "works as before" cover drag & drop and the plugin's real behavior, not just load.
+  if (info.selftested) {
+    expect(info.failed, 'characterized features regressed (must work as before): ' + JSON.stringify(info.failed)).toEqual([]);
+  }
 });`;
 }
 
@@ -196,7 +202,11 @@ Requirements for the page:
 - Create the DOM the plugin needs: a visible <div id="mock-root"> mount (give it a real size, e.g. width:600px;height:400px) plus elements for the detected selectors. The plugin's rendered output MUST appear inside #mock-root.
 - Load libraries and plugin files via <script src> (NOT inline) using the exact paths above; then initialize the plugin the way APEX would.
 - Wrap initialization in try/catch; collect errors in window.__mockErrors (array); add window.onerror to push to it. Set window.__ok = (window.__mockErrors.length === 0). Also set window.__rendered = (document.querySelector('#mock-root') has non-trivial child content, i.e. the plugin produced output).
-- EXERCISE EVERY RELEVANT FEATURE, not just load: after the plugin rendered with data, also (a) call each entry point with plausible config/attributes, (b) trigger EACH detected interaction/event above on its element via dispatchEvent, and (c) cover the plugin's main options/modes. Wrap each in its own try/catch (non-fatal — a feature failing must not break load) and record ONE entry per exercised feature in window.__features = array of { feature, ok, detail } (e.g. {feature:'render',ok:true}, {feature:'entry:initFlow',ok:true}, {feature:'event:click@#node',ok:true}). The mock must represent the plugin's BEHAVIOR, not only its load.
+- FIRST UNDERSTAND the plugin from the source: what it is, EVERY feature it offers, and how each one works. THEN make this page a SELF-TEST HARNESS that characterizes those features as the spec a future migration must preserve. For EACH feature, run a check that ASSERTS its REAL EFFECT (not merely that code ran), e.g.:
+   • render: #mock-root actually contains the expected output (the right number of nodes/cards/rows/svg etc.).
+   • each interaction/event above: perform it and verify the resulting DOM change — e.g. DRAG & DROP actually moves an item into another container; a click toggles/opens the expected element; selection/sort/filter changes what is shown.
+   • each entry point and each main option/mode produces its expected result.
+  Wrap every check in try/catch (non-fatal) and push ONE result per feature to window.__features = array of { feature, ok, detail } where ok is TRUE only if the effect really happened (false + detail otherwise). Then set window.__selftested = true. These window.__features entries ARE the test cases the migration must keep green — make them concrete and meaningful, covering drag & drop and the plugin's other real features.
 - Show a short visible status line (e.g. #mock-status) reporting __ok / __rendered, so a human opening the page sees whether it worked.
 - Return ONLY the complete HTML document. Start the response DIRECTLY with <!DOCTYPE html> and end with </html>. Do NOT write any explanation, preamble or prose before or after the HTML, and no Markdown fences.`;
 }
