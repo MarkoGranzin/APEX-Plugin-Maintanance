@@ -91,6 +91,11 @@ describe('F-28 T-97 Auto-Mock', () => {
       expect(p).toMatch(/window\.__features/);
       expect(p).toMatch(/window\.__selftested/);
       expect(p).toMatch(/window\.__rendered/);
+      // T-106: Optik realistisch + Self-Tests nicht-destruktiv (sichtbarer Stand bleibt sauber)
+      expect(p).toMatch(/VISUAL QUALITY MATTERS/);
+      expect(p).toMatch(/HUMAN-READABLE/);
+      expect(p).toMatch(/NON-DESTRUCTIVE/);
+      expect(p).toMatch(/visible page MUST show the clean/);
     });
 
     it('generateAiMock: KI schreibt den Mock (mode=ai)', async () => {
