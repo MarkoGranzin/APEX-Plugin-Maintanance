@@ -91,6 +91,7 @@ describe('F-28 T-97 Auto-Mock', () => {
       expect(p).toMatch(/SELF-TEST HARNESS/);         // dann Self-Test-Harness
       expect(p).toMatch(/REAL EFFECT/);               // Wirkung prüfen, nicht nur ausführen
       expect(p).toMatch(/drag & drop/i);              // Drag&Drop ausdrücklich
+      expect(p).toMatch(/not reliably simulable headlessly/); // False-Negative vermeiden: echtes DnD nicht rot werten
       expect(p).toMatch(/window\.__features/);
       expect(p).toMatch(/window\.__selftested/);
       expect(p).toMatch(/window\.__rendered/);
