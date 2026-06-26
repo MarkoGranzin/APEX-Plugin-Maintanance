@@ -54,7 +54,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const DATA_DIR = process.env.AISPP_DATA_DIR || path.join(__dirname, 'data');
 // Build-Marker: muss mit APP_BUILD in public/app.html übereinstimmen. Bei Backend-Änderungen erhöhen.
 // Das Frontend vergleicht beide und warnt, wenn der laufende Dienst veraltet ist (Neustart nötig).
-const BUILD = '2026-06-26.32';
+const BUILD = '2026-06-26.33';
 const C = { reset: '\x1b[0m', bold: '\x1b[1m', dim: '\x1b[2m', green: '\x1b[32m', yellow: '\x1b[33m', red: '\x1b[31m', cyan: '\x1b[36m' };
 const c = (col, s) => `${C[col]}${s}${C.reset}`;
 
@@ -460,7 +460,14 @@ function cmdServe(portArg) {
       const body = await readBody(req);
       const r = await assignRepoToComponent(store, id, body || {}, { workDir: settings.workDir, secretStore });
       saveSecrets(); // ggf. neu hinterlegtes Token verschlüsselt persistieren
-      if (!r?.error) { const mu = await buildMockFor(store.get(id), { force: true }); if (mu) r.mockUrl = mu; } // KI-Mock nach Clone (T-97/T-101)
+      if (!r?.error) {
+        // Libraries/Typ/Format SOFORT erkennen (read-only) — sonst bleibt die LIBRARIES-Spalte nach dem Import
+        // leer bis zum nächsten Check. Gleiche Aufrufe wie die Post-Update-Auffrischung → konsistente Anzeige.
+        try { runComponentOnce(store, store.get(id), { scan: scanRepo, logSink: writeLog, onTestPlan, onSbom }); } catch { /* Erkennung best effort */ }
+        try { const enr = await checkLibrariesOnline(store.get(id).libs || []); store.update(id, { libs: enr, libWarning: libWarningFrom(enr) }); } catch { /* offline → Web-Aktualität später */ }
+        const mu = await buildMockFor(store.get(id), { force: true }); if (mu) r.mockUrl = mu; // KI-Mock nach Clone (T-97/T-101)
+        r.libs = (store.get(id).libs || []).length;
+      }
       return json(res, r, r?.error ? 400 : 200);
     });
 
