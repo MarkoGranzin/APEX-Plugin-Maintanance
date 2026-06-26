@@ -12,6 +12,7 @@
 
 import fs from 'node:fs';
 import path from 'node:path';
+import os from 'node:os';
 
 /**
  * @typedef {Object} AiBackend
@@ -83,15 +84,18 @@ export function cliArgsFor(command) {
  */
 export function findBundledClaude(env = process.env) {
   if (process.platform !== 'win32') return null;
-  // %APPDATA%/%LOCALAPPDATA% sind in manchen Start-Umgebungen (Dienst/Task) NICHT gesetzt →
-  // zusätzlich aus %USERPROFILE% bzw. HOMEDRIVE+HOMEPATH ableiten, damit die Erkennung trotzdem greift.
-  const profile = env.USERPROFILE || ((env.HOMEDRIVE && env.HOMEPATH) ? env.HOMEDRIVE + env.HOMEPATH : null);
-  const roots = [...new Set([
-    env.APPDATA && path.join(env.APPDATA, 'Claude', 'claude-code'),
-    env.LOCALAPPDATA && path.join(env.LOCALAPPDATA, 'Claude', 'claude-code'),
-    profile && path.join(profile, 'AppData', 'Roaming', 'Claude', 'claude-code'),
-    profile && path.join(profile, 'AppData', 'Local', 'Claude', 'claude-code'),
-  ].filter(Boolean))];
+  // env-Variablen (APPDATA/LOCALAPPDATA/USERPROFILE) sind in manchen Start-Umgebungen NICHT gesetzt →
+  // zusätzlich os.homedir() nutzen UND notfalls alle Benutzerprofile unter C:\Users scannen.
+  let home = env.USERPROFILE || ((env.HOMEDRIVE && env.HOMEPATH) ? env.HOMEDRIVE + env.HOMEPATH : null);
+  if (!home) { try { home = os.homedir(); } catch { /* egal */ } }
+  const bases = new Set();
+  for (const b of [env.APPDATA, env.LOCALAPPDATA, home && path.join(home, 'AppData', 'Roaming'), home && path.join(home, 'AppData', 'Local')].filter(Boolean)) bases.add(b);
+  // Fallback: alle Profile durchsuchen (C:\Users\<user>\AppData\{Roaming,Local})
+  try {
+    const usersRoot = home ? path.dirname(home) : (env.SystemDrive ? env.SystemDrive + '\\Users' : 'C:\\Users');
+    for (const u of fs.readdirSync(usersRoot)) { bases.add(path.join(usersRoot, u, 'AppData', 'Roaming')); bases.add(path.join(usersRoot, u, 'AppData', 'Local')); }
+  } catch { /* egal */ }
+  const roots = [...new Set([...bases].map((b) => path.join(b, 'Claude', 'claude-code')))];
   const cmp = (a, b) => { for (let i = 0; i < Math.max(a.length, b.length); i++) { const d = (a[i] || 0) - (b[i] || 0); if (d) return d; } return 0; };
   let best = null, bestV = null;
   for (const root of roots) {
