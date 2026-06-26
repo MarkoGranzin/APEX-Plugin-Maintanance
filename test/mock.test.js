@@ -5,8 +5,8 @@ import path from 'node:path';
 import { buildMockPage, buildMockSpec, generateMock, writeMock, generateAiMock, aiMockPrompt, collectMock } from '../src/test/mock.js';
 
 describe('F-28 T-97 Auto-Mock', () => {
-  it('buildMockPage: self-contained HTML mit Shim, Libs (src), Plugin-Dateien (src), DOM, Entry-Calls', () => {
-    const html = buildMockPage({ name: 'P', libFiles: ['three.js'], pluginFiles: ['plugin/widget.js'], selectors: ['#bg', '.box'], entryPoints: ['initPlugin'] });
+  it('buildMockPage: self-contained HTML mit Shim, Libs (src), Plugin-Dateien (src), DOM, Entry-Calls, Events, __rendered/__features', () => {
+    const html = buildMockPage({ name: 'P', libFiles: ['three.js'], pluginFiles: ['plugin/widget.js'], selectors: ['#bg', '.box'], entryPoints: ['initPlugin'], events: [{ type: 'click', selector: '#bg' }] });
     expect(html).toMatch(/<script src="three\.js">/);
     expect(html).toMatch(/<script src="plugin\/widget\.js">/); // Plugin-Code extern, nicht inline
     expect(html).toMatch(/window\.apex/);
@@ -14,13 +14,21 @@ describe('F-28 T-97 Auto-Mock', () => {
     expect(html).toMatch(/class="box"/);
     expect(html).toMatch(/initPlugin\(\)/);
     expect(html).toMatch(/window\.__ok/);
+    // T-102: Features ausüben — erkanntes Event wird ausgelöst, __rendered + __features gesetzt
+    expect(html).toMatch(/dispatchEvent\(new Event\("click"/);
+    expect(html).toMatch(/window\.__mockEvents/);
+    expect(html).toMatch(/window\.__rendered/);
+    expect(html).toMatch(/window\.__features/);
   });
 
-  it('buildMockSpec prüft window.__ok + Mount sichtbar', () => {
+  it('buildMockSpec prüft window.__ok + Mount sichtbar + zweites „rendert"-Szenario (T-102)', () => {
     const s = buildMockSpec('P');
     expect(s).toMatch(/#mock-root/);
     expect(s).toMatch(/__ok === true/);
     expect(s).toMatch(/@playwright\/test/);
+    // T-102: separates Szenario, das verifiziert, dass das Plugin Output rendert
+    expect(s).toMatch(/renders output and exercises its features/);
+    expect(s).toMatch(/__rendered/);
   });
 
   it('buildMockSpec wartet auf den FINALEN __ok-Zustand (kein Race gegen die Charakterisierung)', () => {
@@ -68,6 +76,15 @@ describe('F-28 T-97 Auto-Mock', () => {
       expect(p).toMatch(/plugin\//);             // Plugin-Dateipfad
       expect(p).toMatch(/window\.__ok/);          // Vertrag
       expect(p).toMatch(/apex/i);                 // Shim-Anforderung
+    });
+
+    it('aiMockPrompt fordert das Ausüben ALLER Features + window.__features (T-102)', () => {
+      const c = collectMock(dir);
+      const p = aiMockPrompt('Widget', c);
+      expect(p).toMatch(/interactions\/events/i);   // Events werden gelistet
+      expect(p).toMatch(/EXERCISE EVERY RELEVANT FEATURE/);
+      expect(p).toMatch(/window\.__features/);
+      expect(p).toMatch(/window\.__rendered/);
     });
 
     it('generateAiMock: KI schreibt den Mock (mode=ai)', async () => {

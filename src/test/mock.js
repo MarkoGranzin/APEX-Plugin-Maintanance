@@ -30,7 +30,7 @@ function domFor(sel) {
 }
 
 /** Self-contained Mock-Seite (rein). libFiles + pluginFiles werden via <script src> geladen (relativ). */
-export function buildMockPage({ name = 'plugin', libFiles = [], pluginFiles = [], selectors = [], entryPoints = [] } = {}) {
+export function buildMockPage({ name = 'plugin', libFiles = [], pluginFiles = [], selectors = [], entryPoints = [], events = [] } = {}) {
   const dom = [...new Set(selectors.map(domFor).filter(Boolean))].join('\n      ');
   const libTags = libFiles.map((f) => `<script src="${esc(f)}"></script>`).join('\n    ');
   // Plugin-Code als EXTERNE Dateien laden (kein Inlining → keine HTML-Kontext-/Encoding-Brüche;
@@ -40,6 +40,9 @@ export function buildMockPage({ name = 'plugin', libFiles = [], pluginFiles = []
   // „lädt sauber"-Baseline nicht rot machen. Erfolge/Fehler je Entry werden separat erfasst (Info bzw.
   // zusätzliche grüne Szenarien, die eine Migration dann doch schützen, wenn ein Entry hier läuft).
   const entry = entryPoints.map((fn) => `  try{ if(typeof ${fn}==='function'){ ${fn}(); window.__mockEntry.push({fn:'${esc(fn)}',ok:true}); } }catch(e){ window.__mockEntry.push({fn:'${esc(fn)}',ok:false,error:(e&&e.message||String(e))}); }`).join('\n');
+  // Erkannte Events auf ihren Elementen auslösen (non-fatal) → die Event-Handler des Plugins werden ausgeübt,
+  // nicht nur das Laden. Jedes Ergebnis wird in window.__mockEvents protokolliert.
+  const evDispatch = (events || []).map((ev) => `  try{ var el=document.querySelector(${JSON.stringify(ev.selector)}); if(el){ el.dispatchEvent(new Event(${JSON.stringify(ev.type)},{bubbles:true})); window.__mockEvents.push({type:${JSON.stringify(ev.type)},selector:${JSON.stringify(ev.selector)},ok:true}); } else { window.__mockEvents.push({type:${JSON.stringify(ev.type)},selector:${JSON.stringify(ev.selector)},ok:true,skipped:true}); } }catch(e){ window.__mockEvents.push({type:${JSON.stringify(ev.type)},selector:${JSON.stringify(ev.selector)},ok:false,error:(e&&e.message||String(e))}); }`).join('\n');
   return `<!doctype html>
 <html><head><meta charset="utf-8"><title>Mock — ${esc(name)}</title></head>
 <body>
@@ -47,7 +50,7 @@ export function buildMockPage({ name = 'plugin', libFiles = [], pluginFiles = []
   <p class="muted">Self-contained test page (apex shim + libs + plugin). For manual testing &amp; the works-as-before baseline.</p>
   <div id="mock-root" style="width:200px;height:60px;border:1px solid #888">plugin mount</div>
       ${dom}
-  <script>window.__mockErrors=[]; window.__mockEntry=[]; window.onerror=function(m){ window.__mockErrors.push(String(m)); };</script>
+  <script>window.__mockErrors=[]; window.__mockEntry=[]; window.__mockEvents=[]; window.onerror=function(m){ window.__mockErrors.push(String(m)); };</script>
     ${libTags}
   <script>
     // apex-Shim (nach den Libs, damit jQuery verfügbar ist) — breit genug, damit Plugins beim Laden nicht stolpern
@@ -67,7 +70,15 @@ export function buildMockPage({ name = 'plugin', libFiles = [], pluginFiles = []
 ${plugin}
   <script>
 ${entry}
-    // Baseline „lädt sauber" = nur Lade-/Top-Level-Fehler zählen (Entry-Aufrufe ohne Config sind nicht fatal)
+${evDispatch}
+    // __rendered: hat das Plugin substanziellen Output in #mock-root erzeugt (Feature „rendert")?
+    (function(){ var r=document.querySelector('#mock-root'); window.__rendered = !!(r && (r.querySelector('svg,canvas') || (r.children.length>0 && r.innerHTML.replace(/\\s/g,'').length>40))); })();
+    // Feature-Übersicht (Einstiegspunkte + Events) für die Charakterisierung
+    window.__features = [].concat(
+      (window.__mockEntry||[]).map(function(e){ return { feature:'entry:'+e.fn, ok:e.ok, error:e.error }; }),
+      (window.__mockEvents||[]).map(function(e){ return { feature:'event:'+e.type+'@'+e.selector, ok:e.ok, error:e.error }; })
+    );
+    // Baseline „lädt sauber" = nur Lade-/Top-Level-Fehler zählen (Feature-Aufrufe ohne Config sind nicht fatal)
     window.__ok = (window.__mockErrors.length === 0);
   </script>
 </body></html>`;
@@ -77,21 +88,36 @@ ${entry}
 export function buildMockSpec(name = 'plugin') {
   return `import { test, expect } from '@playwright/test';
 const URL = process.env.PLUGIN_URL;
+
+// The mock characterizes itself asynchronously (mxGraph etc. need a tick to lay out). Mocks differ in
+// HOW they signal: some leave window.__ok undefined until done, others initialise it to false and flip
+// it to true at the end. So wait for the FINAL state (__ok === true); on timeout fall through and read
+// the final value so the assertions fail with captured detail instead of a cryptic timeout.
+async function settle(page) {
+  await page.goto(URL);
+  await expect(page.locator('#mock-root')).toBeVisible();
+  await page.waitForFunction(() => window.__ok === true, null, { timeout: 8000 }).catch(() => {});
+}
+
 test('mock loads the plugin without JS errors (works as before)', async ({ page }) => {
   const errors = [];
   page.on('pageerror', (e) => errors.push(String(e)));
-  await page.goto(URL);
-  await expect(page.locator('#mock-root')).toBeVisible();
-  // The mock characterizes itself asynchronously (mxGraph etc. need a tick to lay out). Mocks
-  // differ in HOW they signal: some leave window.__ok undefined until done, others initialise it
-  // to false and flip it to true at the end. So wait for the FINAL state (__ok === true); if it
-  // never settles true (a genuinely broken plugin), fall through and read the final value so the
-  // assertion below fails with the captured errors instead of a cryptic timeout.
-  await page.waitForFunction(() => window.__ok === true, null, { timeout: 8000 }).catch(() => {});
+  await settle(page);
   const ok = await page.evaluate(() => window.__ok === true);
   const mockErrors = await page.evaluate(() => window.__mockErrors || []);
   expect(errors, errors.join('\\n')).toEqual([]);
   expect(ok, 'plugin reported load errors: ' + JSON.stringify(mockErrors)).toBe(true);
+});
+
+test('plugin renders output and exercises its features', async ({ page }) => {
+  await settle(page);
+  const info = await page.evaluate(() => {
+    var r = document.querySelector('#mock-root');
+    var dom = !!(r && (r.querySelector('svg,canvas') || (r.children.length > 0 && r.innerHTML.replace(/\\s/g, '').length > 40)));
+    var rendered = (window.__rendered === true) || (window.__rendered !== false && dom);
+    return { rendered: rendered, features: window.__features || [] };
+  });
+  expect(info.rendered, 'plugin produced no visible output in #mock-root; features=' + JSON.stringify(info.features)).toBe(true);
 });`;
 }
 
@@ -107,6 +133,7 @@ export function collectMock(dir) {
   const selectors = new Set();
   const entryPoints = new Set();
   const functions = [];
+  const events = new Map(); // key: type|selector → {type,selector}
   const seen = new Set();
   let n = 0;
   try {
@@ -121,10 +148,11 @@ export function collectMock(dir) {
       }
       const deep = analyzeDeep(a.code || '');
       for (const s of deep.selectors || []) selectors.add(s);
+      for (const ev of deep.events || []) { if (ev && ev.selector) { const k = ev.type + '|' + ev.selector; if (!events.has(k)) events.set(k, { type: ev.type, selector: ev.selector }); } }
       for (const f of deep.functions || []) { functions.push(f); if (f.name && /^(init|refresh|render|draw|setup|load|create|destroy)/i.test(f.name)) entryPoints.add(f.name); }
     }
   } catch { /* best effort */ }
-  return { libFiles, pluginFiles, selectors: [...selectors], entryPoints: [...entryPoints], functions };
+  return { libFiles, pluginFiles, selectors: [...selectors], entryPoints: [...entryPoints], functions, events: [...events.values()] };
 }
 
 /**
@@ -134,7 +162,7 @@ export function collectMock(dir) {
 export function generateMock(dir, opts = {}) {
   const name = opts.name || 'plugin';
   const c = collectMock(dir);
-  const html = buildMockPage({ name, libFiles: c.libFiles, pluginFiles: c.pluginFiles.map((p) => p.name), selectors: c.selectors, entryPoints: c.entryPoints });
+  const html = buildMockPage({ name, libFiles: c.libFiles, pluginFiles: c.pluginFiles.map((p) => p.name), selectors: c.selectors, entryPoints: c.entryPoints, events: c.events });
   return { html, spec: { name: `${slug(name)}.ui.spec.js`, content: buildMockSpec(name) }, libFiles: c.libFiles, pluginFiles: c.pluginFiles, selectors: c.selectors, entryPoints: c.entryPoints, mode: 'static' };
 }
 
@@ -152,6 +180,7 @@ ${(c.pluginFiles || []).map((p) => '  ' + p.name).join('\n') || '  (none)'}
 
 Detected DOM selectors the plugin uses: ${(c.selectors || []).join(', ') || '(none)'}
 Likely entry points: ${(c.entryPoints || []).join(', ') || '(none)'}
+Detected interactions/events the plugin binds (trigger EACH on its element): ${(c.events || []).map((e) => e.type + '→' + e.selector).join(', ') || '(none)'}
 Functions/signatures (with apex.* usage):
 ${fns || '(none)'}
 
@@ -167,6 +196,7 @@ Requirements for the page:
 - Create the DOM the plugin needs: a visible <div id="mock-root"> mount (give it a real size, e.g. width:600px;height:400px) plus elements for the detected selectors. The plugin's rendered output MUST appear inside #mock-root.
 - Load libraries and plugin files via <script src> (NOT inline) using the exact paths above; then initialize the plugin the way APEX would.
 - Wrap initialization in try/catch; collect errors in window.__mockErrors (array); add window.onerror to push to it. Set window.__ok = (window.__mockErrors.length === 0). Also set window.__rendered = (document.querySelector('#mock-root') has non-trivial child content, i.e. the plugin produced output).
+- EXERCISE EVERY RELEVANT FEATURE, not just load: after the plugin rendered with data, also (a) call each entry point with plausible config/attributes, (b) trigger EACH detected interaction/event above on its element via dispatchEvent, and (c) cover the plugin's main options/modes. Wrap each in its own try/catch (non-fatal — a feature failing must not break load) and record ONE entry per exercised feature in window.__features = array of { feature, ok, detail } (e.g. {feature:'render',ok:true}, {feature:'entry:initFlow',ok:true}, {feature:'event:click@#node',ok:true}). The mock must represent the plugin's BEHAVIOR, not only its load.
 - Show a short visible status line (e.g. #mock-status) reporting __ok / __rendered, so a human opening the page sees whether it worked.
 - Return ONLY the complete HTML document. Start the response DIRECTLY with <!DOCTYPE html> and end with </html>. Do NOT write any explanation, preamble or prose before or after the HTML, and no Markdown fences.`;
 }
