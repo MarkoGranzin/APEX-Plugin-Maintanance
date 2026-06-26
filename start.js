@@ -55,7 +55,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const DATA_DIR = process.env.AISPP_DATA_DIR || path.join(__dirname, 'data');
 // Build-Marker: muss mit APP_BUILD in public/app.html übereinstimmen. Bei Backend-Änderungen erhöhen.
 // Das Frontend vergleicht beide und warnt, wenn der laufende Dienst veraltet ist (Neustart nötig).
-const BUILD = '2026-06-26.3';
+const BUILD = '2026-06-26.4';
 const C = { reset: '\x1b[0m', bold: '\x1b[1m', dim: '\x1b[2m', green: '\x1b[32m', yellow: '\x1b[33m', red: '\x1b[31m', cyan: '\x1b[36m' };
 const c = (col, s) => `${C[col]}${s}${C.reset}`;
 
@@ -129,10 +129,20 @@ function cmdServe(portArg) {
   const onSbom = (component, sbom) => {
     try { fs.mkdirSync(sbomDir, { recursive: true }); fs.writeFileSync(path.join(sbomDir, `${slugify(component.name)}.cdx.json`), JSON.stringify(sbom, null, 2)); } catch {}
   };
-  // Charakterisierungs-Baseline je Plugin persistent ablegen (F-28/T-92)
+  // Charakterisierungs-Baseline INS PLUGIN-VERZEICHNIS ablegen (F-28/T-92/T-99): Teil des Pflege-Nachweises,
+  // wird beim Upload mitcommittet. Fallback nach DATA_DIR/baseline nur, wenn (noch) kein Repo-Pfad da ist.
   const baselineDir = path.join(DATA_DIR, 'baseline');
   const onBaseline = (component, baseline) => {
-    try { fs.mkdirSync(baselineDir, { recursive: true }); fs.writeFileSync(path.join(baselineDir, `${slugify(component.name)}.json`), JSON.stringify(baseline, null, 2)); } catch {}
+    try {
+      if (component?.path && fs.existsSync(component.path)) {
+        const d = path.join(component.path, '.maintenance');
+        fs.mkdirSync(d, { recursive: true });
+        fs.writeFileSync(path.join(d, 'baseline.json'), JSON.stringify(baseline, null, 2));
+      } else {
+        fs.mkdirSync(baselineDir, { recursive: true });
+        fs.writeFileSync(path.join(baselineDir, `${slugify(component.name)}.json`), JSON.stringify(baseline, null, 2));
+      }
+    } catch { /* Datei-Fehler nicht eskalieren */ }
   };
   // Auto-Mock je Plugin (F-28/T-97/T-99): self-contained Testseite + generierte Tests INS REPO schreiben
   // (unter <repo>/.maintenance/), damit sie beim Upload mitcommittet werden; von dort statisch ausliefern.
