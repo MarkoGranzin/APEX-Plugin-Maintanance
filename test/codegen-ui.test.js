@@ -33,4 +33,22 @@ describe('T-64 Coded-UI- & Unit-Generierung', () => {
     const { files } = generateCodedTests('Leer', { functions: [], events: [], selectors: [] });
     for (const f of files) expect(parses(f.content)).toBe(true);
   });
+
+  it('keine doppelten test()-Titel bei doppelten Events/Selektoren (Playwright lehnt sonst die Datei ab)', () => {
+    // Analyse kann denselben Selektor/dasselbe Event mehrfach liefern → früher: doppelte Titel →
+    // Playwright „duplicate test title" → 0 Szenarien → rote Baseline → Migration übersprungen.
+    const dup = {
+      functions: [],
+      selectors: ['#t_TreeNav', '#t_TreeNav', '.box'],
+      events: [
+        { type: 'theme42layoutchanged', selector: '#t_TreeNav' },
+        { type: 'theme42layoutchanged', selector: '#t_TreeNav' },
+        { type: 'click', selector: '.box' },
+      ],
+    };
+    const spec = buildPlaywrightSpec('Dup', dup);
+    expect(parses(spec)).toBe(true);
+    const titles = [...spec.matchAll(/test\((["'])((?:\\.|(?!\1).)*)\1/g)].map((m) => m[2]);
+    expect(titles.length).toBe(new Set(titles).size); // alle Titel eindeutig
+  });
 });

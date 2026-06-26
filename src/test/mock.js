@@ -82,6 +82,12 @@ test('mock loads the plugin without JS errors (works as before)', async ({ page 
   page.on('pageerror', (e) => errors.push(String(e)));
   await page.goto(URL);
   await expect(page.locator('#mock-root')).toBeVisible();
+  // The mock characterizes itself asynchronously (mxGraph etc. need a tick to lay out). Mocks
+  // differ in HOW they signal: some leave window.__ok undefined until done, others initialise it
+  // to false and flip it to true at the end. So wait for the FINAL state (__ok === true); if it
+  // never settles true (a genuinely broken plugin), fall through and read the final value so the
+  // assertion below fails with the captured errors instead of a cryptic timeout.
+  await page.waitForFunction(() => window.__ok === true, null, { timeout: 8000 }).catch(() => {});
   const ok = await page.evaluate(() => window.__ok === true);
   const mockErrors = await page.evaluate(() => window.__mockErrors || []);
   expect(errors, errors.join('\\n')).toEqual([]);

@@ -23,6 +23,16 @@ describe('F-28 T-97 Auto-Mock', () => {
     expect(s).toMatch(/@playwright\/test/);
   });
 
+  it('buildMockSpec wartet auf den FINALEN __ok-Zustand (kein Race gegen die Charakterisierung)', () => {
+    // Mocks signalisieren „fertig" unterschiedlich: mal __ok erst spät gesetzt, mal früh false→true.
+    // Auf __ok===true zu warten deckt BEIDE Muster ab; ohne Warten liefert ein grün rendernder Mock
+    // eine ROTE Baseline. Bei echtem Fehlschlag (Timeout) wird der finale Wert gelesen → klare Assertion.
+    const s = buildMockSpec('P');
+    expect(s).toMatch(/waitForFunction\(\(\) => window\.__ok === true[\s\S]*\.catch\(/);
+    // das Warten muss VOR der __ok-Auswertung stehen
+    expect(s.indexOf('waitForFunction')).toBeLessThan(s.lastIndexOf('window.__ok === true'));
+  });
+
   describe('generateMock + writeMock am Fixture-Repo', () => {
     let dir, mockDir;
     beforeAll(() => {
