@@ -36,7 +36,7 @@ import { maintainComponent } from './src/service/maintain.js';
 import { runUiTests } from './src/test/run-ui.js';
 import { captureBaseline } from './src/service/baseline.js';
 import { redevelopComponent } from './src/service/redev.js';
-import { generateMock, writeMock } from './src/test/mock.js';
+import { generateAiMock, writeMock } from './src/test/mock.js';
 import { uploadFix } from './src/service/upload.js';
 import { slug as slugify } from './src/util/slug.js';
 import { resolveAiBackend, aiBackendView } from './src/ai/configure.js';
@@ -55,7 +55,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const DATA_DIR = process.env.AISPP_DATA_DIR || path.join(__dirname, 'data');
 // Build-Marker: muss mit APP_BUILD in public/app.html übereinstimmen. Bei Backend-Änderungen erhöhen.
 // Das Frontend vergleicht beide und warnt, wenn der laufende Dienst veraltet ist (Neustart nötig).
-const BUILD = '2026-06-26.5';
+const BUILD = '2026-06-26.6';
 const C = { reset: '\x1b[0m', bold: '\x1b[1m', dim: '\x1b[2m', green: '\x1b[32m', yellow: '\x1b[33m', red: '\x1b[31m', cyan: '\x1b[36m' };
 const c = (col, s) => `${C[col]}${s}${C.reset}`;
 
@@ -156,18 +156,28 @@ function cmdServe(portArg) {
   };
   // Auto-Mock je Plugin (F-28/T-97/T-99): self-contained Testseite + generierte Tests INS REPO schreiben
   // (unter <repo>/.maintenance/), damit sie beim Upload mitcommittet werden; von dort statisch ausliefern.
-  const buildMockFor = (component) => {
+  // KI-first (T-101): die KI schreibt aus der Analyse einen plugin-spezifischen Mock; ohne KI Fallback
+  // auf das statische Template. Kosten begrenzen: einmal je Plugin bauen (force bei assign-repo),
+  // sonst wiederverwenden (Full maintenance baut nur, wenn noch keiner existiert) — gleicher Harness vor/nach Migration.
+  const buildMockFor = async (component, opts = {}) => {
     try {
       if (!component?.path || !fs.existsSync(component.path)) return null;
       const sl = slugify(component.name);
-      const gen = generateMock(component.path, { name: component.name });
+      const mockUrl = `http://localhost:${port}/mock/${sl}/index.html`;
+      const exists = fs.existsSync(path.join(component.path, '.maintenance', 'mock', 'index.html'));
+      if (exists && !opts.force) { // vorhandenen Mock wiederverwenden (kein erneuter KI-Lauf)
+        const cur = store.get(component.id) || {};
+        store.update(component.id, { mockUrl, ...(cur.uiTestUrl ? {} : { uiTestUrl: mockUrl }) });
+        return mockUrl;
+      }
+      const ai = resolveAiBackend(settings, secretStore);
+      const gen = await generateAiMock(component.path, { ai, name: component.name }); // KI schreibt; Fallback statisch
       writeMock(path.join(component.path, '.maintenance', 'mock'), component.path, gen); // committet (git add .)
       const testsDir = path.join(component.path, '.maintenance', 'tests');
       fs.mkdirSync(testsDir, { recursive: true });
       fs.writeFileSync(path.join(testsDir, gen.spec.name), gen.spec.content);
-      const mockUrl = `http://localhost:${port}/mock/${sl}/index.html`;
       const cur = store.get(component.id) || {};
-      const patch = { mockUrl, codedTests: [...(cur.codedTests || []).filter((t) => t.name !== gen.spec.name), gen.spec] };
+      const patch = { mockUrl, mockMode: gen.mode, codedTests: [...(cur.codedTests || []).filter((t) => t.name !== gen.spec.name), gen.spec] };
       if (!cur.uiTestUrl) patch.uiTestUrl = mockUrl; // Default-Ziel, falls der Nutzer keine eigene URL gesetzt hat
       store.update(component.id, patch);
       return mockUrl;
@@ -393,7 +403,7 @@ function cmdServe(portArg) {
       const body = await readBody(req);
       const r = await assignRepoToComponent(store, id, body || {}, { workDir: settings.workDir, secretStore });
       saveSecrets(); // ggf. neu hinterlegtes Token verschlüsselt persistieren
-      if (!r?.error) { const mu = buildMockFor(store.get(id)); if (mu) r.mockUrl = mu; } // Auto-Mock nach Clone (T-97)
+      if (!r?.error) { const mu = await buildMockFor(store.get(id), { force: true }); if (mu) r.mockUrl = mu; } // KI-Mock nach Clone (T-97/T-101)
       return json(res, r, r?.error ? 400 : 200);
     });
 
@@ -490,8 +500,8 @@ function cmdServe(portArg) {
       const hasPlaywright = fs.existsSync(path.join(__dirname, 'node_modules', '@playwright', 'test'));
       const sl = slugify(c.name);
       const specsDir = path.join(DATA_DIR, 'ui-tests', sl);
-      // 0) Auto-Mock sicherstellen (Default-UI-Test-Ziel, T-97)
-      buildMockFor(store.get(id));
+      // 0) Auto-Mock sicherstellen (vorhandenen wiederverwenden; sonst bauen) — Default-UI-Test-Ziel (T-97/T-101)
+      await buildMockFor(store.get(id));
       // 1) Normale Pflege: check → web-libcheck → safe Lib-Updates → autofix → re-test → breaking melden → upload(gated)
       const r = await maintainComponent(store, store.get(id), { ai, updateDeps: { push: localGitPush(c.path), registry: prRegistry, recordRun: record }, logSink: writeLog, onTestPlan, onSbom, recordRun: record });
       // 2) Breaking Libs? → Baseline gegen den Mock + verifizierte Migration (works-as-before), sonst Rollback

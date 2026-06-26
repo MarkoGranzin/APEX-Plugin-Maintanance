@@ -2,7 +2,7 @@ import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { buildMockPage, buildMockSpec, generateMock, writeMock } from '../src/test/mock.js';
+import { buildMockPage, buildMockSpec, generateMock, writeMock, generateAiMock, aiMockPrompt, collectMock } from '../src/test/mock.js';
 
 describe('F-28 T-97 Auto-Mock', () => {
   it('buildMockPage: self-contained HTML mit Shim, Libs (src), Plugin-Dateien (src), DOM, Entry-Calls', () => {
@@ -49,6 +49,36 @@ describe('F-28 T-97 Auto-Mock', () => {
       expect(fs.existsSync(path.join(mockDir, gen.libFiles[0]))).toBe(true);
       expect(fs.existsSync(path.join(mockDir, gen.pluginFiles[0].name))).toBe(true);
       expect(fs.readFileSync(idx, 'utf8')).toMatch(/<script src=/);
+    });
+
+    it('aiMockPrompt enthält Analyse, Lib-/Datei-Pfade und window.__ok-Vertrag (T-101)', () => {
+      const c = collectMock(dir);
+      const p = aiMockPrompt('Widget', c);
+      expect(p).toMatch(/three\.js/);            // Lib-Pfad
+      expect(p).toMatch(/plugin\//);             // Plugin-Dateipfad
+      expect(p).toMatch(/window\.__ok/);          // Vertrag
+      expect(p).toMatch(/apex/i);                 // Shim-Anforderung
+    });
+
+    it('generateAiMock: KI schreibt den Mock (mode=ai)', async () => {
+      let asked = '';
+      const ai = { kind: 'cli', complete: async (prompt) => { asked = prompt; return '```html\n<html><body><div id="mock-root"></div><script>window.__ok=true;</script></body></html>\n```'; } };
+      const gen = await generateAiMock(dir, { ai, name: 'Widget' });
+      expect(gen.mode).toBe('ai');
+      expect(gen.html).toMatch(/<html>/);
+      expect(gen.html).not.toMatch(/```/); // Markdown-Zaun entfernt
+      expect(asked).toMatch(/senior test engineer/i);
+    });
+
+    it('generateAiMock: ohne KI → statischer Fallback', async () => {
+      const gen = await generateAiMock(dir, { ai: { kind: 'stub' }, name: 'Widget' });
+      expect(gen.mode).toBe('static');
+    });
+
+    it('generateAiMock: unbrauchbare KI-Antwort → statischer Fallback', async () => {
+      const ai = { kind: 'cli', complete: async () => 'sorry, I cannot' };
+      const gen = await generateAiMock(dir, { ai, name: 'Widget' });
+      expect(gen.mode).toBe('static');
     });
   });
 });

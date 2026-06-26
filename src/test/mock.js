@@ -90,27 +90,24 @@ test('mock loads the plugin without JS errors (works as before)', async ({ page 
 }
 
 /**
- * Sammelt aus dem Repo, was der Mock braucht.
- * @returns {{html:string, spec:{name:string,content:string}, libFiles:string[], selectors:string[], entryPoints:string[]}}
+ * Sammelt aus dem Repo, was der Mock braucht: Lib-Dateien, Plugin-Dateien (extern), Analyse.
+ * @returns {{libFiles:string[], pluginFiles:{name:string,code:string}[], selectors:string[], entryPoints:string[], functions:object[]}}
  */
-export function generateMock(dir, opts = {}) {
-  const name = opts.name || 'plugin';
+export function collectMock(dir) {
   const libs = detectVendoredLibraries(dir).filter((l) => l.evidence && /\.js$/i.test(l.evidence));
   const libFiles = libs.map((l) => l.evidence);
   const libSet = new Set(libFiles);
-  // Plugin-Eigencode = extrahierte JS/Inline-Assets, die KEINE vendored Lib sind. WICHTIG: Lib-Kopien
-  // (auch .min, auch wenn nicht die kanonische Evidenz) NICHT inlinen — sie werden via <script src> geladen
-  // (sonst Doppel-Deklaration → Fehler). min/non-min derselben Datei dedupen; nur valides JS aufnehmen.
-  const pluginFiles = []; // [{name, code}] → als externe Dateien plugin/<name> geschrieben + geladen
+  const pluginFiles = [];
   const selectors = new Set();
   const entryPoints = new Set();
+  const functions = [];
   const seen = new Set();
   let n = 0;
   try {
     for (const a of inspectAssets(dir)) {
       const rel = a.origin?.type === 'file' ? String(a.origin.path).replace(/\\/g, '/') : '';
       if (rel && (libSet.has(rel) || isLibraryFile(rel) || /(^|\/)(lib|libs|vendor|vendors|dist)\//i.test(rel))) continue; // Lib → schon als <script src>
-      const base = (rel || a.name || '').replace(/\.min\.js$/i, '.js'); // min/non-min zusammenführen
+      const base = (rel || a.name || '').replace(/\.min\.js$/i, '.js');
       if (base && seen.has(base)) continue; if (base) seen.add(base);
       if (a.code && parseOk(a.code) && a.code.length < 200000) {
         const fname = `plugin/${String((rel ? rel.split('/').pop() : a.name) || `inline-${++n}.js`).replace(/[^\w.-]/g, '_').replace(/\.min\.js$/i, '.js')}`;
@@ -118,11 +115,66 @@ export function generateMock(dir, opts = {}) {
       }
       const deep = analyzeDeep(a.code || '');
       for (const s of deep.selectors || []) selectors.add(s);
-      for (const f of deep.functions || []) if (f.name && /^(init|refresh|render|draw|setup|load|create|destroy)/i.test(f.name)) entryPoints.add(f.name);
+      for (const f of deep.functions || []) { functions.push(f); if (f.name && /^(init|refresh|render|draw|setup|load|create|destroy)/i.test(f.name)) entryPoints.add(f.name); }
     }
   } catch { /* best effort */ }
-  const html = buildMockPage({ name, libFiles, pluginFiles: pluginFiles.map((p) => p.name), selectors: [...selectors], entryPoints: [...entryPoints] });
-  return { html, spec: { name: `${slug(name)}.ui.spec.js`, content: buildMockSpec(name) }, libFiles, pluginFiles, selectors: [...selectors], entryPoints: [...entryPoints] };
+  return { libFiles, pluginFiles, selectors: [...selectors], entryPoints: [...entryPoints], functions };
+}
+
+/**
+ * Statischer Mock (Fallback ohne KI) — generisches Template.
+ * @returns {{html, spec, libFiles, pluginFiles, selectors, entryPoints, mode:'static'}}
+ */
+export function generateMock(dir, opts = {}) {
+  const name = opts.name || 'plugin';
+  const c = collectMock(dir);
+  const html = buildMockPage({ name, libFiles: c.libFiles, pluginFiles: c.pluginFiles.map((p) => p.name), selectors: c.selectors, entryPoints: c.entryPoints });
+  return { html, spec: { name: `${slug(name)}.ui.spec.js`, content: buildMockSpec(name) }, libFiles: c.libFiles, pluginFiles: c.pluginFiles, selectors: c.selectors, entryPoints: c.entryPoints, mode: 'static' };
+}
+
+/** Baut den Prompt, mit dem die KI einen plugin-spezifischen Mock schreibt (rein/testbar). */
+export function aiMockPrompt(name, c) {
+  const fns = (c.functions || []).slice(0, 40).map((f) => `${f.name}(${(f.params || []).join(', ')})${f.apexCalls?.length ? ' [apex: ' + f.apexCalls.slice(0, 6).join(', ') + ']' : ''}`).join('\n');
+  const src = (c.pluginFiles || []).map((p) => `// ${p.name}\n${p.code}`).join('\n\n').slice(0, 14000);
+  return `You are a senior test engineer. Write ONE self-contained HTML page that loads and INITIALIZES this Oracle APEX plugin in a plain browser (no real APEX), so its load behavior can be characterized.
+
+Plugin: ${name}
+Libraries to load FIRST, in this order, via <script src="<path>"> (use exactly these relative paths):
+${(c.libFiles || []).map((f) => '  ' + f).join('\n') || '  (none)'}
+Plugin code files to load via <script src="plugin/<file>"> (already written next to the page):
+${(c.pluginFiles || []).map((p) => '  ' + p.name).join('\n') || '  (none)'}
+
+Detected DOM selectors the plugin uses: ${(c.selectors || []).join(', ') || '(none)'}
+Likely entry points: ${(c.entryPoints || []).join(', ') || '(none)'}
+Functions/signatures (with apex.* usage):
+${fns || '(none)'}
+
+Plugin source (excerpt):
+${src}
+
+Requirements for the page:
+- Provide a realistic apex.* shim covering the apex.* calls above (apex.item/$v/$s/apex.server.process/apex.jQuery/apex.message/apex.debug/apex.region/etc.) so the plugin does not crash at load.
+- Create the DOM elements the plugin needs (a visible <div id="mock-root"> mount plus elements for the detected selectors).
+- Load the libraries and plugin files via <script src> (NOT inline) using the exact paths above.
+- Initialize the plugin the way APEX would: call its entry point(s) with plausible attributes/options.
+- Wrap initialization in try/catch; collect any errors in window.__mockErrors (array). Set window.__ok = (window.__mockErrors.length === 0). Add window.onerror to push to window.__mockErrors.
+- Return ONLY the complete HTML document (no Markdown, no comments outside HTML).`;
+}
+
+/**
+ * KI-geschriebener, plugin-spezifischer Mock. Fällt bei fehlender/ungültiger KI-Antwort auf generateMock zurück.
+ * @param {string} dir @param {{ai:object, name?:string}} deps
+ */
+export async function generateAiMock(dir, deps = {}) {
+  const name = deps.name || 'plugin';
+  const c = collectMock(dir);
+  const ai = deps.ai;
+  if (!ai || ai.kind === 'stub' || typeof ai.complete !== 'function') return generateMock(dir, { name });
+  let html = '';
+  try { html = String(await ai.complete(aiMockPrompt(name, c), {})); } catch { return generateMock(dir, { name }); }
+  html = html.replace(/^```[a-z]*\n?|```\s*$/gi, '').trim();
+  if (!/<html[\s>]/i.test(html) || !/__ok/.test(html)) return generateMock(dir, { name }); // unbrauchbar → Fallback
+  return { html, spec: { name: `${slug(name)}.ui.spec.js`, content: buildMockSpec(name) }, libFiles: c.libFiles, pluginFiles: c.pluginFiles, selectors: c.selectors, entryPoints: c.entryPoints, mode: 'ai' };
 }
 
 const slug = (s) => String(s).toLowerCase().replace(/[^a-z0-9.-]+/g, '-').replace(/^-|-$/g, '') || 'plugin';
