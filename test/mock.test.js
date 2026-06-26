@@ -102,6 +102,7 @@ describe('F-28 T-97 Auto-Mock', () => {
       expect(p).toMatch(/__ok MUST be true for the unmodified plugin/);
       // T-106: Optik realistisch + Self-Tests nicht-destruktiv (sichtbarer Stand bleibt sauber)
       expect(p).toMatch(/VISUAL QUALITY MATTERS/);
+      expect(p).toMatch(/HEADERS\/LABELS MUST BE FULLY VISIBLE/); // Spaltenköpfe dürfen nicht abgeschnitten/überlappt sein
       expect(p).toMatch(/HUMAN-READABLE/);
       expect(p).toMatch(/NON-DESTRUCTIVE/);
       expect(p).toMatch(/visible page MUST show the clean/);
