@@ -16,6 +16,65 @@ import { reinjectAsset } from '../extract/reinject.js';
 import { runUiTestsDetailed } from '../test/run-ui.js';
 import { compareToBaseline } from './baseline.js';
 import { applyVendoredUpdates } from './lib-update.js';
+import { analyzeDeep } from '../test/analyze-deep.js';
+
+// T-103: konkrete Breaking-Change-Hinweise je Bibliothek, damit die KI Aufrufstellen PORTIERT
+// (Markup/Klassen/APIs) statt nicht-kompilierenden Code zu löschen — sonst gehen Optik & Features verloren.
+const LIB_NOTES = {
+  jquery: 'jQuery 3/4: removed event shorthands .load()/.unload()/.error() and .bind/.unbind/.delegate/.live → use .on()/.off(); .size() → .length; jqXHR .success()/.error()/.complete() → .done()/.fail()/.always(); $.isArray/$.isFunction/$.trim/$.parseJSON removed → Array.isArray/typeof/String.trim/JSON.parse; .andSelf() → .addBack(); positional :first/:last/:eq deprecated. Keep every selector, handler and DOM effect identical.',
+  bootstrap: 'Bootstrap 3→5: jQuery is no longer required and the jQuery plugin API ($el.modal()/$el.tooltip()/$el.tab()) is REMOVED → use the new JS API (new bootstrap.Modal(el)…) or data-bs-* attributes; data-toggle→data-bs-toggle, data-target→data-bs-target, data-dismiss→data-bs-dismiss; grid col-xs-*→col-*; .hidden→.d-none; .pull-left/right→.float-start/end; .center-block→.mx-auto; .panel→.card (.panel-heading→.card-header, .panel-body→.card-body); .btn-default→.btn-secondary; .img-responsive→.img-fluid; .label→.badge; glyphicons removed. Port ALL class names & data-attributes so the layout LOOKS identical.',
+  bootstrap4: 'Bootstrap 4→5: drop jQuery dependency; data-* → data-bs-*; .form-row→.row; .no-gutters→.g-0; .ml-/.mr-→.ms-/.me-; .float-left/right→.float-start/end; .badge-*→.bg-*; .close→.btn-close; .custom-control→form-check. Port markup so appearance is unchanged.',
+};
+/** Baut die Breaking-Change-Notizen für die tatsächlich betroffenen Libs (rein/testbar). */
+export function breakingNotes(libs = []) {
+  const out = [];
+  for (const l of libs || []) {
+    const key = String(l.name || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+    const note = LIB_NOTES[key] || LIB_NOTES[key.replace(/[0-9].*$/, '')];
+    if (note) out.push(`- ${l.name} (${l.version || '?'} → ${l.latest || 'latest'}): ${note}`);
+    else if (l.latest && l.version && l.version !== l.latest) out.push(`- ${l.name} (${l.version} → ${l.latest}): consult this library's migration guide; port removed/renamed APIs and markup instead of deleting them.`);
+  }
+  return out.join('\n');
+}
+
+/** Plugin-weites Feature-Inventar aus der Analyse (Funktionen, Events/Interaktionen, Selektoren, apex.*). */
+function featureInventory(dir) {
+  const fns = new Set(), events = new Set(), selectors = new Set(), apexCalls = new Set();
+  try {
+    for (const a of inspectAssets(dir)) {
+      const d = analyzeDeep(a.code || '');
+      for (const f of d.functions || []) { if (f.name) fns.add(`${f.name}(${(f.params || []).join(', ')})`); for (const c of f.apexCalls || []) apexCalls.add(c); }
+      for (const ev of d.events || []) { if (ev.selector) events.add(`${ev.type}→${ev.selector}`); }
+      for (const s of d.selectors || []) selectors.add(s);
+    }
+  } catch { /* best effort */ }
+  return { fns: [...fns], events: [...events], selectors: [...selectors], apexCalls: [...apexCalls] };
+}
+
+/** Reicher, feature-/breaking-bewusster Migrations-Prompt je Datei (rein/testbar, T-103). */
+export function buildMigrationPrompt(asset, ctx = {}) {
+  const { target = 'the latest stable libraries', breaking = '', inventory = {} } = ctx;
+  const inv = [];
+  if (inventory.events?.length) inv.push('Interactions/events to PRESERVE (re-bind so they still work — includes drag & drop / sortable): ' + inventory.events.slice(0, 40).join(', '));
+  if (inventory.fns?.length) inv.push('Functions/behaviors to keep working: ' + inventory.fns.slice(0, 40).join(', '));
+  if (inventory.apexCalls?.length) inv.push('apex.* integration to keep: ' + [...new Set(inventory.apexCalls)].slice(0, 30).join(', '));
+  return `You are an expert front-end engineer migrating an Oracle APEX plugin to ${target}. Migrate THIS file so the plugin keeps working on the new library versions WITHOUT changing what the user sees or can do.
+
+NON-NEGOTIABLE — preserve 1:1:
+- The exact VISUAL appearance and layout: keep the same DOM structure; when a framework renamed classes/attributes, PORT them to the new version's equivalents so the result LOOKS identical. Do NOT delete markup/classes that "no longer apply" — translate them.
+- ALL interactive features: drag & drop / sortable, click/hover/keyboard handlers, animations, dialogs/modals, AJAX/data loading. Re-bind every handler with the new API; NEVER drop a feature because its old API was removed — replace it with the new equivalent.
+- The public behavior and apex.* integration.
+
+Library breaking changes to apply (port call sites; do not remove functionality):
+${breaking || "(consult each library's migration guide)"}
+
+${inv.join('\n')}
+
+If something cannot be preserved perfectly, keep the closest WORKING equivalent rather than removing it. Return EXCLUSIVELY the full updated file content (no Markdown, no explanation).
+
+File ${asset.name}:
+${asset.code}`;
+}
 
 /**
  * Default-Migration (B-17): ZUERST die vendored Lib-Dateien wirklich auf die neueste stabile Version
@@ -49,13 +108,16 @@ async function defaultMigrate(store, comp, deps = {}) {
     } catch { /* Mock-Spiegelung best effort */ }
   }
 
-  // 2) KI passt die aufrufenden Plugin-Assets an die neue Lib-API an
+  // 2) KI passt die aufrufenden Plugin-Assets an die neue Lib-API an — mit Feature-Inventar +
+  //    lib-spezifischen Breaking-Changes, damit Optik & Interaktionen (Drag&Drop usw.) erhalten bleiben (T-103).
+  const breaking = breakingNotes(libs);
+  const inventory = featureInventory(dir);
   let aiChanged = 0;
   for (const asset of inspectAssets(dir)) {
     if (!asset.origin) continue;
     let out = '';
     try {
-      out = await ai.complete(`You are an expert web developer migrating an Oracle APEX plugin to ${target} while preserving its exact behavior. Rewrite the file minimally for the new library version. Return EXCLUSIVELY the full updated file content (no Markdown, no explanation).\nFile ${asset.name}:\n${asset.code}`, {});
+      out = await ai.complete(buildMigrationPrompt(asset, { target, breaking, inventory }), {});
     } catch { continue; }
     out = String(out).replace(/^```[a-z]*\n?|```$/g, '').trim();
     if (!out || !parseOk(out) || out === asset.code.trim()) continue;

@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { redevelopComponent } from '../src/service/redev.js';
+import { redevelopComponent, breakingNotes, buildMigrationPrompt } from '../src/service/redev.js';
 import { createComponentStore } from '../src/gui/store.js';
 
 const mkStore = () => createComponentStore({ now: () => 't', idGen: () => 'c1' });
@@ -141,5 +141,28 @@ describe('F-28 T-93 redevelopComponent (Spec-gesicherte Migration)', () => {
     expect(fs.readFileSync(path.join(dir, 'lib', 'jquery.min.js'), 'utf8')).toBe('OLD');                              // Lib zurückgerollt
     expect(fs.readFileSync(path.join(dir, '.maintenance', 'mock', 'lib', 'jquery.min.js'), 'utf8')).toBe('OLD');      // Mock zurückgerollt
     fs.rmSync(dir, { recursive: true, force: true });
+  });
+
+  // T-103: der KI besser vermitteln — konkrete Breaking-Changes + Feature-Erhalt im Prompt
+  it('breakingNotes liefert lib-spezifische Hinweise (jQuery-APIs, Bootstrap-Klassen/Attribute)', () => {
+    const notes = breakingNotes([{ name: 'jquery', version: '1.12.4', latest: '4.0.0' }, { name: 'bootstrap', version: '3.3.7', latest: '5.3.8' }]);
+    expect(notes).toMatch(/\.on\(\)/);              // jQuery: Event-API portieren
+    expect(notes).toMatch(/data-bs-toggle/);        // Bootstrap: Attribut-Rename
+    expect(notes).toMatch(/col-xs-\*→col-\*/);      // Bootstrap: Grid-Klassen
+    expect(notes).toMatch(/jQuery plugin API .*REMOVED/i);
+  });
+
+  it('buildMigrationPrompt verlangt Optik + ALLE Interaktionen (Drag&Drop) und enthält Breaking-Notes + Inventar', () => {
+    const p = buildMigrationPrompt({ name: 'js/script.js', code: 'function f(){}' }, {
+      target: 'jquery@4.0.0, bootstrap@5.3.8',
+      breaking: breakingNotes([{ name: 'bootstrap', version: '3.3.7', latest: '5.3.8' }]),
+      inventory: { events: ['drop→#board', 'click→.card'], fns: ['initBoard(opts)'], apexCalls: ['apex.server.process'] },
+    });
+    expect(p).toMatch(/drag & drop/i);
+    expect(p).toMatch(/VISUAL appearance/);
+    expect(p).toMatch(/PRESERVE/);
+    expect(p).toMatch(/data-bs-toggle/);            // Breaking-Notes eingebettet
+    expect(p).toMatch(/drop→#board/);               // Inventar (Events) eingebettet
+    expect(p).toMatch(/js\/script\.js/);            // Datei
   });
 });
