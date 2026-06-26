@@ -173,11 +173,15 @@ export async function generateAiMock(dir, deps = {}) {
   const name = deps.name || 'plugin';
   const c = collectMock(dir);
   const ai = deps.ai;
-  if (!ai || ai.kind === 'stub' || typeof ai.complete !== 'function') return generateMock(dir, { name });
+  const fallback = (reason) => ({ ...generateMock(dir, { name }), fallbackReason: reason });
+  if (!ai || ai.kind === 'stub' || typeof ai.complete !== 'function') return fallback('no AI backend (Settings → Test connection)');
   let html = '';
-  try { html = String(await ai.complete(aiMockPrompt(name, c), {})); } catch { return generateMock(dir, { name }); }
+  try { html = String(await ai.complete(aiMockPrompt(name, c), {})); }
+  catch (e) { return fallback('AI error: ' + (e?.message ?? e)); }
   html = html.replace(/^```[a-z]*\n?|```\s*$/gi, '').trim();
-  if (!/<html[\s>]/i.test(html) || !/__ok/.test(html)) return generateMock(dir, { name }); // unbrauchbar → Fallback
+  if (!html) return fallback('AI returned empty');
+  if (!/<html[\s>]/i.test(html)) return fallback('AI response was not an HTML document');
+  if (!/__ok/.test(html)) return fallback('AI HTML missing the window.__ok contract');
   return { html, spec: { name: `${slug(name)}.ui.spec.js`, content: buildMockSpec(name) }, libFiles: c.libFiles, pluginFiles: c.pluginFiles, selectors: c.selectors, entryPoints: c.entryPoints, mode: 'ai' };
 }
 

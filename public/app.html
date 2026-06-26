@@ -384,7 +384,7 @@ async function openDetail(id){
       <div class="inline" style="margin-bottom:6px"><button onclick="regenTestPlan()">🔄 Regenerate plan</button>${c.testPlan?'<button onclick="downloadTestPlan()">⬇ .feature</button>':''}${(c.codedTests&&c.codedTests.length)?c.codedTests.map((t,i)=>`<button onclick="downloadCoded(${i})">⬇ ${esc(t.name)}</button>`).join(''):''}</div>
       <h4 class="muted small" style="margin:14px 0 4px">🎭 Coded UI tests (Playwright) <span class="muted">— run live &amp; evaluate (not in the scheduled job)</span></h4>
       <div class="inline" style="gap:6px"><input id="uiUrl" placeholder="UI test URL: auto-mock is used by default" value="${esc(c.uiTestUrl||'')}" style="max-width:340px"><button onclick="runPwTests()">▶ Run UI tests</button></div>
-      ${c.mockUrl?`<div class="small" style="margin-top:4px">🧪 Auto-mock: <a href="${esc(c.mockUrl)}" target="_blank" rel="noopener" style="color:var(--accent)">open &amp; test manually ↗</a> <span class="muted">(self-contained test page built from the cloned plugin; used as the works-as-before baseline)</span></div>`:''}
+      ${c.mockUrl?`<div class="small" style="margin-top:4px">🧪 Auto-mock [${c.mockMode==='ai'?'<span style="color:#3fb950">AI-written</span>':'<span style="color:#d29922">static fallback</span>'}]: <a href="${esc(c.mockUrl)}" target="_blank" rel="noopener" style="color:var(--accent)">open &amp; test manually ↗</a>${c.mockMode!=='ai'&&c.mockNote?` <span style="color:#d29922">— fell back: ${esc(c.mockNote)}</span>`:''}</div>`:''}
       <div class="small muted" style="margin-top:4px">Playwright: ${healthCache.hasPlaywright?'<span style="color:#3fb950">✓ installed</span>':'<span style="color:#d29922">not installed</span> <button class="ghost small" onclick="installPlaywright()">⬇ Install Playwright</button>'}</div>
       <div id="uiTestOut"></div>
       <h4 class="muted small" style="margin:14px 0 4px">📌 Characterization baseline <span class="muted">— pin the working behavior (“works as before”)</span></h4>
@@ -939,7 +939,7 @@ async function loadLibraries(){
 }
 
 // Build-Marker: muss mit BUILD in start.js übereinstimmen. Erkennt einen veralteten Backend-Prozess.
-const APP_BUILD = '2026-06-26.7';
+const APP_BUILD = '2026-06-26.8';
 async function checkBackend(){
   const b = $('staleBanner');
   try{

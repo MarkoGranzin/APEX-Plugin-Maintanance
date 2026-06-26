@@ -70,15 +70,22 @@ describe('F-28 T-97 Auto-Mock', () => {
       expect(asked).toMatch(/senior test engineer/i);
     });
 
-    it('generateAiMock: ohne KI → statischer Fallback', async () => {
+    it('generateAiMock: ohne KI → statischer Fallback mit Grund', async () => {
       const gen = await generateAiMock(dir, { ai: { kind: 'stub' }, name: 'Widget' });
       expect(gen.mode).toBe('static');
+      expect(gen.fallbackReason).toMatch(/no AI backend/i);
     });
 
-    it('generateAiMock: unbrauchbare KI-Antwort → statischer Fallback', async () => {
-      const ai = { kind: 'cli', complete: async () => 'sorry, I cannot' };
-      const gen = await generateAiMock(dir, { ai, name: 'Widget' });
+    it('generateAiMock: unbrauchbare KI-Antwort → Fallback mit klarem Grund', async () => {
+      const gen = await generateAiMock(dir, { ai: { kind: 'cli', complete: async () => 'sorry, I cannot' }, name: 'Widget' });
       expect(gen.mode).toBe('static');
+      expect(gen.fallbackReason).toMatch(/not an HTML|missing|empty/i);
+    });
+
+    it('generateAiMock: KI-Fehler → Fallback meldet den Fehler', async () => {
+      const gen = await generateAiMock(dir, { ai: { kind: 'cli', complete: async () => { throw new Error('spawn claude ENOENT'); } }, name: 'Widget' });
+      expect(gen.mode).toBe('static');
+      expect(gen.fallbackReason).toMatch(/AI error.*ENOENT/);
     });
   });
 });
