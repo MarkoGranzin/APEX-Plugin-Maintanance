@@ -54,7 +54,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const DATA_DIR = process.env.AISPP_DATA_DIR || path.join(__dirname, 'data');
 // Build-Marker: muss mit APP_BUILD in public/app.html übereinstimmen. Bei Backend-Änderungen erhöhen.
 // Das Frontend vergleicht beide und warnt, wenn der laufende Dienst veraltet ist (Neustart nötig).
-const BUILD = '2026-06-26.15';
+const BUILD = '2026-06-26.16';
 const C = { reset: '\x1b[0m', bold: '\x1b[1m', dim: '\x1b[2m', green: '\x1b[32m', yellow: '\x1b[33m', red: '\x1b[31m', cyan: '\x1b[36m' };
 const c = (col, s) => `${C[col]}${s}${C.reset}`;
 
@@ -271,6 +271,8 @@ function cmdServe(portArg) {
   // Migration (redevelopComponent, B-17 tauscht die Libs real) → adopt „wie zuvor" / sonst Rollback.
   const fullMaintain = async (component, opts = {}) => {
     const id = component.id;
+    RUNNING.add(id); // F-29: auch autonome Läufe (Scheduler/Cron) zeigen den „running…"-Indikator in der GUI
+    try {
     const ai = resolveAiBackend(settings, secretStore);
     const hasPlaywright = fs.existsSync(path.join(__dirname, 'node_modules', '@playwright', 'test'));
     const specsDir = path.join(DATA_DIR, 'ui-tests', slugify(component.name));
@@ -294,6 +296,7 @@ function cmdServe(portArg) {
       }
     }
     return r;
+    } finally { RUNNING.delete(id); }
   };
 
   // API-Kontexte (T-32/T-34, F-18, F-19)
@@ -543,8 +546,8 @@ function cmdServe(portArg) {
     });
 
     // Vollständige Pflege (manuell = automatisch) — eine Orchestrierung (T-66) → async
-    if (p.startsWith('/api/components/') && p.endsWith('/maintain') && req.method === 'POST') return withComponentRunning(async (c, id) => {
-      const r = await fullMaintain(store.get(id)); // gleiche Orchestrierung wie der autonome Lauf
+    if (p.startsWith('/api/components/') && p.endsWith('/maintain') && req.method === 'POST') return withComponent(async (c, id) => {
+      const r = await fullMaintain(store.get(id)); // fullMaintain managt RUNNING selbst (auch für autonome Läufe)
       return json(res, r, r?.error ? 400 : 200);
     });
 
