@@ -184,6 +184,8 @@ describe('F-28 T-97 Auto-Mock', () => {
       expect(p).toMatch(/MOCK DATA, NEVER FUNCTIONALITY/);           // Prinzip als harte Regel
       expect(p).toMatch(/NOT fake, stub, reimplement or "shim"/);    // kein Faken von Libs/Funktion
       expect(p).toMatch(/official CDN/);                              // fehlende Lib echt vom CDN
+      expect(p).toMatch(/PEER \/ TRANSITIVE DEPENDENCIES/);          // Peer-Deps mitladen (z.B. jQuery UI für Fancytree)
+      expect(p).toMatch(/is not a function.*missing|requires/);      // „… is not a function"/„requires X" = fehlende Abhängigkeit
       expect(p).toMatch(/animations must really animate/);           // Animation muss real laufen
     });
 

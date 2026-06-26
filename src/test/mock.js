@@ -270,6 +270,7 @@ HARD RULE — MOCK DATA, NEVER FUNCTIONALITY:
 - You may ONLY mock/shim (a) the APEX runtime (apex.*, $v/$s) and (b) the DATA the plugin consumes. That's it.
 - You must NOT fake, stub, reimplement or "shim" ANY library or the plugin's own behavior. Load the REAL library files listed above (they are in the repo / copied next to the page) and run the REAL plugin code. A faked library (e.g. drawing a static picture instead of running the real animation) is an INVALID mock.
 - If the plugin needs a library that is genuinely NOT in the repo, load the real file from its official CDN (e.g. jsDelivr/unpkg) — do NOT reimplement it.
+- LOAD PEER / TRANSITIVE DEPENDENCIES TOO, in the correct order: a library often needs ANOTHER library that is not vendored in this repo. A "$(...).somePlugin is not a function" or an explicit "X requires Y" error means a dependency is missing — add it from its official CDN. Common cases: a jQuery plugin needs jQuery first; jQuery-UI-based widgets (and Fancytree) need jQuery UI; a plugin may need its theme/widget CSS. Inspect the library and its error output and load EVERY dependency it requires so the real plugin actually initializes.
 - The real library must actually DO its work: animations must really animate, interactions must really react. Mocking data is required; mocking functionality is forbidden.
 
 Requirements for the page:
