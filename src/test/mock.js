@@ -208,7 +208,7 @@ export function aiMockPrompt(name, c) {
 Plugin: ${name}
 Libraries to load FIRST, in this order, via <script src="<path>"> (use exactly these relative paths):
 ${(c.libFiles || []).map((f) => '  ' + f).join('\n') || '  (none)'}
-Other REAL library files present in the repo (copied next to the page) — load the ones the plugin needs, in the correct dependency order (e.g. three.js BEFORE vanta/*; load every animation/feature module the plugin can use). NEVER reimplement these:
+Other REAL library files from the repo — these are ALREADY COPIED next to the page at EXACTLY these relative paths. Load the ones the plugin needs via <script src="<path>"> using these paths VERBATIM (relative to index.html — do NOT prepend "/" and do NOT add any "../"; e.g. write src="vanta/vanta.net.min.js", NOT "../../vanta/..."). Load them in correct dependency order (e.g. three.js BEFORE vanta/*; load every animation/feature module the plugin can use). NEVER reimplement these:
 ${(c.extraLibFiles || []).map((f) => '  ' + f).join('\n') || '  (none)'}
 Plugin code files to load via <script src="plugin/<file>"> (already written next to the page):
 ${(c.pluginFiles || []).map((p) => '  ' + p.name).join('\n') || '  (none)'}
@@ -254,6 +254,30 @@ Requirements for the page:
  * KI-geschriebener, plugin-spezifischer Mock. Fällt bei fehlender/ungültiger KI-Antwort auf generateMock zurück.
  * @param {string} dir @param {{ai:object, name?:string}} deps
  */
+/**
+ * B-21: korrigiert lokale Lib-<script src> auf den echten relativen Pfad im Mock-Verzeichnis.
+ * Die KI schreibt manchmal "../../vanta/x.min.js" oder "/vanta/x.min.js" — beides verfehlt die neben
+ * der Seite kopierte Datei. Anhand des Dateinamens auf den bekannten Pfad zurücksetzen. CDN-/data:-URLs
+ * (echte fehlende Libs) bleiben unangetastet — das Prinzip „echte Libs laden" bleibt gewahrt.
+ */
+export function normalizeLibPaths(html, relPaths) {
+  const byBase = new Map();
+  for (const p of relPaths || []) {
+    const norm = String(p).replace(/\\/g, '/');
+    const base = norm.split('/').pop();
+    if (base) byBase.set(base.toLowerCase(), norm);
+  }
+  if (!byBase.size) return html;
+  return html.replace(/(\ssrc\s*=\s*)("([^"]*)"|'([^']*)')/gi, (m, pre, _q, dq, sq) => {
+    const val = dq !== undefined ? dq : sq;
+    if (/^(https?:)?\/\//i.test(val) || /^data:/i.test(val)) return m; // CDN/protokoll-relativ/data: nicht anfassen
+    const base = val.replace(/[?#].*$/, '').split('/').pop().toLowerCase();
+    const correct = byBase.get(base);
+    if (!correct || correct === val) return m;
+    return `${pre}"${correct}"`;
+  });
+}
+
 export async function generateAiMock(dir, deps = {}) {
   const name = deps.name || 'plugin';
   const c = collectMock(dir);
@@ -274,6 +298,7 @@ export async function generateAiMock(dir, deps = {}) {
   html = html.trim();
   if (!html) return fallback('AI returned empty');
   if (!/<html[\s>]/i.test(html)) return fallback('AI response was not an HTML document');
+  html = normalizeLibPaths(html, [...(c.libFiles || []), ...(c.extraLibFiles || [])]); // B-21: lokale Lib-Pfade auf die kopierten Dateien zurücksetzen
   if (!/__ok/.test(html)) { // gültige HTML ohne Vertrag → Vertrag injizieren statt verwerfen
     html = html.replace(/<\/body>/i, '<script>window.__mockErrors=window.__mockErrors||[];window.addEventListener("error",function(ev){window.__mockErrors.push(String(ev.message||ev));});if(typeof window.__ok==="undefined")window.__ok=(window.__mockErrors.length===0);</script></body>');
     if (!/__ok/.test(html)) return fallback('AI HTML missing the window.__ok contract');

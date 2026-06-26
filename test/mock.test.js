@@ -2,7 +2,7 @@ import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { buildMockPage, buildMockSpec, generateMock, writeMock, generateAiMock, aiMockPrompt, collectMock } from '../src/test/mock.js';
+import { buildMockPage, buildMockSpec, generateMock, writeMock, generateAiMock, aiMockPrompt, collectMock, normalizeLibPaths } from '../src/test/mock.js';
 
 describe('F-28 T-97 Auto-Mock', () => {
   it('buildMockPage: self-contained HTML mit Shim, Libs (src), Plugin-Dateien (src), DOM, Entry-Calls, Events, __rendered/__features', () => {
@@ -126,6 +126,22 @@ describe('F-28 T-97 Auto-Mock', () => {
       expect(p).toMatch(/NOT fake, stub, reimplement or "shim"/);    // kein Faken von Libs/Funktion
       expect(p).toMatch(/official CDN/);                              // fehlende Lib echt vom CDN
       expect(p).toMatch(/animations must really animate/);           // Animation muss real laufen
+    });
+
+    it('B-21: normalizeLibPaths korrigiert falsche lokale Lib-Pfade (../../, /) auf die kopierte Datei, CDN bleibt', () => {
+      const rel = ['js/lib/three.js', 'vanta/vanta.net.min.js'];
+      const html = [
+        '<script src="js/lib/three.js"></script>',
+        '<script src="../../vanta/vanta.net.min.js"></script>',   // KI-Fehler: zwei Ebenen hoch → Server-Root
+        '<script src="/vanta/vanta.net.min.js"></script>',         // KI-Fehler: absoluter Pfad
+        '<script src="https://cdn.jsdelivr.net/npm/jquery@3.7.1/dist/jquery.min.js"></script>', // CDN: echte fehlende Lib
+      ].join('\n');
+      const out = normalizeLibPaths(html, rel);
+      expect(out).toMatch(/src="js\/lib\/three\.js"/);            // korrekt → unverändert
+      expect(out).not.toMatch(/\.\.\/\.\.\/vanta/);               // ../../ entfernt
+      expect(out).not.toMatch(/src="\/vanta/);                    // führendes / entfernt
+      expect((out.match(/src="vanta\/vanta\.net\.min\.js"/g) || []).length).toBe(2); // beide auf den echten Pfad
+      expect(out).toMatch(/cdn\.jsdelivr\.net[^"]*jquery/);       // CDN-URL bleibt unangetastet
     });
 
     it('generateAiMock: KI schreibt den Mock (mode=ai)', async () => {
