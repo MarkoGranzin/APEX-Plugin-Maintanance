@@ -140,27 +140,36 @@ test('plugin renders output and exercises its features', async ({ page }) => {
 });`;
 }
 
+// Verzeichnisse, die beim Repo-Scan übersprungen werden (kein Quellcode/keine Assets des Plugins).
+const SKIP_DIR = /(^|\/)(node_modules|\.git|\.maintenance|\.idea|\.vscode|test|tests|spec|specs|docs?|examples?|img|images)$/i;
+
+/** Läuft das Repo rekursiv ab (ohne SKIP_DIR) und ruft onFile(relPfad, absPfad) je Datei. Best effort. */
+function walkRepoFiles(dir, onFile) {
+  const walk = (d, rel) => {
+    let ents = []; try { ents = fs.readdirSync(d, { withFileTypes: true }); } catch { return; }
+    for (const e of ents) {
+      const r = rel ? `${rel}/${e.name}` : e.name;
+      if (e.isDirectory()) { if (!SKIP_DIR.test('/' + r)) walk(path.join(d, e.name), r); continue; }
+      else onFile(r, path.join(d, e.name));
+    }
+  };
+  try { walk(dir, ''); } catch { /* best effort */ }
+}
+
+const tooBig = (abs) => { try { return fs.statSync(abs).size > 4_000_000; } catch { return true; } };
+
 /**
  * Findet lib-artige JS-Dateien im Repo, die NICHT per Fingerprint erkannt wurden (z.B. vanta/*.min.js).
  * Sonst würden sie ganz fehlen und die KI müsste die Lib faken (statischer Mock, keine echte Funktion). B-21.
  */
 function scanExtraLibFiles(dir, libSet) {
   const out = [];
-  const skipDir = /(^|\/)(node_modules|\.git|\.maintenance|\.idea|\.vscode|test|tests|spec|specs|docs?|examples?|img|images)$/i;
   const libDir = /(^|\/)(lib|libs|vendor|vendors|dist|build|vanta|three|deps|third[-_]?party|external|externals)(\/|$)/i;
-  const walk = (d, rel) => {
-    let ents = []; try { ents = fs.readdirSync(d, { withFileTypes: true }); } catch { return; }
-    for (const e of ents) {
-      const r = rel ? `${rel}/${e.name}` : e.name;
-      if (e.isDirectory()) { if (!skipDir.test('/' + r)) walk(path.join(d, e.name), r); continue; }
-      if (!/\.js$/i.test(e.name)) continue;
-      if (libSet.has(r)) continue;                                  // schon als erkannte Lib gelistet
-      if (!(libDir.test('/' + r) || isLibraryFile(r))) continue;    // nur lib-artige Dateien
-      try { if (fs.statSync(path.join(d, e.name)).size > 4_000_000) continue; } catch { continue; }
-      out.push(r);
-    }
-  };
-  try { walk(dir, ''); } catch { /* best effort */ }
+  walkRepoFiles(dir, (r, abs) => {
+    if (!/\.js$/i.test(r) || libSet.has(r)) return;                  // kein JS / schon als erkannte Lib gelistet
+    if (!(libDir.test('/' + r) || isLibraryFile(r))) return;        // nur lib-artige Dateien
+    if (!tooBig(abs)) out.push(r);
+  });
   return out;
 }
 
@@ -171,18 +180,7 @@ function scanExtraLibFiles(dir, libSet) {
  */
 function scanCssFiles(dir) {
   const found = [];
-  const skipDir = /(^|\/)(node_modules|\.git|\.maintenance|\.idea|\.vscode|test|tests|spec|specs|docs?|examples?)$/i;
-  const walk = (d, rel) => {
-    let ents = []; try { ents = fs.readdirSync(d, { withFileTypes: true }); } catch { return; }
-    for (const e of ents) {
-      const r = rel ? `${rel}/${e.name}` : e.name;
-      if (e.isDirectory()) { if (!skipDir.test('/' + r)) walk(path.join(d, e.name), r); continue; }
-      if (!/\.css$/i.test(e.name)) continue;
-      try { if (fs.statSync(path.join(d, e.name)).size > 4_000_000) continue; } catch { continue; }
-      found.push(r);
-    }
-  };
-  try { walk(dir, ''); } catch { /* best effort */ }
+  walkRepoFiles(dir, (r, abs) => { if (/\.css$/i.test(r) && !tooBig(abs)) found.push(r); });
   // min/non-min entdoppeln: pro Basis (ohne .min) genau eine Datei, .min bevorzugt
   const byBase = new Map();
   for (const r of found) { const key = r.replace(/\.min\.css$/i, '.css').toLowerCase(); const cur = byBase.get(key); if (!cur || (/\.min\.css$/i.test(r) && !/\.min\.css$/i.test(cur))) byBase.set(key, r); }
