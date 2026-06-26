@@ -53,6 +53,13 @@ describe('F-28 T-97 Auto-Mock', () => {
       // B-21: echte Lib, die NICHT fingerprinted ist (z.B. vanta/*.min.js) — muss trotzdem real geladen werden
       fs.mkdirSync(path.join(dir, 'vanta'), { recursive: true });
       fs.writeFileSync(path.join(dir, 'vanta', 'vanta.net.min.js'), "window.VANTA={NET:function(){return{destroy:function(){}}}};");
+      // Echte Plugin-CSS (Optik) + ein per url() referenziertes Font-Asset — muss real geladen+kopiert werden
+      fs.mkdirSync(path.join(dir, 'css'), { recursive: true });
+      fs.mkdirSync(path.join(dir, 'fonts'), { recursive: true });
+      fs.writeFileSync(path.join(dir, 'fonts', 'icon.woff'), 'FONTDATA');
+      fs.writeFileSync(path.join(dir, 'css', 'style.css'), ".kb-col-header-content{min-height:48px}\n@font-face{font-family:i;src:url(../fonts/icon.woff)}");
+      fs.writeFileSync(path.join(dir, 'css', 'style.min.css'), ".kb-col-header-content{min-height:48px}"); // min-Zwilling → wird entdoppelt
+      fs.writeFileSync(path.join(dir, 'css', 'bootstrap.min.css'), ".row{display:flex}");
       mockDir = fs.mkdtempSync(path.join(os.tmpdir(), 'mockout-'));
     });
     afterAll(() => { fs.rmSync(dir, { recursive: true, force: true }); fs.rmSync(mockDir, { recursive: true, force: true }); });
@@ -72,6 +79,38 @@ describe('F-28 T-97 Auto-Mock', () => {
       expect(fs.existsSync(path.join(mockDir, gen.libFiles[0]))).toBe(true);
       expect(fs.existsSync(path.join(mockDir, gen.pluginFiles[0].name))).toBe(true);
       expect(fs.readFileSync(idx, 'utf8')).toMatch(/<script src=/);
+    });
+
+    it('CSS generisch: collectMock sammelt echte CSS (min entdoppelt), Mock verlinkt sie, statt Optik nachzubauen', () => {
+      const c = collectMock(dir);
+      expect((c.cssFiles || []).some((f) => /css\/style\.min\.css$/.test(f))).toBe(true); // .min bevorzugt
+      expect((c.cssFiles || []).some((f) => /css\/style\.css$/.test(f) && !/\.min\./.test(f))).toBe(false); // non-min entdoppelt
+      expect((c.cssFiles || []).some((f) => /bootstrap\.min\.css$/.test(f))).toBe(true);
+      // Frameworks (bootstrap) vor plugin-eigener style.css
+      const idxBoot = c.cssFiles.findIndex((f) => /bootstrap/.test(f));
+      const idxStyle = c.cssFiles.findIndex((f) => /style\./.test(f));
+      expect(idxBoot).toBeLessThan(idxStyle);
+      const gen = generateMock(dir, { name: 'Widget' });
+      expect(gen.html).toMatch(/<link rel="stylesheet" href="[^"]*style\.min\.css">/); // echte CSS verlinkt
+    });
+
+    it('CSS generisch: writeMock kopiert CSS + per url() referenzierte Assets (Fonts)', () => {
+      const gen = generateMock(dir, { name: 'Widget' });
+      writeMock(mockDir, dir, gen);
+      expect(fs.existsSync(path.join(mockDir, 'css', 'style.min.css'))).toBe(true);
+      // style.css (non-min) wird zwar entdoppelt — aber falls eine CSS url() referenziert, muss das Asset da sein.
+      // Wir testen das Font-Asset über die non-min style.css separat:
+      const gen2 = { ...gen, cssFiles: ['css/style.css'] };
+      writeMock(mockDir, dir, gen2);
+      expect(fs.existsSync(path.join(mockDir, 'fonts', 'icon.woff'))).toBe(true); // url(../fonts/icon.woff) mitkopiert
+    });
+
+    it('aiMockPrompt: echte CSS werden gelistet + Regel „nicht nachbauen"', () => {
+      const c = collectMock(dir);
+      const p = aiMockPrompt('Widget', c);
+      expect(p).toMatch(/style\.min\.css/);                          // CSS-Pfad gelistet
+      expect(p).toMatch(/REAL CSS stylesheets of the plugin/);       // als echte CSS deklariert
+      expect(p).toMatch(/do NOT hand-write\/approximate the plugin's own styling/); // nicht nachbauen
     });
 
     it('aiMockPrompt enthält Analyse, Lib-/Datei-Pfade und window.__ok-Vertrag (T-101)', () => {
@@ -102,7 +141,7 @@ describe('F-28 T-97 Auto-Mock', () => {
       expect(p).toMatch(/__ok MUST be true for the unmodified plugin/);
       // T-106: Optik realistisch + Self-Tests nicht-destruktiv (sichtbarer Stand bleibt sauber)
       expect(p).toMatch(/VISUAL QUALITY MATTERS/);
-      expect(p).toMatch(/HEADERS\/LABELS MUST BE FULLY VISIBLE/); // Spaltenköpfe dürfen nicht abgeschnitten/überlappt sein
+      expect(p).toMatch(/REAL CSS IS LOADED — NOT BECAUSE YOU PATCHED IT/); // Optik kommt aus echter CSS, nicht aus plugin-spezifischem Hand-CSS
       expect(p).toMatch(/HUMAN-READABLE/);
       expect(p).toMatch(/NON-DESTRUCTIVE/);
       expect(p).toMatch(/visible page MUST show the clean/);

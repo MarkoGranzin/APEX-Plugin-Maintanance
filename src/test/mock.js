@@ -30,8 +30,9 @@ function domFor(sel) {
 }
 
 /** Self-contained Mock-Seite (rein). libFiles + pluginFiles werden via <script src> geladen (relativ). */
-export function buildMockPage({ name = 'plugin', libFiles = [], pluginFiles = [], selectors = [], entryPoints = [], events = [] } = {}) {
+export function buildMockPage({ name = 'plugin', libFiles = [], cssFiles = [], pluginFiles = [], selectors = [], entryPoints = [], events = [] } = {}) {
   const dom = [...new Set(selectors.map(domFor).filter(Boolean))].join('\n      ');
+  const cssTags = cssFiles.map((f) => `<link rel="stylesheet" href="${esc(f)}">`).join('\n  '); // echte Plugin-CSS, nicht nachbauen
   const libTags = libFiles.map((f) => `<script src="${esc(f)}"></script>`).join('\n    ');
   // Plugin-Code als EXTERNE Dateien laden (kein Inlining → keine HTML-Kontext-/Encoding-Brüche;
   // ein fehlerhaftes Skript bricht nur sich selbst, sichtbar als pageerror).
@@ -44,7 +45,9 @@ export function buildMockPage({ name = 'plugin', libFiles = [], pluginFiles = []
   // nicht nur das Laden. Jedes Ergebnis wird in window.__mockEvents protokolliert.
   const evDispatch = (events || []).map((ev) => `  try{ var el=document.querySelector(${JSON.stringify(ev.selector)}); if(el){ el.dispatchEvent(new Event(${JSON.stringify(ev.type)},{bubbles:true})); window.__mockEvents.push({type:${JSON.stringify(ev.type)},selector:${JSON.stringify(ev.selector)},ok:true}); } else { window.__mockEvents.push({type:${JSON.stringify(ev.type)},selector:${JSON.stringify(ev.selector)},ok:true,skipped:true}); } }catch(e){ window.__mockEvents.push({type:${JSON.stringify(ev.type)},selector:${JSON.stringify(ev.selector)},ok:false,error:(e&&e.message||String(e))}); }`).join('\n');
   return `<!doctype html>
-<html><head><meta charset="utf-8"><title>Mock — ${esc(name)}</title></head>
+<html><head><meta charset="utf-8"><title>Mock — ${esc(name)}</title>
+  ${cssTags}
+</head>
 <body>
   <h3>Mock harness — ${esc(name)}</h3>
   <p class="muted">Self-contained test page (apex shim + libs + plugin). For manual testing &amp; the works-as-before baseline.</p>
@@ -152,8 +155,35 @@ function scanExtraLibFiles(dir, libSet) {
 }
 
 /**
- * Sammelt aus dem Repo, was der Mock braucht: Lib-Dateien (erkannt + extra/nicht-erkannt), Plugin-Dateien, Analyse.
- * @returns {{libFiles:string[], extraLibFiles:string[], pluginFiles:{name:string,code:string}[], selectors:string[], entryPoints:string[], functions:object[], events:object[]}}
+ * Findet die echten CSS-Dateien des Plugins im Repo. Optik ist Teil des Verhaltens („wie zuvor") und darf
+ * NICHT von der KI nachgebaut werden — die echten Stylesheets werden geladen (generisch, für jedes Plugin).
+ * Dedupliziert min/non-min (bevorzugt .min.css = Produktionsstand). Reihenfolge: Frameworks vor Plugin-eigener CSS.
+ */
+function scanCssFiles(dir) {
+  const found = [];
+  const skipDir = /(^|\/)(node_modules|\.git|\.maintenance|\.idea|\.vscode|test|tests|spec|specs|docs?|examples?)$/i;
+  const walk = (d, rel) => {
+    let ents = []; try { ents = fs.readdirSync(d, { withFileTypes: true }); } catch { return; }
+    for (const e of ents) {
+      const r = rel ? `${rel}/${e.name}` : e.name;
+      if (e.isDirectory()) { if (!skipDir.test('/' + r)) walk(path.join(d, e.name), r); continue; }
+      if (!/\.css$/i.test(e.name)) continue;
+      try { if (fs.statSync(path.join(d, e.name)).size > 4_000_000) continue; } catch { continue; }
+      found.push(r);
+    }
+  };
+  try { walk(dir, ''); } catch { /* best effort */ }
+  // min/non-min entdoppeln: pro Basis (ohne .min) genau eine Datei, .min bevorzugt
+  const byBase = new Map();
+  for (const r of found) { const key = r.replace(/\.min\.css$/i, '.css').toLowerCase(); const cur = byBase.get(key); if (!cur || (/\.min\.css$/i.test(r) && !/\.min\.css$/i.test(cur))) byBase.set(key, r); }
+  // Frameworks/Reset/Grid zuerst, plugin-eigene Stylesheets (style*) zuletzt, damit sie überschreiben
+  const rank = (f) => /(normalize|reset|bootstrap|foundation|font-?awesome|fontawesome|grid|material|theme|vendor)/i.test(f) ? 0 : (/\bstyle(\.|$)/i.test(f) ? 2 : 1);
+  return [...byBase.values()].sort((a, b) => rank(a) - rank(b) || a.localeCompare(b));
+}
+
+/**
+ * Sammelt aus dem Repo, was der Mock braucht: Lib-Dateien (erkannt + extra/nicht-erkannt), Plugin-Dateien, CSS, Analyse.
+ * @returns {{libFiles:string[], extraLibFiles:string[], cssFiles:string[], pluginFiles:{name:string,code:string}[], selectors:string[], entryPoints:string[], functions:object[], events:object[]}}
  */
 export function collectMock(dir) {
   const libs = detectVendoredLibraries(dir).filter((l) => l.evidence && /\.js$/i.test(l.evidence));
@@ -161,6 +191,8 @@ export function collectMock(dir) {
   const libSet = new Set(libFiles);
   // B-21: echte, aber nicht-fingerprinted Repo-Libs (z.B. vanta/*.min.js) mitnehmen statt faken.
   const extraLibFiles = scanExtraLibFiles(dir, libSet);
+  // Echte CSS des Plugins laden statt von der KI nachbauen lassen (Optik = „wie zuvor", generisch).
+  const cssFiles = scanCssFiles(dir);
   const pluginFiles = [];
   const selectors = new Set();
   const entryPoints = new Set();
@@ -184,7 +216,7 @@ export function collectMock(dir) {
       for (const f of deep.functions || []) { functions.push(f); if (f.name && /^(init|refresh|render|draw|setup|load|create|destroy)/i.test(f.name)) entryPoints.add(f.name); }
     }
   } catch { /* best effort */ }
-  return { libFiles, extraLibFiles, pluginFiles, selectors: [...selectors], entryPoints: [...entryPoints], functions, events: [...events.values()] };
+  return { libFiles, extraLibFiles, cssFiles, pluginFiles, selectors: [...selectors], entryPoints: [...entryPoints], functions, events: [...events.values()] };
 }
 
 /**
@@ -195,8 +227,8 @@ export function generateMock(dir, opts = {}) {
   const name = opts.name || 'plugin';
   const c = collectMock(dir);
   const allLibs = [...c.libFiles, ...(c.extraLibFiles || [])]; // B-21: auch nicht-fingerprinted Libs (vanta/*) real laden
-  const html = buildMockPage({ name, libFiles: allLibs, pluginFiles: c.pluginFiles.map((p) => p.name), selectors: c.selectors, entryPoints: c.entryPoints, events: c.events });
-  return { html, spec: { name: `${slug(name)}.ui.spec.js`, content: buildMockSpec(name) }, libFiles: c.libFiles, extraLibFiles: c.extraLibFiles || [], pluginFiles: c.pluginFiles, selectors: c.selectors, entryPoints: c.entryPoints, mode: 'static' };
+  const html = buildMockPage({ name, libFiles: allLibs, cssFiles: c.cssFiles || [], pluginFiles: c.pluginFiles.map((p) => p.name), selectors: c.selectors, entryPoints: c.entryPoints, events: c.events });
+  return { html, spec: { name: `${slug(name)}.ui.spec.js`, content: buildMockSpec(name) }, libFiles: c.libFiles, extraLibFiles: c.extraLibFiles || [], cssFiles: c.cssFiles || [], pluginFiles: c.pluginFiles, selectors: c.selectors, entryPoints: c.entryPoints, mode: 'static' };
 }
 
 /** Baut den Prompt, mit dem die KI einen plugin-spezifischen Mock schreibt (rein/testbar). */
@@ -212,6 +244,8 @@ Other REAL library files from the repo — these are ALREADY COPIED next to the 
 ${(c.extraLibFiles || []).map((f) => '  ' + f).join('\n') || '  (none)'}
 Plugin code files to load via <script src="plugin/<file>"> (already written next to the page):
 ${(c.pluginFiles || []).map((p) => '  ' + p.name).join('\n') || '  (none)'}
+REAL CSS stylesheets of the plugin — ALREADY COPIED next to the page at EXACTLY these relative paths (their url(...) font/image assets are copied too). Load ALL of them via <link rel="stylesheet" href="<path>"> in the <head>, in this order, using the paths VERBATIM (no "/" prefix, no "../"). This is the plugin's REAL appearance — load it; do NOT hand-write/approximate the plugin's own styling (its layout/classes) inline. Inline <style> is ONLY for the harness chrome (status line) and the mock-root sizing, never to recreate the plugin's CSS:
+${(c.cssFiles || []).map((f) => '  ' + f).join('\n') || '  (none)'}
 
 Detected DOM selectors the plugin uses: ${(c.selectors || []).join(', ') || '(none)'}
 Likely entry points: ${(c.entryPoints || []).join(', ') || '(none)'}
@@ -236,7 +270,7 @@ Requirements for the page:
 - Provide a realistic apex.* shim covering the apex.* calls above (apex.item/$v/$s/apex.server.process/apex.jQuery/apex.message/apex.debug/apex.region/apex.util/etc.) so the plugin does not crash.
 - Create the DOM the plugin needs: a visible <div id="mock-root"> mount (give it a real size, e.g. width:900px;height:560px) plus elements for the detected selectors. The plugin's rendered output MUST appear inside #mock-root.
 - VISUAL QUALITY MATTERS: the page must LOOK like the plugin in real production use — correct layout, sensible spacing, the plugin's normal styling/colors, no overlapping/cramped/cut-off elements. If the plugin needs a CSS file, load it; if it relies on theme/host CSS that isn't present, add minimal styles so it looks clean and presentable (like a screenshot you'd show a stakeholder). Aim for a realistic, tidy result — not a raw/broken-looking dump.
-- HEADERS/LABELS MUST BE FULLY VISIBLE — NOT CLIPPED OR OVERLAPPED: column headers, section/group headers and titles must show completely. Watch out for THREE common bugs and add corrective CSS for whichever apply: (a) a sticky/absolute group or section header that sits ON TOP of the column-title row and hides it — give the column titles their own reserved space (or correct z-index/order) so a sticky row never covers them; (b) the scroll/overflow container clipping the first row of titles at the top — reserve enough top padding/height so nothing is cut off; (c) a header/title whose container is TOO SHORT so the text overflows DOWNWARD into the row beneath it (e.g. a column-header element fixed at ~35px while the title needs more) — give such header containers enough min-height plus vertical padding (e.g. min-height so the title fits with breathing room) so the title never bleeds into the next row. Since you cannot see the result, PROACTIVELY add a small CSS block targeting the plugin's own header/title classes to guarantee this. Give #mock-root enough height (it is fine to make the page tall and let it scroll) so the WHOLE plugin is visible. After rendering, the column/section headers must read fully (e.g. "To Do", "In Progress", "Done" — not half-cut).
+- THE PLUGIN MUST LOOK RIGHT BECAUSE ITS REAL CSS IS LOADED — NOT BECAUSE YOU PATCHED IT: clipped/overlapping headers, wrong spacing or a broken layout almost always mean the plugin's real stylesheet(s) did not load. So: load EVERY real CSS file listed above via <link> with the exact relative paths (a wrong path → 404 → the plugin falls back to unstyled/half-styled and looks broken). Do NOT "fix" the look by hand-writing CSS for the plugin's own classes — that is faking the appearance. Your ONLY layout job is the harness container: give #mock-root a sensible size and enough page height (the page may be tall and scroll) so the WHOLE plugin is visible; do not constrain the plugin into a box too small for it. With the real CSS loaded and a roomy container, headers like "To Do"/"In Progress"/"Done" render fully on their own.
 - Load libraries and plugin files via <script src> (NOT inline) using the exact paths above; then initialize the plugin the way APEX would.
 - Wrap initialization in try/catch; collect errors in window.__mockErrors (array); add window.onerror to push to it. Set window.__ok = (window.__mockErrors.length === 0). Also set window.__rendered = (document.querySelector('#mock-root') has non-trivial child content, i.e. the plugin produced output).
 - CHARACTERIZE THE PLUGIN AS IT IS — NOT AS IT SHOULD BE. This page is the "works EXACTLY as before" spec: after the libraries are updated the plugin must do the SAME — no more, no less. Therefore EVERY self-test must describe the CURRENT behavior of the unmodified plugin and MUST PASS right now. Do NOT invent aspirational/robustness checks the current plugin does not already satisfy (e.g. "handles missing/undefined input gracefully", error-handling or edge cases it was never built for). If a check would be RED against the current unmodified plugin, it is NOT a valid characterization — drop it, or if the behavior matters record the plugin's ACTUAL current result as the expected value (e.g. if it currently throws on bad input, that IS the characterized behavior). window.__ok MUST be true for the unmodified plugin; a failing self-test here means you mis-characterized, not that the plugin is broken.
@@ -271,9 +305,9 @@ export function normalizeLibPaths(html, relPaths) {
     if (base) byBase.set(base.toLowerCase(), norm);
   }
   if (!byBase.size) return html;
-  return html.replace(/(\ssrc\s*=\s*)("([^"]*)"|'([^']*)')/gi, (m, pre, _q, dq, sq) => {
+  return html.replace(/(\s(?:src|href)\s*=\s*)("([^"]*)"|'([^']*)')/gi, (m, pre, _q, dq, sq) => {
     const val = dq !== undefined ? dq : sq;
-    if (/^(https?:)?\/\//i.test(val) || /^data:/i.test(val)) return m; // CDN/protokoll-relativ/data: nicht anfassen
+    if (/^(https?:)?\/\//i.test(val) || /^data:/i.test(val) || /^#/.test(val)) return m; // CDN/protokoll-relativ/data:/Anker nicht anfassen
     const base = val.replace(/[?#].*$/, '').split('/').pop().toLowerCase();
     const correct = byBase.get(base);
     if (!correct || correct === val) return m;
@@ -301,12 +335,12 @@ export async function generateAiMock(dir, deps = {}) {
   html = html.trim();
   if (!html) return fallback('AI returned empty');
   if (!/<html[\s>]/i.test(html)) return fallback('AI response was not an HTML document');
-  html = normalizeLibPaths(html, [...(c.libFiles || []), ...(c.extraLibFiles || [])]); // B-21: lokale Lib-Pfade auf die kopierten Dateien zurücksetzen
+  html = normalizeLibPaths(html, [...(c.libFiles || []), ...(c.extraLibFiles || []), ...(c.cssFiles || [])]); // B-21: lokale Lib-/CSS-Pfade auf die kopierten Dateien zurücksetzen
   if (!/__ok/.test(html)) { // gültige HTML ohne Vertrag → Vertrag injizieren statt verwerfen
     html = html.replace(/<\/body>/i, '<script>window.__mockErrors=window.__mockErrors||[];window.addEventListener("error",function(ev){window.__mockErrors.push(String(ev.message||ev));});if(typeof window.__ok==="undefined")window.__ok=(window.__mockErrors.length===0);</script></body>');
     if (!/__ok/.test(html)) return fallback('AI HTML missing the window.__ok contract');
   }
-  return { html, spec: { name: `${slug(name)}.ui.spec.js`, content: buildMockSpec(name) }, libFiles: c.libFiles, extraLibFiles: c.extraLibFiles || [], pluginFiles: c.pluginFiles, selectors: c.selectors, entryPoints: c.entryPoints, mode: 'ai' };
+  return { html, spec: { name: `${slug(name)}.ui.spec.js`, content: buildMockSpec(name) }, libFiles: c.libFiles, extraLibFiles: c.extraLibFiles || [], cssFiles: c.cssFiles || [], pluginFiles: c.pluginFiles, selectors: c.selectors, entryPoints: c.entryPoints, mode: 'ai' };
 }
 
 const slug = (s) => String(s).toLowerCase().replace(/[^a-z0-9.-]+/g, '-').replace(/^-|-$/g, '') || 'plugin';
@@ -321,6 +355,22 @@ export function writeMock(mockDir, repoDir, gen) {
       fs.mkdirSync(path.dirname(dst), { recursive: true });
       fs.copyFileSync(src, dst);
     } catch { /* Lib fehlt → Mock lädt sie eben nicht */ }
+  }
+  // Echte CSS + ihre per url(...) referenzierten Assets (Fonts/Bilder) mitkopieren — Optik „wie zuvor", generisch.
+  const copyRel = (rel) => { try { const src = path.join(repoDir, rel); const dst = path.join(mockDir, rel); if (!fs.existsSync(src)) return; fs.mkdirSync(path.dirname(dst), { recursive: true }); fs.copyFileSync(src, dst); } catch { /* skip */ } };
+  for (const rel of gen.cssFiles || []) {
+    copyRel(rel);
+    try {
+      const css = fs.readFileSync(path.join(repoDir, rel), 'utf8');
+      const cssDir = path.posix.dirname(rel.replace(/\\/g, '/'));
+      for (const m of css.matchAll(/url\(\s*['"]?([^'")]+)['"]?\s*\)/gi)) {
+        const u = m[1].trim();
+        if (/^(https?:)?\/\//i.test(u) || /^data:/i.test(u) || u.startsWith('#')) continue; // CDN/data:/Anker überspringen
+        const assetRel = path.posix.normalize(path.posix.join(cssDir, u.replace(/[?#].*$/, ''))); // relativ zur CSS-Datei
+        if (assetRel.startsWith('..')) continue; // außerhalb des Repos
+        copyRel(assetRel);
+      }
+    } catch { /* best effort */ }
   }
   for (const pf of gen.pluginFiles || []) {
     try { const dst = path.join(mockDir, pf.name); fs.mkdirSync(path.dirname(dst), { recursive: true }); fs.writeFileSync(dst, pf.code); } catch { /* skip */ }
