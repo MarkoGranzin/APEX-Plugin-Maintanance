@@ -36,6 +36,7 @@ import { maintainComponent } from './src/service/maintain.js';
 import { runUiTests } from './src/test/run-ui.js';
 import { captureBaseline } from './src/service/baseline.js';
 import { redevelopComponent } from './src/service/redev.js';
+import { generateMock, writeMock } from './src/test/mock.js';
 import { uploadFix } from './src/service/upload.js';
 import { slug as slugify } from './src/util/slug.js';
 import { resolveAiBackend, aiBackendView } from './src/ai/configure.js';
@@ -132,6 +133,23 @@ function cmdServe(portArg) {
   const baselineDir = path.join(DATA_DIR, 'baseline');
   const onBaseline = (component, baseline) => {
     try { fs.mkdirSync(baselineDir, { recursive: true }); fs.writeFileSync(path.join(baselineDir, `${slugify(component.name)}.json`), JSON.stringify(baseline, null, 2)); } catch {}
+  };
+  // Auto-Mock je Plugin (F-28/T-97): self-contained Testseite nach dem Clone bauen, statisch ausliefern,
+  // als Default-UI-Test-URL setzen → manuell testbar + Grundlage für Baseline/Migration.
+  const mocksDir = path.join(DATA_DIR, 'mocks');
+  const buildMockFor = (component) => {
+    try {
+      if (!component?.path || !fs.existsSync(component.path)) return null;
+      const sl = slugify(component.name);
+      const gen = generateMock(component.path, { name: component.name });
+      writeMock(path.join(mocksDir, sl), component.path, gen);
+      const mockUrl = `http://localhost:${port}/mock/${sl}/index.html`;
+      const cur = store.get(component.id) || {};
+      const patch = { mockUrl, codedTests: [...(cur.codedTests || []).filter((t) => t.name !== gen.spec.name), gen.spec] };
+      if (!cur.uiTestUrl) patch.uiTestUrl = mockUrl; // Default-Ziel, falls der Nutzer keine eigene URL gesetzt hat
+      store.update(component.id, patch);
+      return mockUrl;
+    } catch { return null; }
   };
   // Report aus dem aktuellen Stand aller Komponenten bauen
   const buildReport = () => {
@@ -240,6 +258,19 @@ function cmdServe(portArg) {
 
     // Web-GUI + Doku
     if (p === '/' || p === '/app.html') return serveFile(res, path.join(__dirname, 'public', 'app.html'), 'text/html');
+
+    // Auto-Mock-Seiten statisch ausliefern (F-28/T-97): /mock/<slug>/... → DATA_DIR/mocks/<slug>/...
+    if (p.startsWith('/mock/')) {
+      const rel = decodeURIComponent(p.slice('/mock/'.length));
+      const file = path.normalize(path.join(mocksDir, rel));
+      if (!file.startsWith(path.normalize(mocksDir))) { res.writeHead(403); return res.end('forbidden'); }
+      const target = file.endsWith(path.sep) || p.endsWith('/') ? path.join(file, 'index.html') : file;
+      if (!fs.existsSync(target)) { res.writeHead(404, { 'Content-Type': 'text/plain' }); return res.end('mock not found'); }
+      const ext = path.extname(target).toLowerCase();
+      const ct = ext === '.html' ? 'text/html' : ext === '.js' ? 'text/javascript' : ext === '.css' ? 'text/css' : 'application/octet-stream';
+      res.writeHead(200, { 'Content-Type': `${ct}; charset=utf-8` });
+      return res.end(fs.readFileSync(target));
+    }
     if (p === '/readme.html') return serveFile(res, path.join(__dirname, 'readme.html'), 'text/html');
 
     // Health/Build-Marker: das Frontend vergleicht ihn mit seinem APP_BUILD und warnt bei Abweichung
@@ -336,6 +367,7 @@ function cmdServe(portArg) {
       const body = await readBody(req);
       const r = await assignRepoToComponent(store, id, body || {}, { workDir: settings.workDir, secretStore });
       saveSecrets(); // ggf. neu hinterlegtes Token verschlüsselt persistieren
+      if (!r?.error) { const mu = buildMockFor(store.get(id)); if (mu) r.mockUrl = mu; } // Auto-Mock nach Clone (T-97)
       return json(res, r, r?.error ? 400 : 200);
     });
 
