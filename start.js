@@ -55,7 +55,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const DATA_DIR = process.env.AISPP_DATA_DIR || path.join(__dirname, 'data');
 // Build-Marker: muss mit APP_BUILD in public/app.html übereinstimmen. Bei Backend-Änderungen erhöhen.
 // Das Frontend vergleicht beide und warnt, wenn der laufende Dienst veraltet ist (Neustart nötig).
-const BUILD = '2026-06-26.11';
+const BUILD = '2026-06-26.12';
 const C = { reset: '\x1b[0m', bold: '\x1b[1m', dim: '\x1b[2m', green: '\x1b[32m', yellow: '\x1b[33m', red: '\x1b[31m', cyan: '\x1b[36m' };
 const c = (col, s) => `${C[col]}${s}${C.reset}`;
 
@@ -154,6 +154,9 @@ function cmdServe(portArg) {
       }
     } catch { /* Datei-Fehler nicht eskalieren */ }
   };
+  // F-29: laufende Operationen je Komponente serverseitig merken (clone/maintain/migrate/…),
+  // damit die GUI auch nach Reload / bei woanders gestartetem Lauf „läuft gerade" anzeigen kann.
+  const RUNNING = new Set();
   // Auto-Mock je Plugin (F-28/T-97/T-99): self-contained Testseite + generierte Tests INS REPO schreiben
   // (unter <repo>/.maintenance/), damit sie beim Upload mitcommittet werden; von dort statisch ausliefern.
   // KI-first (T-101): die KI schreibt aus der Analyse einen plugin-spezifischen Mock; ohne KI Fallback
@@ -289,6 +292,17 @@ function cmdServe(portArg) {
       try { return await fn(c, id); }
       catch (err) { return json(res, { error: String(err?.message ?? err) }, 500); }
     };
+    // Wie withComponent, markiert die Komponente aber als „läuft gerade" (F-29) für lange Operationen
+    // (clone/maintain/migrate/autofix/baseline/ui-tests) → GUI-Spinner auch nach Reload / extern gestartet.
+    const withComponentRunning = async (fn) => {
+      const id = p.split('/')[3];
+      const c = store.get(id);
+      if (!c) return json(res, { error: 'not found' }, 404);
+      RUNNING.add(id);
+      try { return await fn(c, id); }
+      catch (err) { return json(res, { error: String(err?.message ?? err) }, 500); }
+      finally { RUNNING.delete(id); }
+    };
 
     // Web-GUI + Doku
     if (p === '/' || p === '/app.html') return serveFile(res, path.join(__dirname, 'public', 'app.html'), 'text/html');
@@ -312,6 +326,9 @@ function cmdServe(portArg) {
     if (p === '/readme.html') return serveFile(res, path.join(__dirname, 'readme.html'), 'text/html');
 
     // Health/Build-Marker: das Frontend vergleicht ihn mit seinem APP_BUILD und warnt bei Abweichung
+    // F-29: welche Komponenten gerade einen langen Lauf haben (clone/maintain/migrate/…) → GUI-Spinner
+    if (p === '/api/running') return json(res, { running: [...RUNNING] });
+
     if (p === '/api/health') return json(res, { ok: true, build: BUILD, hasPlaywright: fs.existsSync(path.join(__dirname, 'node_modules', '@playwright', 'test')), aiReady: resolveAiBackend(settings, secretStore).kind !== 'stub', features: ['vendored-libs', 'sbom', 'deep-tests', 'maintain', 'web-libcheck', 'ui-tests', 'pr-upload', 'lib-update', 'auto-repair', 'characterization', 'redev', 'licenses'] });
 
     // Playwright aus der App installieren (F-28/T-96): npm i -D @playwright/test + Browser → async
@@ -401,7 +418,7 @@ function cmdServe(portArg) {
     });
 
     // Repo einem Plugin zuordnen (F-21) → async
-    if (p.startsWith('/api/components/') && p.endsWith('/assign-repo') && req.method === 'POST') return withComponent(async (c, id) => {
+    if (p.startsWith('/api/components/') && p.endsWith('/assign-repo') && req.method === 'POST') return withComponentRunning(async (c, id) => {
       const body = await readBody(req);
       const r = await assignRepoToComponent(store, id, body || {}, { workDir: settings.workDir, secretStore });
       saveSecrets(); // ggf. neu hinterlegtes Token verschlüsselt persistieren
@@ -410,7 +427,7 @@ function cmdServe(portArg) {
     });
 
     // Auto-Update je Komponente (F-20) → async, vor dem synchronen Handler
-    if (p.startsWith('/api/components/') && p.endsWith('/update') && req.method === 'POST') return withComponent(async (c, id) => {
+    if (p.startsWith('/api/components/') && p.endsWith('/update') && req.method === 'POST') return withComponentRunning(async (c, id) => {
       const body = await readBody(req);
       // 0) Aktualität sicherstellen (latest/outdated), damit vendored-Updates erkannt werden
       try { const enr = await checkLibrariesOnline(store.get(id).libs || []); store.update(id, { libs: enr }); } catch { /* offline → weiter */ }
@@ -441,7 +458,7 @@ function cmdServe(portArg) {
     });
 
     // Coded-UI-Tests (Playwright) live ausführen (T-73) — nur GUI-getriggert, NICHT im Job → async
-    if (p.startsWith('/api/components/') && p.endsWith('/ui-tests') && req.method === 'POST') return withComponent(async (c, id) => {
+    if (p.startsWith('/api/components/') && p.endsWith('/ui-tests') && req.method === 'POST') return withComponentRunning(async (c, id) => {
       const body = await readBody(req);
       const url = (body?.url || c.uiTestUrl || '').trim();
       if (url && url !== c.uiTestUrl) store.update(id, { uiTestUrl: url });
@@ -451,7 +468,7 @@ function cmdServe(portArg) {
     });
 
     // Charakterisierungs-Baseline aufnehmen (F-28/T-92): Ist-Verhalten als Spec festnageln → async
-    if (p.startsWith('/api/components/') && p.endsWith('/baseline') && req.method === 'POST') return withComponent(async (c, id) => {
+    if (p.startsWith('/api/components/') && p.endsWith('/baseline') && req.method === 'POST') return withComponentRunning(async (c, id) => {
       const body = await readBody(req);
       const url = (body?.url || c.uiTestUrl || '').trim();
       if (url && url !== c.uiTestUrl) store.update(id, { uiTestUrl: url });
@@ -461,7 +478,7 @@ function cmdServe(portArg) {
     });
 
     // Re-Dev/Migration gegen die Spec (F-28/T-93): KI migriert → UI-Gate → Übernahme nur „grün wie zuvor" → async
-    if (p.startsWith('/api/components/') && p.endsWith('/redevelop') && req.method === 'POST') return withComponent(async (c) => {
+    if (p.startsWith('/api/components/') && p.endsWith('/redevelop') && req.method === 'POST') return withComponentRunning(async (c) => {
       const ai = resolveAiBackend(settings, secretStore);
       const hasPlaywright = fs.existsSync(path.join(__dirname, 'node_modules', '@playwright', 'test'));
       const r = await redevelopComponent(store, c, {
@@ -486,7 +503,7 @@ function cmdServe(portArg) {
     });
 
     // Alles automatisch beheben (T-61) → async
-    if (p.startsWith('/api/components/') && p.endsWith('/autofix') && req.method === 'POST') return withComponent(async (c) => {
+    if (p.startsWith('/api/components/') && p.endsWith('/autofix') && req.method === 'POST') return withComponentRunning(async (c) => {
       const ai = resolveAiBackend(settings, secretStore);
       const r = await autoFixComponent(store, c, {
         ai,
@@ -497,7 +514,7 @@ function cmdServe(portArg) {
     });
 
     // Vollständige Pflege (manuell = automatisch) — eine Orchestrierung (T-66) → async
-    if (p.startsWith('/api/components/') && p.endsWith('/maintain') && req.method === 'POST') return withComponent(async (c, id) => {
+    if (p.startsWith('/api/components/') && p.endsWith('/maintain') && req.method === 'POST') return withComponentRunning(async (c, id) => {
       const ai = resolveAiBackend(settings, secretStore);
       const hasPlaywright = fs.existsSync(path.join(__dirname, 'node_modules', '@playwright', 'test'));
       const sl = slugify(c.name);

@@ -90,6 +90,9 @@
   .modal h2{margin:0 0 6px;font-size:1.15rem}
   .modal .foot{display:flex;justify-content:flex-end;gap:8px;margin-top:18px}
   .toast{position:fixed;bottom:20px;left:50%;transform:translateX(-50%);background:var(--panel2);border:1px solid var(--line);padding:10px 16px;border-radius:10px;display:none;z-index:50}
+  .overlay{position:fixed;inset:0;background:rgba(0,0,0,.5);display:flex;align-items:center;justify-content:center;z-index:60}
+  .overlay[hidden]{display:none}
+  .overlay-card{display:flex;align-items:center;gap:12px;background:var(--panel2);border:1px solid var(--line);padding:18px 26px;border-radius:12px;font-weight:600}
   .toast.show{display:block}
   .inline{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
   .agcount{display:inline-block;min-width:74px;font-size:.72rem;font-weight:600;text-transform:uppercase;letter-spacing:.04em;color:var(--muted)}
@@ -155,8 +158,7 @@
     <h2 id="mTitle">Component</h2>
     <input type="hidden" id="mId">
     <label>Name</label><input id="mName" placeholder="e.g. ColorPicker">
-    <label>Directory / repo path <span class="muted small">(optional — otherwise later via “🔗 Assign repo”)</span></label><input id="mPath" placeholder="D:\repos\plugin">
-    <div class="muted small" style="margin-top:10px">Type and format are detected automatically on check. Everything is always tested.</div>
+    <label>Directory or Git URL <span class="muted small">(optional)</span></label><input id="mPath" placeholder="https://github.com/org/plugin  ·  D:\repos\plugin">
     <div class="foot">
       <button class="ghost" onclick="closeModal()">Cancel</button>
       <button class="primary" onclick="saveComponent()">Save</button>
@@ -229,6 +231,11 @@
 
 <div class="toast" id="toast"></div>
 
+<!-- F-29: Clone-/Lauf-Overlay nach „Save" (Repo klonen + Mock bauen) -->
+<div class="overlay" id="busyOverlay" hidden>
+  <div class="overlay-card"><span class="spin" style="width:18px;height:18px"></span><span id="busyOverlayTxt">Working…</span></div>
+</div>
+
 <script>
 const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s ?? '').replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
@@ -262,12 +269,28 @@ function rebuiltBadge(c){
 
 let current = null;
 
-// Laufende Aktionen je Komponente → Spinner vor dem Plugin (Liste) + im Drawer-Titel
+// Laufende Aktionen je Komponente → Spinner vor dem Plugin (Liste) + im Drawer-Titel.
+// BUSY = in diesem Tab gestartet; SRUN = serverseitig laufend (F-29, via /api/running-Poll →
+// zeigt „läuft gerade" auch nach Reload oder wenn der Lauf woanders gestartet wurde).
 const BUSY = new Set();
-function setBusy(id, on){
-  if(on) BUSY.add(id); else BUSY.delete(id);
+const SRUN = new Set();
+function rowBusy(id){ return BUSY.has(id) || SRUN.has(id); }
+function applySpin(id){
+  const on = rowBusy(id);
   document.querySelectorAll(`.spin[data-cid="${id}"]`).forEach(s=>s.hidden=!on);
+  document.querySelectorAll(`.runlbl[data-cid="${id}"]`).forEach(s=>s.hidden=!on);
   const d=$('dSpin'); if(d && current && current.id===id) d.hidden=!on;
+}
+function setBusy(id, on){ if(on) BUSY.add(id); else BUSY.delete(id); applySpin(id); }
+// F-29: serverseitig laufende Komponenten pollen und Spinner entsprechend setzen
+async function pollRunning(){
+  try{
+    const r = await api('GET','/api/running');
+    const next = new Set(r.running||[]);
+    const touched = new Set([...next, ...SRUN]);
+    SRUN.clear(); next.forEach(id=>SRUN.add(id));
+    touched.forEach(applySpin);
+  }catch{ /* offline → ignorieren */ }
 }
 // Datei-Download aus In-Memory-Inhalt (vorher 4× dupliziert: SBOM/Log/Testplan/Coded-Test)
 function saveBlob(name, content, type){
@@ -286,7 +309,7 @@ async function load(){
     const badgeCls = c.formatBadge==='APEX-SQL-Export'?'export':'';
     const typeBadge = c.type==='template_component'?'<span class="badge tc">Template Component</span>':'<span class="badge">Plugin</span>';
     tr.innerHTML = `
-      <td><span class="spin" data-cid="${c.id}"${BUSY.has(c.id)?'':' hidden'}></span><b>${esc(c.name)}</b>${libWarnBadge(c.libWarning)}${rebuiltBadge(c)}</td>
+      <td><span class="spin" data-cid="${c.id}"${rowBusy(c.id)?'':' hidden'}></span><b>${esc(c.name)}</b>${libWarnBadge(c.libWarning)}${rebuiltBadge(c)}<span class="runlbl muted small" data-cid="${c.id}"${rowBusy(c.id)?'':' hidden'}> · running…</span></td>
       <td class="small muted">${esc(c.repo||'—')}</td>
       <td>${typeBadge}</td>
       <td><span class="badge ${badgeCls}">${esc(c.formatBadge)}</span></td>
@@ -295,10 +318,11 @@ async function load(){
       <td class="small muted">${fmtDate(c.lastChange&&c.lastChange.at)}</td>
       <td class="small">${esc(c.changeSummary)}</td>
       <td><div class="actions">
+        ${c.mockUrl?`<button class="ghost small" data-act="mock" title="Open the rendered mock in a new tab${c.mockMode==='ai'?' (AI-written)':c.mockMode?' (static fallback)':''}">🧪 Open mock</button>`:''}
         <button class="ghost small" data-act="edit">Edit</button>
         <button class="ghost small danger" data-act="del">Delete</button>
       </div></td>`;
-    tr.onclick = (e)=>{ const a=e.target.getAttribute('data-act'); if(a==='edit'){e.stopPropagation();openEdit(c);} else if(a==='del'){e.stopPropagation();delComponent(c);} else openDetail(c.id); };
+    tr.onclick = (e)=>{ const a=e.target.getAttribute('data-act'); if(a==='mock'){e.stopPropagation();window.open(c.mockUrl,'_blank','noopener');} else if(a==='edit'){e.stopPropagation();openEdit(c);} else if(a==='del'){e.stopPropagation();delComponent(c);} else openDetail(c.id); };
     rows.appendChild(tr);
   }
 }
@@ -793,15 +817,21 @@ async function saveComponent(){
   // Typ/Format/Status werden automatisch erkannt — der Nutzer wählt sie nicht.
   const data={ name:$('mName').value.trim(), path: isUrl?'':p };
   if(!data.name) return toast('Name missing');
+  let comp;
   try{
-    const comp = id ? await api('PUT','/api/components/'+id,data) : await api('POST','/api/components',data);
-    if(isUrl && comp && comp.id){
-      toast('Cloning repo…');
-      await api('POST',`/api/components/${comp.id}/assign-repo`,{source:p,visibility:'öffentlich'});
-    }
-    closeModal(); load(); toast(isUrl?'Saved & repo cloned — “▶ Check” detects type/format':'Saved');
-  }catch(e){ toast('Error: '+e.message); }
+    comp = id ? await api('PUT','/api/components/'+id,data) : await api('POST','/api/components',data);
+  }catch(e){ return toast('Error: '+e.message); }
+  closeModal();            // F-29: Dialog sofort schließen
+  await load();            // neue Zeile sofort sichtbar machen
+  if(isUrl && comp && comp.id){
+    busyOverlay(true, `Cloning ${data.name} & building mock…`);   // F-29: Spinner bis der Klon fertig ist
+    try{ await api('POST',`/api/components/${comp.id}/assign-repo`,{source:p,visibility:'öffentlich'}); toast('Repo cloned & mock built — “▶ Check” detects type/format'); }
+    catch(e){ toast('Clone error: '+e.message); }
+    finally{ busyOverlay(false); await load(); }   // Hauptseite aktualisieren, damit du es siehst
+  } else { toast('Saved'); }
 }
+// F-29: zentrales Lauf-Overlay (Klonen/Mock-Bau) ein/aus
+function busyOverlay(on, txt){ const o=$('busyOverlay'); if(!o) return; if(txt) $('busyOverlayTxt').textContent=txt; o.hidden=!on; }
 async function delComponent(c){
   if(!confirm(`Really delete component “${c.name}”?`)) return;
   await api('DELETE','/api/components/'+c.id); load(); toast('Deleted');
@@ -939,7 +969,7 @@ async function loadLibraries(){
 }
 
 // Build-Marker: muss mit BUILD in start.js übereinstimmen. Erkennt einen veralteten Backend-Prozess.
-const APP_BUILD = '2026-06-26.11';
+const APP_BUILD = '2026-06-26.12';
 async function checkBackend(){
   const b = $('staleBanner');
   try{
@@ -967,8 +997,9 @@ document.addEventListener('keydown', (e) => {
 
 checkBackend();
 loadSettings();
-load();
+load().then(pollRunning); // F-29: nach dem ersten Laden Lauf-Status anwenden
 loadLibraries(); // beim Öffnen: Bibliotheken + Warn-Badges aktualisieren
+setInterval(pollRunning, 2500); // F-29: „läuft gerade" laufend aktualisieren
 </script>
 </body>
 </html>

@@ -57,6 +57,17 @@ describe('T-33 View-Model & Aktionen', () => {
     expect(vm[0]).toMatchObject({ name: 'Slider', type: 'template_component', formatBadge: 'APEX-SQL-Export', status: 'ok', changeSummary: 'jquery 3.4.1 → 3.7.1' });
   });
 
+  it('Übersicht liefert mockUrl/mockMode für den „Open mock"-Button (F-29)', () => {
+    const s = newStore();
+    s.add({ name: 'Flow', type: 'plugin', format: 'export', status: 'ok' });
+    s.update('c1', { mockUrl: 'http://x/mock/flow/index.html', mockMode: 'ai' });
+    const vm = overviewViewModel(s);
+    expect(vm[0]).toMatchObject({ mockUrl: 'http://x/mock/flow/index.html', mockMode: 'ai' });
+    // ohne Mock: null (Button wird dann nicht gerendert)
+    s.add({ name: 'NoMock', type: 'plugin' });
+    expect(overviewViewModel(s).find((c) => c.name === 'NoMock')).toMatchObject({ mockUrl: null, mockMode: null });
+  });
+
   it('Verzeichnis öffnen ruft den OS-Opener mit dem Pfad', () => {
     const calls = [];
     const res = openDirectory('D:/plugins/x', { platform: 'win32', spawn: (cmd, args) => calls.push([cmd, args]) });
