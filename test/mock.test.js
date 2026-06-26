@@ -50,6 +50,9 @@ describe('F-28 T-97 Auto-Mock', () => {
       fs.mkdirSync(path.join(dir, 'js', 'lib'), { recursive: true });
       fs.writeFileSync(path.join(dir, 'js', 'lib', 'three.js'), "var THREE={REVISION:'160'};");
       fs.writeFileSync(path.join(dir, 'js', 'widget.js'), "function initWidget(){ document.querySelector('#vanta'); }");
+      // B-21: echte Lib, die NICHT fingerprinted ist (z.B. vanta/*.min.js) — muss trotzdem real geladen werden
+      fs.mkdirSync(path.join(dir, 'vanta'), { recursive: true });
+      fs.writeFileSync(path.join(dir, 'vanta', 'vanta.net.min.js'), "window.VANTA={NET:function(){return{destroy:function(){}}}};");
       mockDir = fs.mkdtempSync(path.join(os.tmpdir(), 'mockout-'));
     });
     afterAll(() => { fs.rmSync(dir, { recursive: true, force: true }); fs.rmSync(mockDir, { recursive: true, force: true }); });
@@ -96,6 +99,33 @@ describe('F-28 T-97 Auto-Mock', () => {
       expect(p).toMatch(/HUMAN-READABLE/);
       expect(p).toMatch(/NON-DESTRUCTIVE/);
       expect(p).toMatch(/visible page MUST show the clean/);
+    });
+
+    it('B-21: collectMock + generateMock erfassen NICHT-fingerprinted Libs (vanta/*) als extraLibFiles', () => {
+      const c = collectMock(dir);
+      expect((c.extraLibFiles || []).some((f) => /vanta[\\/]vanta\.net\.min\.js$/.test(f))).toBe(true);
+      const gen = generateMock(dir, { name: 'Widget' });
+      expect((gen.extraLibFiles || []).some((f) => /vanta\.net\.min\.js$/.test(f))).toBe(true);
+      // statischer Mock lädt die echte Lib real per <script src>, faked sie NICHT
+      expect(gen.html).toMatch(/<script src="[^"]*vanta\.net\.min\.js">/);
+    });
+
+    it('B-21: writeMock kopiert auch extraLibFiles neben die Seite', () => {
+      const gen = generateMock(dir, { name: 'Widget' });
+      writeMock(mockDir, dir, gen);
+      const extra = gen.extraLibFiles.find((f) => /vanta\.net\.min\.js$/.test(f));
+      expect(extra).toBeTruthy();
+      expect(fs.existsSync(path.join(mockDir, extra))).toBe(true);
+    });
+
+    it('B-21: aiMockPrompt listet extraLibFiles + harte Regel „Daten mocken, Funktionalität NICHT"', () => {
+      const c = collectMock(dir);
+      const p = aiMockPrompt('Widget', c);
+      expect(p).toMatch(/vanta\.net\.min\.js/);                       // echte Lib gelistet
+      expect(p).toMatch(/MOCK DATA, NEVER FUNCTIONALITY/);           // Prinzip als harte Regel
+      expect(p).toMatch(/NOT fake, stub, reimplement or "shim"/);    // kein Faken von Libs/Funktion
+      expect(p).toMatch(/official CDN/);                              // fehlende Lib echt vom CDN
+      expect(p).toMatch(/animations must really animate/);           // Animation muss real laufen
     });
 
     it('generateAiMock: KI schreibt den Mock (mode=ai)', async () => {

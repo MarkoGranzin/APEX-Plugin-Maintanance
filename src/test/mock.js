@@ -128,13 +128,39 @@ test('plugin renders output and exercises its features', async ({ page }) => {
 }
 
 /**
- * Sammelt aus dem Repo, was der Mock braucht: Lib-Dateien, Plugin-Dateien (extern), Analyse.
- * @returns {{libFiles:string[], pluginFiles:{name:string,code:string}[], selectors:string[], entryPoints:string[], functions:object[]}}
+ * Findet lib-artige JS-Dateien im Repo, die NICHT per Fingerprint erkannt wurden (z.B. vanta/*.min.js).
+ * Sonst würden sie ganz fehlen und die KI müsste die Lib faken (statischer Mock, keine echte Funktion). B-21.
+ */
+function scanExtraLibFiles(dir, libSet) {
+  const out = [];
+  const skipDir = /(^|\/)(node_modules|\.git|\.maintenance|\.idea|\.vscode|test|tests|spec|specs|docs?|examples?|img|images)$/i;
+  const libDir = /(^|\/)(lib|libs|vendor|vendors|dist|build|vanta|three|deps|third[-_]?party|external|externals)(\/|$)/i;
+  const walk = (d, rel) => {
+    let ents = []; try { ents = fs.readdirSync(d, { withFileTypes: true }); } catch { return; }
+    for (const e of ents) {
+      const r = rel ? `${rel}/${e.name}` : e.name;
+      if (e.isDirectory()) { if (!skipDir.test('/' + r)) walk(path.join(d, e.name), r); continue; }
+      if (!/\.js$/i.test(e.name)) continue;
+      if (libSet.has(r)) continue;                                  // schon als erkannte Lib gelistet
+      if (!(libDir.test('/' + r) || isLibraryFile(r))) continue;    // nur lib-artige Dateien
+      try { if (fs.statSync(path.join(d, e.name)).size > 4_000_000) continue; } catch { continue; }
+      out.push(r);
+    }
+  };
+  try { walk(dir, ''); } catch { /* best effort */ }
+  return out;
+}
+
+/**
+ * Sammelt aus dem Repo, was der Mock braucht: Lib-Dateien (erkannt + extra/nicht-erkannt), Plugin-Dateien, Analyse.
+ * @returns {{libFiles:string[], extraLibFiles:string[], pluginFiles:{name:string,code:string}[], selectors:string[], entryPoints:string[], functions:object[], events:object[]}}
  */
 export function collectMock(dir) {
   const libs = detectVendoredLibraries(dir).filter((l) => l.evidence && /\.js$/i.test(l.evidence));
   const libFiles = libs.map((l) => l.evidence);
   const libSet = new Set(libFiles);
+  // B-21: echte, aber nicht-fingerprinted Repo-Libs (z.B. vanta/*.min.js) mitnehmen statt faken.
+  const extraLibFiles = scanExtraLibFiles(dir, libSet);
   const pluginFiles = [];
   const selectors = new Set();
   const entryPoints = new Set();
@@ -158,7 +184,7 @@ export function collectMock(dir) {
       for (const f of deep.functions || []) { functions.push(f); if (f.name && /^(init|refresh|render|draw|setup|load|create|destroy)/i.test(f.name)) entryPoints.add(f.name); }
     }
   } catch { /* best effort */ }
-  return { libFiles, pluginFiles, selectors: [...selectors], entryPoints: [...entryPoints], functions, events: [...events.values()] };
+  return { libFiles, extraLibFiles, pluginFiles, selectors: [...selectors], entryPoints: [...entryPoints], functions, events: [...events.values()] };
 }
 
 /**
@@ -168,8 +194,9 @@ export function collectMock(dir) {
 export function generateMock(dir, opts = {}) {
   const name = opts.name || 'plugin';
   const c = collectMock(dir);
-  const html = buildMockPage({ name, libFiles: c.libFiles, pluginFiles: c.pluginFiles.map((p) => p.name), selectors: c.selectors, entryPoints: c.entryPoints, events: c.events });
-  return { html, spec: { name: `${slug(name)}.ui.spec.js`, content: buildMockSpec(name) }, libFiles: c.libFiles, pluginFiles: c.pluginFiles, selectors: c.selectors, entryPoints: c.entryPoints, mode: 'static' };
+  const allLibs = [...c.libFiles, ...(c.extraLibFiles || [])]; // B-21: auch nicht-fingerprinted Libs (vanta/*) real laden
+  const html = buildMockPage({ name, libFiles: allLibs, pluginFiles: c.pluginFiles.map((p) => p.name), selectors: c.selectors, entryPoints: c.entryPoints, events: c.events });
+  return { html, spec: { name: `${slug(name)}.ui.spec.js`, content: buildMockSpec(name) }, libFiles: c.libFiles, extraLibFiles: c.extraLibFiles || [], pluginFiles: c.pluginFiles, selectors: c.selectors, entryPoints: c.entryPoints, mode: 'static' };
 }
 
 /** Baut den Prompt, mit dem die KI einen plugin-spezifischen Mock schreibt (rein/testbar). */
@@ -181,6 +208,8 @@ export function aiMockPrompt(name, c) {
 Plugin: ${name}
 Libraries to load FIRST, in this order, via <script src="<path>"> (use exactly these relative paths):
 ${(c.libFiles || []).map((f) => '  ' + f).join('\n') || '  (none)'}
+Other REAL library files present in the repo (copied next to the page) — load the ones the plugin needs, in the correct dependency order (e.g. three.js BEFORE vanta/*; load every animation/feature module the plugin can use). NEVER reimplement these:
+${(c.extraLibFiles || []).map((f) => '  ' + f).join('\n') || '  (none)'}
 Plugin code files to load via <script src="plugin/<file>"> (already written next to the page):
 ${(c.pluginFiles || []).map((p) => '  ' + p.name).join('\n') || '  (none)'}
 
@@ -195,6 +224,12 @@ ${src}
 
 Goal: a FUNCTIONAL mock that actually RENDERS the plugin WITH realistic sample data — not an empty mount. Study the source to understand how the plugin gets its data and what it produces, then feed it that data so its visual output appears.
 
+HARD RULE — MOCK DATA, NEVER FUNCTIONALITY:
+- You may ONLY mock/shim (a) the APEX runtime (apex.*, $v/$s) and (b) the DATA the plugin consumes. That's it.
+- You must NOT fake, stub, reimplement or "shim" ANY library or the plugin's own behavior. Load the REAL library files listed above (they are in the repo / copied next to the page) and run the REAL plugin code. A faked library (e.g. drawing a static picture instead of running the real animation) is an INVALID mock.
+- If the plugin needs a library that is genuinely NOT in the repo, load the real file from its official CDN (e.g. jsDelivr/unpkg) — do NOT reimplement it.
+- The real library must actually DO its work: animations must really animate, interactions must really react. Mocking data is required; mocking functionality is forbidden.
+
 Requirements for the page:
 - STUDY THE DATA FLOW in the source: how does the plugin obtain data (apex.server.process / apex.jQuery.ajax / item values via $v/apex.item / plugin attributes/options / jsonpath over a JSON string)? What output does it build (e.g. an mxGraph flow chart, an SVG, a list)? Infer the exact data SHAPE it expects.
 - PROVIDE REALISTIC SAMPLE DATA matching that shape so the plugin renders real content (e.g. a flow chart with several nodes + edges, or a kanban board with a few realistic cards per column). Use PLAUSIBLE, HUMAN-READABLE labels — real-ish titles/names/values (e.g. "Design login screen", "In Review", "Anna M.") — NEVER random gibberish strings. Make the apex shim return it: apex.server.process(name, opts) and apex.jQuery.ajax resolve/callback with a plausible response; set item values ($v/apex.item) and pass plausible plugin attributes/options to the init call. Embed the sample data inline.
@@ -206,6 +241,8 @@ Requirements for the page:
 - FIRST UNDERSTAND the plugin from the source: what it is, EVERY feature it offers, and how each one works. THEN make this page a SELF-TEST HARNESS that characterizes those features as the spec a future migration must preserve. For EACH feature, run a check that ASSERTS its REAL EFFECT (not merely that code ran), e.g.:
    • render: #mock-root actually contains the expected output (the right number of nodes/cards/rows/svg etc.).
    • each interaction/event above: perform it and verify the resulting DOM change — e.g. DRAG & DROP actually moves an item into another container; a click toggles/opens the expected element; selection/sort/filter changes what is shown.
+   • ANIMATION (if the plugin animates, e.g. canvas/WebGL/SVG/CSS): verify it REALLY runs over time — capture the canvas/element state, wait ~300ms, capture again, and assert it CHANGED (a frozen/static frame = FAIL). The real library must be driving it, not a screenshot.
+   • BUTTONS / mode switches (if present, e.g. type tabs like net/waves/clouds): click EACH button and assert it actually switches AND the new mode then animates/renders — not merely that the button exists.
    • each entry point and each main option/mode produces its expected result.
   Wrap every check in try/catch (non-fatal) and push ONE result per feature to window.__features = array of { feature, ok, detail } where ok is TRUE only if the effect really happened (false + detail otherwise). Then set window.__selftested = true. These window.__features entries ARE the test cases the migration must keep green — make them concrete and meaningful, covering drag & drop and the plugin's other real features.
 - KEEP THE VISIBLE STATE CLEAN: the self-tests must be NON-DESTRUCTIVE to the view. After all checks, the visible page MUST show the clean, correctly-rendered plugin with the original sample data — exactly what a user would see. Undo any mutation your tests caused (remove test-added cards/groups, restore toggles/collapses, move dragged items back), or run the checks on cloned/detached nodes. A screenshot taken at the end (for the visual "looks-as-before" gate) must show the tidy plugin, NOT a cluttered post-test board.
@@ -241,7 +278,7 @@ export async function generateAiMock(dir, deps = {}) {
     html = html.replace(/<\/body>/i, '<script>window.__mockErrors=window.__mockErrors||[];window.addEventListener("error",function(ev){window.__mockErrors.push(String(ev.message||ev));});if(typeof window.__ok==="undefined")window.__ok=(window.__mockErrors.length===0);</script></body>');
     if (!/__ok/.test(html)) return fallback('AI HTML missing the window.__ok contract');
   }
-  return { html, spec: { name: `${slug(name)}.ui.spec.js`, content: buildMockSpec(name) }, libFiles: c.libFiles, pluginFiles: c.pluginFiles, selectors: c.selectors, entryPoints: c.entryPoints, mode: 'ai' };
+  return { html, spec: { name: `${slug(name)}.ui.spec.js`, content: buildMockSpec(name) }, libFiles: c.libFiles, extraLibFiles: c.extraLibFiles || [], pluginFiles: c.pluginFiles, selectors: c.selectors, entryPoints: c.entryPoints, mode: 'ai' };
 }
 
 const slug = (s) => String(s).toLowerCase().replace(/[^a-z0-9.-]+/g, '-').replace(/^-|-$/g, '') || 'plugin';
@@ -249,7 +286,7 @@ const slug = (s) => String(s).toLowerCase().replace(/[^a-z0-9.-]+/g, '-').replac
 /** Schreibt den Mock (index.html + benötigte Lib-Dateien) in mockDir. */
 export function writeMock(mockDir, repoDir, gen) {
   fs.mkdirSync(mockDir, { recursive: true });
-  for (const rel of gen.libFiles) {
+  for (const rel of [...(gen.libFiles || []), ...(gen.extraLibFiles || [])]) { // B-21: echte Libs (inkl. nicht-fingerprinted) mitkopieren
     try {
       const src = path.join(repoDir, rel);
       const dst = path.join(mockDir, rel);

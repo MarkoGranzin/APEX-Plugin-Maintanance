@@ -236,6 +236,18 @@
   <div class="overlay-card"><span class="spin" style="width:18px;height:18px"></span><span id="busyOverlayTxt">Working…</span></div>
 </div>
 
+<!-- App-eigene Bestätigung statt blockierendem confirm() (zuverlässig + automatisierbar) -->
+<div class="modal-bg" id="confirmBg" onclick="if(event.target===this)__resolveConfirm(false)">
+  <div class="modal">
+    <h2 id="confirmTitle">Please confirm</h2>
+    <p id="confirmMsg" class="muted small" style="margin-top:0"></p>
+    <div class="foot">
+      <button class="ghost" onclick="__resolveConfirm(false)">Cancel</button>
+      <button class="primary danger" id="confirmOk" onclick="__resolveConfirm(true)">Delete</button>
+    </div>
+  </div>
+</div>
+
 <script>
 const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s ?? '').replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
@@ -832,8 +844,19 @@ async function saveComponent(){
 }
 // F-29: zentrales Lauf-Overlay (Klonen/Mock-Bau) ein/aus
 function busyOverlay(on, txt){ const o=$('busyOverlay'); if(!o) return; if(txt) $('busyOverlayTxt').textContent=txt; o.hidden=!on; }
+// App-eigene, nicht-blockierende Bestätigung (ersetzt natives confirm()): gibt ein Promise<bool> zurück.
+let __confirmResolve = null;
+function __resolveConfirm(v){ const bg=$('confirmBg'); if(bg) bg.classList.remove('open'); const r=__confirmResolve; __confirmResolve=null; if(r) r(v); }
+function uiConfirm(msg, okLabel){
+  return new Promise((resolve)=>{
+    __confirmResolve = resolve;
+    $('confirmMsg').textContent = msg;
+    if(okLabel) $('confirmOk').textContent = okLabel;
+    $('confirmBg').classList.add('open');
+  });
+}
 async function delComponent(c){
-  if(!confirm(`Really delete component “${c.name}”?`)) return;
+  if(!(await uiConfirm(`Really delete component “${c.name}”? This removes it from the list.`, 'Delete'))) return;
   await api('DELETE','/api/components/'+c.id); load(); toast('Deleted');
 }
 
@@ -969,7 +992,7 @@ async function loadLibraries(){
 }
 
 // Build-Marker: muss mit BUILD in start.js übereinstimmen. Erkennt einen veralteten Backend-Prozess.
-const APP_BUILD = '2026-06-26.23';
+const APP_BUILD = '2026-06-26.24';
 async function checkBackend(){
   const b = $('staleBanner');
   try{
@@ -990,6 +1013,7 @@ async function checkBackend(){
 // Esc schließt offene Dialoge bzw. den Drawer
 document.addEventListener('keydown', (e) => {
   if (e.key !== 'Escape') return;
+  if ($('confirmBg')?.classList.contains('open')) { __resolveConfirm(false); return; } // Bestätigung sauber abbrechen
   const m = document.querySelector('.modal-bg.open');
   if (m) { m.classList.remove('open'); return; }
   if ($('drawer').classList.contains('open')) closeDrawer();
