@@ -166,6 +166,21 @@ describe('F-28 T-93 redevelopComponent (Spec-gesicherte Migration)', () => {
     expect(p).toMatch(/js\/script\.js/);            // Datei
   });
 
+  it('buildMigrationPrompt: unmaintained → permissiver Ersatz bzw. MIT-Self-Build, nie Copyleft', () => {
+    const p = buildMigrationPrompt({ name: 'js/script.js', code: 'x' }, {
+      replacements: [
+        { from: 'moment', to: 'dayjs', license: 'MIT', cdn: 'https://cdn/dayjs.js', note: 'dayjs API', attribution: false, strategy: 'replace' },
+        { from: 'yui', to: null, strategy: 'self-build' },
+      ],
+    });
+    expect(p).toMatch(/Replace UNMAINTAINED/);
+    expect(p).toMatch(/dayjs/);                       // Nachfolger genannt
+    expect(p).toMatch(/cdn\/dayjs\.js/);             // echte Lib via CDN laden
+    expect(p).toMatch(/NEVER GPL\/AGPL\/LGPL\/other copyleft/); // Lizenz-Leitplanke
+    expect(p).toMatch(/BUILD a minimal self-contained replacement/); // Self-Build-Fallback
+    expect(p).toMatch(/license it MIT/);
+  });
+
   // T-104: optisches Abschluss-Gate (AI-UI-Prüfung „sieht aus wie zuvor")
   const withShotBaseline = (store) => {
     const id = store.add({ name: 'P', path: '/repo', uiTestUrl: 'http://x', codedTests: [{ name: 'p.ui.spec.js', content: 'x' }] }).id;

@@ -20,6 +20,7 @@ import { runComponentOnce } from './run-component.js';
 import { checkLibrariesOnline } from './lib-check.js';
 import { autoFixComponent } from './autofix.js';
 import { applyVendoredUpdates, rollbackUpdates } from './lib-update.js';
+import { planReplacements } from './lib-replace.js';
 
 export async function maintainComponent(store, comp, deps = {}) {
   const now = deps.now ?? (() => new Date().toISOString());
@@ -91,6 +92,18 @@ export async function maintainComponent(store, comp, deps = {}) {
       reason: can
         ? 'Major update: the software migrates via AI agent + coded UI test; adopted only after review (upload/PR)'
         : 'Major update: an AI backend is required for the software to perform the migration',
+    });
+  }
+
+  // 4c) UNMAINTAINED Libs werden ERSETZT (nicht nur geupdatet): permissiver Nachfolger bzw. MIT-Self-Build.
+  // Wie Breaking-Updates wird das per KI-Migration + works-as-before-Gate übernommen (in fullMaintain/redev).
+  const can = deps.ai && deps.ai.kind !== 'stub';
+  for (const r of planReplacements(cur().libs ?? [])) {
+    steps.push({
+      step: 'migrate', name: r.from, to: r.to, replace: true, strategy: r.strategy, license: r.license ?? null, skipped: true,
+      reason: r.strategy === 'replace'
+        ? (can ? `Unmaintained → replace with ${r.to} (${r.license}${r.attribution ? ', attribution' : ', no obligations'}); migrated via AI + works-as-before gate` : `Unmaintained → replaceable with ${r.to} (${r.license}); an AI backend is required to perform the swap`)
+        : (can ? 'Unmaintained, no permissive successor → AI builds a minimal MIT replacement, verified as before' : 'Unmaintained, no permissive successor → an AI backend is required to build a replacement'),
     });
   }
 

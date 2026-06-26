@@ -568,7 +568,13 @@ function libLine(l){
   const link = l.source||l.homepage||l.npm;
   const src = link ? ` · <a href="${esc(link)}" target="_blank" rel="noopener" style="color:var(--accent)">Source ↗</a>` : '';
   const manual = l.detectedBy==='manuell' ? ' <span class="badge">manual</span>' : '';
-  return `<div class="logline ${cls}"><b>${esc(l.name)}@${esc(l.version)}</b>${manual} — ${esc(libStatusLabel(l.status))}${l.vuln?` (${esc(l.vuln)})`:''}${l.reason?` — ${esc(l.reason)}`:''}${web}${inst}${licenseBadge(l)}${src}</div>`;
+  // Unmaintained → permissiver Ersatzvorschlag (oder MIT-Self-Build), wird bei der Pflege automatisch migriert
+  const rep = l.replacement
+    ? (l.replacement.to
+        ? `<div class="small" style="margin:2px 0 0 12px;color:var(--accent)">↳ replace with <b>${esc(l.replacement.to)}</b> (${esc(l.replacement.license)}${l.replacement.attribution?', attribution':', no obligations'}) — done automatically on maintenance</div>`
+        : `<div class="small" style="margin:2px 0 0 12px;color:var(--accent)">↳ no permissive successor → a minimal MIT replacement is built automatically on maintenance</div>`)
+    : '';
+  return `<div class="logline ${cls}"><b>${esc(l.name)}@${esc(l.version)}</b>${manual} — ${esc(libStatusLabel(l.status))}${l.vuln?` (${esc(l.vuln)})`:''}${l.reason?` — ${esc(l.reason)}`:''}${web}${inst}${licenseBadge(l)}${src}${rep}</div>`;
 }
 // Lizenz-Badge: pflichtenarm (grün) / Attribution (gelb) / copyleft|unklar (rot) — T-95
 function licenseBadge(l){
@@ -992,7 +998,7 @@ async function loadLibraries(){
 }
 
 // Build-Marker: muss mit BUILD in start.js übereinstimmen. Erkennt einen veralteten Backend-Prozess.
-const APP_BUILD = '2026-06-26.34';
+const APP_BUILD = '2026-06-26.35';
 async function checkBackend(){
   const b = $('staleBanner');
   try{

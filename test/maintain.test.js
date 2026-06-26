@@ -41,6 +41,18 @@ describe('T-66 Vollautomatische Pflege = manuelle Pflege', () => {
     expect(r.skipped).toBe(true);
   });
 
+  it('unmaintained Lib → migrate-Schritt mit permissivem Ersatz (für AI-Migration/Gate)', async () => {
+    const store = setup();
+    const scanUnmaint = () => ({ ...scanStub(), libs: [{ name: 'mxgraph', version: '4.2.2', status: 'nicht gepflegt', unmaintained: true }] });
+    const r = await maintainComponent(store, store.get('c1'), { ...baseDeps({}), scan: scanUnmaint, ai: { kind: 'cli' } });
+    const mig = r.steps.find((s) => s.step === 'migrate' && s.replace);
+    expect(mig).toBeTruthy();
+    expect(mig.name).toBe('mxgraph');
+    expect(mig.to).toBe('@maxgraph/core');
+    expect(mig.strategy).toBe('replace');
+    expect(store.get('c1').libs[0].replacement?.to).toBe('@maxgraph/core'); // Ersatz an Lib angehängt (GUI)
+  });
+
   it('maintainAll nutzt dieselbe Orchestrierung je Komponente', async () => {
     const store = setup();
     store.add({ name: 'Q', path: '/repo2', repo: 'Q' });

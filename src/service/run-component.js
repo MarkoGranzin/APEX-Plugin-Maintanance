@@ -10,6 +10,7 @@
 
 import { scanRepo } from './run-repo.js';
 import { libStatus, libWarningFrom } from './lib-check.js';
+import { suggestReplacement } from './lib-replace.js';
 import { buildSbom } from '../sbom/sbom.js';
 
 /** Verdichtet ein Scan-Ergebnis zu einer Kurz-Zusammenfassung. */
@@ -69,6 +70,10 @@ export function runComponentOnce(store, component, opts = {}) {
     const merged = { ...l, latest, releasedAt, ageDays, installedReleasedAt, installedAgeDays, outdated, webStatus, source, homepage, npm };
     merged.status = libStatus(merged); // Status inkl. Web-Outdated konsistent halten (Re-Test darf ihn nicht zurücksetzen)
     return merged;
+  }).map((l) => {
+    // Unmaintained Lib → permissiven Ersatz vorschlagen (für GUI/Migration). null wenn gepflegt oder kein Vorschlag.
+    if (l.unmaintained || l.status === 'nicht gepflegt') { const rep = suggestReplacement(l.name); if (rep) return { ...l, replacement: rep }; }
+    return l;
   });
   // Status/Zusammenfassung aus den GEMERGTEN Libs (inkl. veraltet/unbekannt aus dem Web-Check)
   const libWarning = libWarningFrom(mergedLibs);

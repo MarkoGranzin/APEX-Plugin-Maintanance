@@ -19,6 +19,7 @@ import { applyVendoredUpdates } from './lib-update.js';
 import { analyzeDeep } from '../test/analyze-deep.js';
 import { captureShot, aiVisualCheck } from '../test/visual.js';
 import { collectMock } from '../test/mock.js';
+import { planReplacements } from './lib-replace.js';
 
 // T-103: konkrete Breaking-Change-Hinweise je Bibliothek, damit die KI Aufrufstellen PORTIERT
 // (Markup/Klassen/APIs) statt nicht-kompilierenden Code zu löschen — sonst gehen Optik & Features verloren.
@@ -55,11 +56,17 @@ function featureInventory(dir) {
 
 /** Reicher, feature-/breaking-bewusster Migrations-Prompt je Datei (rein/testbar, T-103). */
 export function buildMigrationPrompt(asset, ctx = {}) {
-  const { target = 'the latest stable libraries', breaking = '', inventory = {} } = ctx;
+  const { target = 'the latest stable libraries', breaking = '', inventory = {}, replacements = [] } = ctx;
   const inv = [];
   if (inventory.events?.length) inv.push('Interactions/events to PRESERVE (re-bind so they still work — includes drag & drop / sortable): ' + inventory.events.slice(0, 40).join(', '));
   if (inventory.fns?.length) inv.push('Functions/behaviors to keep working: ' + inventory.fns.slice(0, 40).join(', '));
   if (inventory.apexCalls?.length) inv.push('apex.* integration to keep: ' + [...new Set(inventory.apexCalls)].slice(0, 30).join(', '));
+  // Unmaintained Libs ERSETZEN (nicht nur updaten): permissiver Nachfolger oder MIT-Self-Build, nie Copyleft.
+  const repl = [];
+  for (const r of replacements || []) {
+    if (r.strategy === 'replace') repl.push(`- Replace UNMAINTAINED "${r.from}" with the maintained, permissively-licensed "${r.to}" (${r.license}${r.attribution ? ', attribution required — keep its license/NOTICE' : ', no obligations'}). Load the REAL replacement${r.cdn ? ` from its official CDN: ${r.cdn}` : ''} and port the call sites: ${r.note}`);
+    else repl.push(`- "${r.from}" is UNMAINTAINED and has no known permissive successor → BUILD a minimal self-contained replacement yourself, implementing ONLY the functionality this plugin actually uses, and license it MIT (add a short MIT header). Do not pull in any new dependency.`);
+  }
   return `You are an expert front-end engineer migrating an Oracle APEX plugin to ${target}. Migrate THIS file so the plugin keeps working on the new library versions WITHOUT changing what the user sees or can do.
 
 NON-NEGOTIABLE — preserve 1:1:
@@ -69,7 +76,7 @@ NON-NEGOTIABLE — preserve 1:1:
 
 Library breaking changes to apply (port call sites; do not remove functionality):
 ${breaking || "(consult each library's migration guide)"}
-
+${repl.length ? '\nReplace UNMAINTAINED libraries (keep behavior 1:1; only commercially-usable permissive licenses, NEVER GPL/AGPL/LGPL/other copyleft):\n' + repl.join('\n') + '\n' : ''}
 ${inv.join('\n')}
 
 If something cannot be preserved perfectly, keep the closest WORKING equivalent rather than removing it. Return EXCLUSIVELY the full updated file content (no Markdown, no explanation).
@@ -114,12 +121,13 @@ async function defaultMigrate(store, comp, deps = {}) {
   //    lib-spezifischen Breaking-Changes, damit Optik & Interaktionen (Drag&Drop usw.) erhalten bleiben (T-103).
   const breaking = breakingNotes(libs);
   const inventory = featureInventory(dir);
+  const replacements = planReplacements(libs); // unmaintained → permissiver Nachfolger / MIT-Self-Build
   let aiChanged = 0;
   for (const asset of inspectAssets(dir)) {
     if (!asset.origin) continue;
     let out = '';
     try {
-      out = await ai.complete(buildMigrationPrompt(asset, { target, breaking, inventory }), {});
+      out = await ai.complete(buildMigrationPrompt(asset, { target, breaking, inventory, replacements }), {});
     } catch { continue; }
     out = String(out).replace(/^```[a-z]*\n?|```$/g, '').trim();
     if (!out || !parseOk(out) || out === asset.code.trim()) continue;
