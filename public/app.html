@@ -389,7 +389,8 @@ async function openDetail(id){
       <div id="uiTestOut"></div>
       <h4 class="muted small" style="margin:14px 0 4px">📌 Characterization baseline <span class="muted">— pin the working behavior (“works as before”)</span></h4>
       ${renderBaseline(c)}
-      <div class="inline" style="gap:6px"><button onclick="captureBaselineNow()" title="Run the UI tests against the current (working) build and pin the result as the as-before baseline. Migrations/rebuilds are then only adopted if green as before.">📌 Capture baseline (now-working state)</button><button onclick="runRedev()" title="AI migrates/rebuilds the plugin onto the latest stable library, then re-runs the UI tests against the baseline. Adopted ONLY if green as before (else rolled back). Needs an AI backend + a UI test URL + a captured baseline.">🚀 Migrate to latest (verified vs baseline)</button></div>
+      <div class="muted small" style="margin-top:4px">The verified migration to the latest libs runs automatically inside <b>🧰 Full maintenance now</b>. Manual baseline refresh:</div>
+      <div class="inline" style="gap:6px"><button onclick="captureBaselineNow()" title="Re-pin the as-before baseline by running the UI tests against the current working build.">📌 Capture baseline (now-working state)</button></div>
       <div id="baselineOut"></div>
       <h4 class="muted small" style="margin:14px 0 4px">📋 Test plan (Cucumber)</h4>
       ${renderGherkin(c.testPlan)}
@@ -606,9 +607,16 @@ async function runMaintain(){
     if(r.error){ $('reviewOut').innerHTML=`<div class="finding">${esc(r.error)}</div>`; return; }
     if(r.skipped){ $('reviewOut').innerHTML=`<div class="finding medium">Skipped: ${esc(r.reason||'')}</div>`; return; }
     await openDetail(id); load();
-    $('reviewOut').innerHTML = `<div class="note"><b>🧰 Maintenance done:</b> ${esc(r.before)} → ${esc(r.after)}</div>`
-      + (r.steps||[]).map(s=>`<div class="finding low"><b>${esc(s.step)}</b> ${esc(s.summary||s.status||(s.error?('Error: '+s.error):JSON.stringify(s)))}</div>`).join('');
-    toast('Full maintenance done');
+    let mig='';
+    if(r.migration){
+      const m=r.migration;
+      if(m.adopted) mig=`<div class="note"><b style="color:#3fb950">🚀 Migrated to latest — verified as before</b> · ${esc(m.migration||'')}${m.upload&&m.upload.prUrl?` — <a href="${esc(m.upload.prUrl)}" target="_blank" rel="noopener" style="color:var(--accent)">PR ↗</a>`:''}</div>`;
+      else if(m.skipped) mig=`<div class="finding medium">↪ Migration skipped — ${esc(m.reason||'')}</div>`;
+      else mig=`<div class="finding"><b>⛔ Migration not adopted (rolled back)</b> — ${esc(m.reason||(m.gate&&m.gate.summary)||'not green as before')}</div>`+((m.regressions||[]).map(x=>`<div class="finding medium">↩ ${esc(x.scenario)}: ${esc(x.was||'passed')} → ${esc(x.now||'failed')}</div>`).join(''));
+    }
+    $('reviewOut').innerHTML = `<div class="note"><b>🧰 Maintenance done:</b> ${esc(r.before)} → ${esc(r.after)}${r.rebuilt?' · 🚀 rebuilt':''}</div>` + mig
+      + (r.steps||[]).map(s=>`<div class="finding low"><b>${esc(s.step)}</b> ${esc(s.summary||s.status||s.reason||(s.error?('Error: '+s.error):JSON.stringify(s)))}</div>`).join('');
+    toast(r.migration&&r.migration.adopted?'Migrated to latest (verified)':'Full maintenance done');
   }catch(e){ $('reviewOut').innerHTML=`<div class="finding">${esc(e.message)}</div>`; toast('Error: '+e.message); }
   finally{ setBusy(id,false); }
 }
@@ -931,7 +939,7 @@ async function loadLibraries(){
 }
 
 // Build-Marker: muss mit BUILD in start.js übereinstimmen. Erkennt einen veralteten Backend-Prozess.
-const APP_BUILD = '2026-06-25.13';
+const APP_BUILD = '2026-06-26.1';
 async function checkBackend(){
   const b = $('staleBanner');
   try{

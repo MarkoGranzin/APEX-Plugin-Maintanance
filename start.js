@@ -55,7 +55,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const DATA_DIR = process.env.AISPP_DATA_DIR || path.join(__dirname, 'data');
 // Build-Marker: muss mit APP_BUILD in public/app.html übereinstimmen. Bei Backend-Änderungen erhöhen.
 // Das Frontend vergleicht beide und warnt, wenn der laufende Dienst veraltet ist (Neustart nötig).
-const BUILD = '2026-06-25.13';
+const BUILD = '2026-06-26.1';
 const C = { reset: '\x1b[0m', bold: '\x1b[1m', dim: '\x1b[2m', green: '\x1b[32m', yellow: '\x1b[33m', red: '\x1b[31m', cyan: '\x1b[36m' };
 const c = (col, s) => `${C[col]}${s}${C.reset}`;
 
@@ -459,9 +459,34 @@ function cmdServe(portArg) {
     });
 
     // Vollständige Pflege (manuell = automatisch) — eine Orchestrierung (T-66) → async
-    if (p.startsWith('/api/components/') && p.endsWith('/maintain') && req.method === 'POST') return withComponent(async (c) => {
+    if (p.startsWith('/api/components/') && p.endsWith('/maintain') && req.method === 'POST') return withComponent(async (c, id) => {
       const ai = resolveAiBackend(settings, secretStore);
-      const r = await maintainComponent(store, c, { ai, updateDeps: { push: localGitPush(c.path), registry: prRegistry, recordRun: record }, logSink: writeLog, onTestPlan, onSbom, recordRun: record });
+      const hasPlaywright = fs.existsSync(path.join(__dirname, 'node_modules', '@playwright', 'test'));
+      const sl = slugify(c.name);
+      const specsDir = path.join(DATA_DIR, 'ui-tests', sl);
+      // 0) Auto-Mock sicherstellen (Default-UI-Test-Ziel, T-97)
+      buildMockFor(store.get(id));
+      // 1) Normale Pflege: check → web-libcheck → safe Lib-Updates → autofix → re-test → breaking melden → upload(gated)
+      const r = await maintainComponent(store, store.get(id), { ai, updateDeps: { push: localGitPush(c.path), registry: prRegistry, recordRun: record }, logSink: writeLog, onTestPlan, onSbom, recordRun: record });
+      // 2) Breaking Libs? → Baseline gegen den Mock + verifizierte Migration (works-as-before), sonst Rollback
+      const breaking = (r.steps || []).filter((s) => s.step === 'migrate' && s.skipped);
+      if (breaking.length && r.skipped !== true) {
+        if (!hasPlaywright) r.migration = { skipped: true, reason: 'Playwright not installed — needed for the verified migration (Tests tab → Install Playwright)' };
+        else if (ai.kind === 'stub') r.migration = { skipped: true, reason: 'No AI backend — needed for the migration (Settings → Test connection)' };
+        else {
+          let comp = store.get(id);
+          if (!comp.baseline || !(comp.baseline.green > 0)) {
+            await captureBaseline(store, comp, { specsDir, hasPlaywright, onBaseline });
+            comp = store.get(id);
+          }
+          if (comp.baseline && comp.baseline.green > 0) {
+            r.migration = await redevelopComponent(store, store.get(id), { ai, specsDir, hasPlaywright, upload: uploadFor(true) });
+            const fresh = store.get(id); r.before = r.before; r.after = fresh.status; r.rebuilt = !!fresh.rebuilt;
+          } else {
+            r.migration = { skipped: true, reason: comp.baseline ? 'Mock baseline not green — migration cannot be verified “as before” (the mock does not load the plugin cleanly)' : 'No baseline could be captured' };
+          }
+        }
+      }
       return json(res, r, r?.error ? 400 : 200);
     });
 
