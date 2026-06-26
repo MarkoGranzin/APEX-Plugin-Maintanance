@@ -17,6 +17,7 @@ import { runUiTestsDetailed } from '../test/run-ui.js';
 import { compareToBaseline } from './baseline.js';
 import { applyVendoredUpdates } from './lib-update.js';
 import { analyzeDeep } from '../test/analyze-deep.js';
+import { captureShot, aiVisualCheck } from '../test/visual.js';
 
 // T-103: konkrete Breaking-Change-Hinweise je Bibliothek, damit die KI Aufrufstellen PORTIERT
 // (Markup/Klassen/APIs) statt nicht-kompilierenden Code zu löschen — sonst gehen Optik & Features verloren.
@@ -179,6 +180,23 @@ export async function redevelopComponent(store, comp, deps = {}) {
   const gate = compareToBaseline(cur, r.scenarios ?? []);
 
   if (gate.pass) {
+    // 3b) T-104 — optisches Abschluss-Gate: „sieht aus wie zuvor?" KI vergleicht initialen Baseline-Screenshot
+    //     mit einem frischen Screenshot des migrierten Builds. Optischer Regress = NICHT übernehmen (Rollback).
+    let visual = { ran: false, reason: 'kein Baseline-Screenshot' };
+    const beforeShot = baseline.shot;
+    const shotUrl = deps.pluginUrl || cur.uiTestUrl;
+    if (beforeShot && shotUrl && deps.hasPlaywright !== false && ai && ai.kind !== 'stub') {
+      const afterShot = `${deps.specsDir || '.'}/after-shot.png`;
+      const cap = await (deps.captureShot ?? captureShot)(shotUrl, afterShot, {});
+      if (cap.ok) visual = await (deps.aiVisualCheck ?? aiVisualCheck)({ ai, before: beforeShot, after: afterShot });
+      else visual = { ran: false, reason: 'after-screenshot failed: ' + cap.error };
+    }
+    if (visual.ran && visual.looksSame === false) {
+      if (mig.rollback) await mig.rollback();
+      store.addReview?.(comp.id, { kind: 'redev', pass: false, visual });
+      return { adopted: false, at: now(), migration: mig.summary, gate, review, visual, reason: 'visual regression — does not look as before: ' + (visual.issues || []).join('; ') };
+    }
+
     let upload = null;
     if (deps.upload) { try { upload = await deps.upload(store.get(comp.id) ?? comp); } catch (e) { upload = { error: String(e?.message ?? e) }; } }
     // T-94/B-17: Kennzeichnung aus den TATSÄCHLICH getauschten Libs (nicht aus l.latest = Ziel).
@@ -186,8 +204,8 @@ export async function redevelopComponent(store, comp, deps = {}) {
       ? mig.applied.map((l) => `${l.name}@${l.to}`).join(', ')
       : ((store.get(comp.id)?.libs ?? comp.libs ?? []).filter((l) => l.latest).map((l) => `${l.name}@${l.latest}`).join(', ') || 'latest');
     store.update(comp.id, { rebuilt: true, rebuiltAt: now(), rebuiltTo: target, rebuiltSummary: mig.summary, verifiedAsBefore: true, reviewUrl: upload?.prUrl ?? (store.get(comp.id)?.reviewUrl ?? null), reviewBranch: upload?.branch ?? (store.get(comp.id)?.reviewBranch ?? null) });
-    store.addReview?.(comp.id, { kind: 'redev', pass: true, migration: mig.summary });
-    return { adopted: true, at: now(), migration: mig.summary, rebuiltTo: target, gate, review, upload };
+    store.addReview?.(comp.id, { kind: 'redev', pass: true, migration: mig.summary, visual });
+    return { adopted: true, at: now(), migration: mig.summary, rebuiltTo: target, gate, review, upload, visual };
   }
   // Regress → Rollback (nichts wird ohne „grün wie zuvor" übernommen)
   if (mig.rollback) await mig.rollback();

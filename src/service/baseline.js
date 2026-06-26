@@ -12,6 +12,7 @@
 import crypto from 'node:crypto';
 import { runUiTestsDetailed } from '../test/run-ui.js';
 import { worksAsBefore } from './works-as-before.js';
+import { captureShot } from '../test/visual.js';
 
 /** Stabiler Hash ueber die UI-Spec-Inhalte — erkennt, ob die Baseline noch zur Spec passt. */
 export function specHashOf(codedTests = []) {
@@ -56,7 +57,12 @@ export async function captureBaseline(store, comp, deps = {}) {
 
   const green = scenarios.filter((s) => s.status === 'passed').length;
   if (!green && !note) note = 'no green scenarios — set a UI test URL and make the UI tests pass before this is a usable baseline';
-  const baseline = { at: now(), mode, specHash, note, green, total: scenarios.length, scenarios };
+  // T-104: initialen Screenshot des Ist-Stands aufnehmen — Grundlage für die optische „sieht aus wie zuvor"-Prüfung.
+  let shot = null;
+  if (url && deps.hasPlaywright !== false && deps.specsDir) {
+    try { const r = await (deps.captureShot ?? captureShot)(url, `${deps.specsDir}/baseline-shot.png`, {}); if (r.ok) shot = r.path; } catch { /* Screenshot best effort */ }
+  }
+  const baseline = { at: now(), mode, specHash, note, green, total: scenarios.length, scenarios, shot };
   store.update(comp.id, { baseline });
   if (deps.onBaseline) { try { deps.onBaseline(comp, baseline); } catch { /* Datei-Fehler nicht eskalieren */ } }
   return baseline;

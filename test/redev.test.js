@@ -165,4 +165,42 @@ describe('F-28 T-93 redevelopComponent (Spec-gesicherte Migration)', () => {
     expect(p).toMatch(/drop→#board/);               // Inventar (Events) eingebettet
     expect(p).toMatch(/js\/script\.js/);            // Datei
   });
+
+  // T-104: optisches Abschluss-Gate (AI-UI-Prüfung „sieht aus wie zuvor")
+  const withShotBaseline = (store) => {
+    const id = store.add({ name: 'P', path: '/repo', uiTestUrl: 'http://x', codedTests: [{ name: 'p.ui.spec.js', content: 'x' }] }).id;
+    store.update(id, { baseline: { mode: 'ui', specHash: 'h', scenarios: [{ scenario: 'A', status: 'passed' }], shot: '/tmp/before.png' } });
+    return id;
+  };
+  const visualDeps = (visual) => ({
+    ai: { kind: 'cli' },
+    migrate: async () => ({ changed: true, summary: 'm', backups: new Map(), rollback() { this._rb = true; }, _rb: false }),
+    runDetailed: async () => ({ ran: true, ok: true, scenarios: [{ scenario: 'A', status: 'passed' }] }),
+    hasPlaywright: true,
+    captureShot: async () => ({ ok: true, path: '/tmp/after.png' }),
+    aiVisualCheck: async () => visual,
+    upload: async () => ({ ok: true, branch: 'b' }),
+  });
+
+  it('T-104: optischer Regress (AI looksSame:false) → Rollback, NICHT uebernommen', async () => {
+    const store = mkStore();
+    const id = withShotBaseline(store);
+    let rolledBack = false;
+    const deps = visualDeps({ ran: true, looksSame: false, issues: ['layout broken'] });
+    deps.migrate = async () => ({ changed: true, summary: 'm', backups: new Map(), rollback: () => { rolledBack = true; } });
+    const r = await redevelopComponent(store, store.get(id), deps);
+    expect(r.adopted).toBe(false);
+    expect(rolledBack).toBe(true);
+    expect(r.visual).toMatchObject({ ran: true, looksSame: false });
+    expect(store.get(id).rebuilt).toBeFalsy();
+  });
+
+  it('T-104: AI looksSame:true → uebernommen, visual im Ergebnis', async () => {
+    const store = mkStore();
+    const id = withShotBaseline(store);
+    const r = await redevelopComponent(store, store.get(id), visualDeps({ ran: true, looksSame: true, issues: [] }));
+    expect(r.adopted).toBe(true);
+    expect(r.visual).toMatchObject({ ran: true, looksSame: true });
+    expect(store.get(id).rebuilt).toBe(true);
+  });
 });
