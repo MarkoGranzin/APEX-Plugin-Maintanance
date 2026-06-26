@@ -55,7 +55,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const DATA_DIR = process.env.AISPP_DATA_DIR || path.join(__dirname, 'data');
 // Build-Marker: muss mit APP_BUILD in public/app.html übereinstimmen. Bei Backend-Änderungen erhöhen.
 // Das Frontend vergleicht beide und warnt, wenn der laufende Dienst veraltet ist (Neustart nötig).
-const BUILD = '2026-06-26.4';
+const BUILD = '2026-06-26.5';
 const C = { reset: '\x1b[0m', bold: '\x1b[1m', dim: '\x1b[2m', green: '\x1b[32m', yellow: '\x1b[33m', red: '\x1b[31m', cyan: '\x1b[36m' };
 const c = (col, s) => `${C[col]}${s}${C.reset}`;
 
@@ -119,10 +119,20 @@ function cmdServe(portArg) {
   const writeLog = (component, text) => {
     try { const d = compLogDir(component); fs.mkdirSync(d, { recursive: true }); fs.writeFileSync(path.join(d, `${Date.now()}.log`), text); } catch {}
   };
-  // Testplan reproduzierbar als .feature-Datei ablegen
+  // Testplan (.feature) INS PLUGIN-VERZEICHNIS unter .maintenance/tests/ (analog Baseline/Coded-Tests) →
+  // wird beim Upload mitcommittet. Fallback nach DATA_DIR/testplans, wenn (noch) kein Repo-Pfad da ist.
   const testplanDir = path.join(DATA_DIR, 'testplans');
   const onTestPlan = (component, text) => {
-    try { fs.mkdirSync(testplanDir, { recursive: true }); fs.writeFileSync(path.join(testplanDir, `${slugify(component.name)}.feature`), text); } catch {}
+    try {
+      if (component?.path && fs.existsSync(component.path)) {
+        const d = path.join(component.path, '.maintenance', 'tests');
+        fs.mkdirSync(d, { recursive: true });
+        fs.writeFileSync(path.join(d, `${slugify(component.name)}.feature`), text);
+      } else {
+        fs.mkdirSync(testplanDir, { recursive: true });
+        fs.writeFileSync(path.join(testplanDir, `${slugify(component.name)}.feature`), text);
+      }
+    } catch { /* Datei-Fehler nicht eskalieren */ }
   };
   // SBOM (CycloneDX) je Plugin persistent ablegen — auch headless verfügbar (T-75)
   const sbomDir = path.join(DATA_DIR, 'sbom');
