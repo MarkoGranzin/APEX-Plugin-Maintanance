@@ -318,7 +318,7 @@ function mockBadge(c){
       const pass=sc.total-(sc.failed||0);
       return ` <span class="badge" title="AI mock self-tests${sc.views?` · ${sc.views} views`:''}${sc.failed?` · ${sc.failed} red`:''}" style="color:${sc.failed?'#d29922':'#3fb950'};border-color:${sc.failed?'#d2992266':'#3fb95066'}">🧪 ${pass}/${sc.total}</span>`;
     }
-    return ` <span class="badge" title="AI-written mock" style="color:#3fb950;border-color:#3fb95066">🧪 AI</span>`;
+    return ''; // KI-Mock ohne Self-Test-Bilanz → kein separates „AI"-Badge (Bilanz erscheint nach Rebuild)
   }
   return ` <span class="badge" title="Mock build fell back to a static stub${c.mockNote?': '+esc(c.mockNote):''} — re-import/▶ to rebuild" style="color:#f85149;border-color:#f8514966">🧪 mock failed</span>`;
 }
@@ -1109,7 +1109,7 @@ async function loadLibraries(){
 }
 
 // Build-Marker: muss mit BUILD in start.js übereinstimmen. Erkennt einen veralteten Backend-Prozess.
-const APP_BUILD = '2026-06-27.46';
+const APP_BUILD = '2026-06-27.47';
 async function checkBackend(){
   const b = $('staleBanner');
   try{
