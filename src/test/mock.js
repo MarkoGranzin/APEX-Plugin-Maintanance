@@ -197,7 +197,7 @@ function scanCssFiles(dir) {
  */
 function scanPluginAttributes(dir) {
   const names = new Set();
-  const docParts = [];
+  const docs = [];
   walkRepoFiles(dir, (rel, abs) => {
     if (!/\.sql$/i.test(rel) || tooBig(abs)) return;
     let txt = ''; try { txt = fs.readFileSync(abs, 'utf8'); } catch { return; }
@@ -205,17 +205,17 @@ function scanPluginAttributes(dir) {
       const label = m[1].replace(/''/g, "'").trim();
       if (label && label.length <= 60) names.add(label);
     }
-    // Options-/Mode-Surface: Config-Defaults (JSON-Keys) + Hilfetext (erlaubte Werte je Option, z.B.
-    // „selectMode: 1 single; 2 multi; 3 hierarchical"). So sieht die KI ALLE Modes, nicht nur Attribut-Namen.
-    for (const m of txt.matchAll(/'((?:[^']|'')*)'/g)) {
-      const s = m[1].replace(/''/g, "'");
-      if (/"[\w-]+"\s*:/.test(s) || /<li>/i.test(s) || /\b(mode|option|enable|disable|true|false)\b/i.test(s)) docParts.push(s);
+    // Options-/Mode-Surface ZEILENWEISE (robust, wenig Rauschen): Config-Default-JSON-Keys ("key":),
+    // Hilfetext-Listen (<li>…</li>) und „name (type): werte". So sieht die KI ALLE Modes/Werte je Option.
+    for (const raw of txt.split(/\r?\n/)) {
+      const u = raw.replace(/''/g, "'");
+      if (!(/"[\w$-]+"\s*:/.test(u) || /<li[ >]/i.test(u) || /\([a-z][a-z ]*\)\s*:/i.test(u))) continue;
+      const s = u.replace(/<[^>]+>/g, ' ').replace(/&[a-z]+;/gi, ' ').replace(/^[\s,'|]+|[\s,'|]+$/g, '').replace(/\s+/g, ' ').trim();
+      if (s.length >= 4 && s.length <= 220) docs.push(s);
     }
   });
   const seen = new Set(); const lines = []; let len = 0;
-  for (let p of docParts) {
-    p = p.replace(/<[^>]+>/g, ' ').replace(/&[a-z]+;/gi, ' ').replace(/\s+/g, ' ').trim();
-    if (p.length < 4 || p.length > 220) continue;
+  for (const p of docs) {
     const k = p.toLowerCase(); if (seen.has(k)) continue; seen.add(k);
     if (len + p.length > 2600) break;
     lines.push(p); len += p.length;
