@@ -358,15 +358,28 @@ describe('F-28 T-97 Auto-Mock', () => {
       expect(st.ran).toBe(false);
     });
 
-    it('aiRefinePrompt: nennt die roten Checks + Ist-Werte und die Korrektur-Regel', () => {
-      const p = aiRefinePrompt('Widget', '<html></html>', [{ view: 'v1', feature: 'toggleEffect===false', detail: 'real={effect:slide}' }]);
-      expect(p).toMatch(/are RED/);
-      expect(p).toMatch(/mis-characterization/);
+    it('aiRefinePrompt: nennt die Probleme + Ist-Werte und beide Korrektur-Regeln (rot + falsch-grün)', () => {
+      const p = aiRefinePrompt('Widget', '<html></html>', [{ view: 'v1', feature: 'toggleEffect===false', detail: 'real={effect:slide}' }], { rendered: false });
+      expect(p).toMatch(/problems remain/);
       expect(p).toMatch(/v1/);
       expect(p).toMatch(/toggleEffect===false/);
       expect(p).toMatch(/real=\{effect:slide\}/);
-      expect(p).toMatch(/ACTUAL current behavior/);
-      expect(p).toMatch(/DROP that check/);
+      expect(p).toMatch(/BROKEN MOCK/);                    // Dependency/leeres Rendern fixen, nicht asserten
+      expect(p).toMatch(/Load the missing library/);
+      expect(p).toMatch(/__rendered is FALSE/);             // Render-Warnung bei rendered:false
+      expect(p).toMatch(/read the REAL current value/);     // rote Checks: Ist-Wert lesen
+      expect(p).toMatch(/DROP it/);
+    });
+
+    it('runMockSelfTests: erkennt FALSCH-GRÜN (bestandener Check beschreibt Dependency-/Leer-Render-Fehler)', async () => {
+      const launch = fakeLaunch([{ ok: true, rendered: true, views: 1, features: [
+        { view: 'a', feature: 'renders', ok: true, detail: 'styling() threw before any cell rendered: jsonpath is not defined; empty mxGraph SVG (rect=0 ellipse=0 path=0)' },
+        { view: 'a', feature: 'real check', ok: true, detail: '12 nodes' },
+      ] }]);
+      const st = await runMockSelfTests('http://x/index.html', { launch });
+      expect(st.failed.length).toBe(0);          // formal kein roter Check
+      expect(st.falseGreen.length).toBe(1);      // aber ein falsch-grüner (jsonpath/empty)
+      expect(st.problems.length).toBe(1);        // → zählt als Problem
     });
 
     it('refineMock: rot → KI bessert nach → grün (konvergiert, schreibt korrigierten Mock)', async () => {
@@ -375,7 +388,7 @@ describe('F-28 T-97 Auto-Mock', () => {
         { ok: true, rendered: true, views: 2, features: [{ view: 'v', feature: 'f', ok: true }] },                       // Runde 2 misst: grün
       ]);
       let aiCalls = 0; const written = [];
-      const ai = { kind: 'cli', complete: async (p) => { aiCalls++; expect(p).toMatch(/are RED/); return '<!DOCTYPE html><html><body><div id="mock-root">x</div><script>window.__ok=true;window.__selftested=true;</script></body></html>'; } };
+      const ai = { kind: 'cli', complete: async (p) => { aiCalls++; expect(p).toMatch(/problems remain/); return '<!DOCTYPE html><html><body><div id="mock-root">x</div><script>window.__ok=true;window.__selftested=true;</script></body></html>'; } };
       const gen = { html: '<!DOCTYPE html><html><body><div id="mock-root">x</div><script>window.__ok=true;</script></body></html>', mode: 'ai', libFiles: [], extraLibFiles: [], cssFiles: [] };
       const ref = await refineMock(gen, { ai, url: 'http://x/index.html', name: 'Widget', write: (h) => written.push(h), launch });
       expect(aiCalls).toBe(1);            // genau eine Korrektur nötig

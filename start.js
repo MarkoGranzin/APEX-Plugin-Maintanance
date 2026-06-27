@@ -54,7 +54,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const DATA_DIR = process.env.AISPP_DATA_DIR || path.join(__dirname, 'data');
 // Build-Marker: muss mit APP_BUILD in public/app.html übereinstimmen. Bei Backend-Änderungen erhöhen.
 // Das Frontend vergleicht beide und warnt, wenn der laufende Dienst veraltet ist (Neustart nötig).
-const BUILD = '2026-06-27.47';
+const BUILD = '2026-06-27.48';
 const C = { reset: '\x1b[0m', bold: '\x1b[1m', dim: '\x1b[2m', green: '\x1b[32m', yellow: '\x1b[33m', red: '\x1b[31m', cyan: '\x1b[36m' };
 const c = (col, s) => `${C[col]}${s}${C.reset}`;
 
@@ -203,7 +203,8 @@ function cmdServe(portArg) {
         });
         if (ref.after) {
           gen.html = ref.html;
-          gen.selfCheck = { views: ref.after.views, total: ref.after.total, failed: ref.after.failed.length };
+          // „failed" zählt ALLE verbliebenen Probleme (rote Checks + falsch-grüne Dependency-/Leer-Render-Fälle)
+          gen.selfCheck = { views: ref.after.views, total: ref.after.total, failed: (ref.failed || ref.after.failed || []).length };
         }
       } catch (e) { writeLog(component, `[mock-selfcheck] übersprungen: ${e?.message ?? e}`); }
       const testsDir = path.join(component.path, '.maintenance', 'tests');

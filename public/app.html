@@ -433,7 +433,7 @@ function renderTable(){
       <td>${typeBadge}</td>
       <td><span class="badge ${badgeCls}">${esc(c.formatBadge)}</span></td>
       <td><span class="dot ${dot}"></span>${esc(statusLabel(c.status))}</td>
-      <td class="small muted">${(c.libs||[]).slice(0,4).map(l=>`<span class="badge" style="${l.status==='verwundbar'?'color:var(--red)':l.status==='nicht gepflegt'?'color:var(--yellow)':''}">${esc(l.name)}@${esc(l.version)}</span>`).join(' ')||'—'}${(c.libs||[]).length>4?` <span class="muted">+${c.libs.length-4}</span>`:''}</td>
+      <td class="small muted">${(c.libs||[]).slice(0,4).map(l=>`<span class="badge" style="${l.status==='verwundbar'?'color:var(--red);border-color:#f8514966':(l.status==='nicht gepflegt'||l.status==='veraltet')?'color:var(--yellow);border-color:#d2992266':l.status==='unbekannt'?'color:var(--muted)':''}" title="${esc(libStatusLabel(l.status)||l.status||'')}">${esc(l.name)}@${esc(l.version)}</span>`).join(' ')||'—'}${(c.libs||[]).length>4?` <span class="muted">+${c.libs.length-4}</span>`:''}</td>
       <td class="small muted">${fmtDate(c.lastChange&&c.lastChange.at)}</td>
       <td class="small">${esc(c.changeSummary)}</td>
       <td><div class="actions">
@@ -1113,7 +1113,7 @@ async function loadLibraries(){
 }
 
 // Build-Marker: muss mit BUILD in start.js übereinstimmen. Erkennt einen veralteten Backend-Prozess.
-const APP_BUILD = '2026-06-27.47';
+const APP_BUILD = '2026-06-27.48';
 async function checkBackend(){
   const b = $('staleBanner');
   try{

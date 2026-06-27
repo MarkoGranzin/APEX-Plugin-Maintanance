@@ -330,7 +330,7 @@ export function collectMock(dir) {
  * Spec-Version der Mock-/Analyse-LOGIK. HOCHZÄHLEN, wenn sich Analyse-Stufe, Prompt oder Mock-Aufbau
  * fachlich ändern → bekannte Plugins werden einmalig neu untersucht, gleicher Stand bleibt gecacht.
  */
-export const MOCK_SPEC_VERSION = '2026-06-27.42';
+export const MOCK_SPEC_VERSION = '2026-06-27.48';
 
 /**
  * Fingerprint der EINGABEN, die den Mock bestimmen: Plugin-Code + deklarierter Vertrag (Options-Surface)
@@ -442,17 +442,18 @@ HARD RULE — MOCK DATA, NEVER FUNCTIONALITY:
 - You may ONLY mock/shim (a) the APEX runtime (apex.*, $v/$s) and (b) the DATA the plugin consumes. That's it.
 - You must NOT fake, stub, reimplement or "shim" ANY library or the plugin's own behavior. Load the REAL library files listed above (they are in the repo / copied next to the page) and run the REAL plugin code. A faked library (e.g. drawing a static picture instead of running the real animation) is an INVALID mock.
 - If the plugin needs a library that is genuinely NOT in the repo, load the real file from its official CDN (e.g. jsDelivr/unpkg) — do NOT reimplement it.
-- LOAD PEER / TRANSITIVE DEPENDENCIES TOO, in the correct order: a library often needs ANOTHER library that is not vendored in this repo. A "$(...).somePlugin is not a function" or an explicit "X requires Y" error means a dependency is missing — add it from its official CDN. Common cases: a jQuery plugin needs jQuery first; jQuery-UI-based widgets (and Fancytree) need jQuery UI; a plugin may need its theme/widget CSS. Inspect the library and its error output and load EVERY dependency it requires so the real plugin actually initializes.
+- LOAD PEER / TRANSITIVE DEPENDENCIES TOO, in the correct order: a library often needs ANOTHER library that is not vendored in this repo. A "$(...).somePlugin is not a function", a bare "X is not defined" / "X is not a function" (a required global/library is missing — e.g. a JSONPath/parser/util lib the plugin calls), or an explicit "X requires Y" error ALL mean a dependency is missing — load it: FIRST from the library list above (it is very likely already there and just needs a <script src>, loaded BEFORE the plugin code that uses it), otherwise from its official CDN. Common cases: a jQuery plugin needs jQuery first; jQuery-UI-based widgets (and Fancytree) need jQuery UI; an mxGraph/flow plugin may need a JSONPath lib; a plugin may need its theme/widget CSS. A "… is not defined" error is NEVER the plugin's characterized behavior — it is the mock failing to load a dependency. Inspect the error output and load EVERY dependency so the real plugin actually initializes and renders.
 - The real library must actually DO its work: animations must really animate, interactions must really react. Mocking data is required; mocking functionality is forbidden.
 
 Requirements for the page:
 - STUDY THE DATA FLOW in the source: how does the plugin obtain data (apex.server.process / apex.jQuery.ajax / item values via $v/apex.item / plugin attributes/options / jsonpath over a JSON string)? What output does it build (e.g. an mxGraph flow chart, an SVG, a list)? Infer the exact data SHAPE it expects.
-- PROVIDE REALISTIC SAMPLE DATA matching that shape so the plugin renders real content (e.g. a flow chart with several nodes + edges, or a kanban board with a few realistic cards per column). Use PLAUSIBLE, HUMAN-READABLE labels — real-ish titles/names/values (e.g. "Design login screen", "In Review", "Anna M.") — NEVER random gibberish strings. Make the apex shim return it: apex.server.process(name, opts) and apex.jQuery.ajax resolve/callback with a plausible response; set item values ($v/apex.item) and pass plausible plugin attributes/options to the init call. Embed the sample data inline.
+- PROVIDE REALISTIC SAMPLE DATA matching that shape so the plugin renders real content (e.g. a flow chart with several nodes + edges, or a kanban board with a few realistic cards per column). Use PLAUSIBLE, HUMAN-READABLE labels — real-ish titles/names/values (e.g. "Design login screen", "In Review", "Anna M.") — NEVER random gibberish AND NEVER joke/placeholder/meta strings (no "trustworthy text", "lorem", "test123", "foo/bar", or comments about the mock itself). The data must look like genuine domain content a real user would see. Make the apex shim return it: apex.server.process(name, opts) and apex.jQuery.ajax resolve/callback with a plausible response; set item values ($v/apex.item) and pass plausible plugin attributes/options to the init call. Embed the sample data inline.
 - Provide a realistic apex.* shim covering the apex.* calls above (apex.item/$v/$s/apex.server.process/apex.jQuery/apex.message/apex.debug/apex.region/apex.util/etc.) so the plugin does not crash.
 - Create the DOM the plugin needs: a visible <div id="mock-root"> mount (give it a real size, e.g. width:900px;height:560px) plus elements for the detected selectors. The plugin's rendered output MUST appear inside #mock-root.
 - VISUAL QUALITY MATTERS — and THE PLUGIN MUST LOOK RIGHT BECAUSE ITS REAL CSS IS LOADED — NOT BECAUSE YOU PATCHED IT: load EVERY real CSS file listed above via <link> with the EXACT paths (a wrong path → 404 → broken/unstyled). A generic CSS reset (box-sizing + margins, APEX-like) is auto-injected before your stylesheets — rely on it, don't re-add one. Never hand-write/approximate the plugin's own classes to "fix" the look (that fakes it). Your ONLY layout job: give #mock-root a sensible size and the page enough height (it may scroll) so the whole plugin is visible. Load libs + plugin files via <script src> (exact paths, not inline); then init the plugin the way APEX would.
-- Wrap initialization in try/catch; collect errors in window.__mockErrors (array); add window.onerror to push to it. Set window.__ok = (window.__mockErrors.length === 0). Also set window.__rendered = (document.querySelector('#mock-root') has non-trivial child content, i.e. the plugin produced output).
-- CHARACTERIZE THE PLUGIN AS IT IS — NOT AS IT SHOULD BE. This page is the "works EXACTLY as before" spec: after the libraries are updated the plugin must do the SAME — no more, no less. Therefore EVERY self-test must describe the CURRENT behavior of the unmodified plugin and MUST PASS right now. Do NOT invent aspirational/robustness checks the current plugin does not already satisfy (e.g. "handles missing/undefined input gracefully", error-handling or edge cases it was never built for). If a check would be RED against the current unmodified plugin, it is NOT a valid characterization — drop it, or if the behavior matters record the plugin's ACTUAL current result as the expected value (e.g. if it currently throws on bad input, that IS the characterized behavior). window.__ok MUST be true for the unmodified plugin; a failing self-test here means you mis-characterized, not that the plugin is broken.
+- Wrap initialization in try/catch; collect errors in window.__mockErrors (array); add window.onerror to push to it. Set window.__ok = (window.__mockErrors.length === 0). Set window.__rendered to true ONLY if the plugin produced its REAL output — i.e. the actual visual artifact has substance (an mxGraph/SVG with real shapes: rect/ellipse/path count > 0; a tree/list/board with real nodes/cards; etc.), NOT merely that #mock-root has some child or harness text. An empty graph (0 shapes) / empty list = __rendered MUST be false.
+- THE PLUGIN MUST ACTUALLY RENDER — an empty/error render is a BROKEN MOCK, never a valid characterization. If the plugin produced no real output (empty SVG/graph/list, or it threw because a dependency/global was undefined), DO NOT write self-tests that assert that empty/error state as "green". Fix the mock first: load the missing library (see PEER/TRANSITIVE rule above), feed the correct data shape, and call the plugin the way APEX does — until the real output appears. Only THEN characterize the (working) behavior. A mock where every view is blank is wrong even if window.__ok is true.
+- CHARACTERIZE THE PLUGIN AS IT IS — NOT AS IT SHOULD BE. This page is the "works EXACTLY as before" spec: after the libraries are updated the plugin must do the SAME — no more, no less. Therefore EVERY self-test must describe the CURRENT behavior of the unmodified plugin and MUST PASS right now. Do NOT invent aspirational/robustness checks the current plugin does not already satisfy (e.g. "handles missing/undefined input gracefully", error-handling or edge cases it was never built for). If a check would be RED against the current unmodified plugin, it is NOT a valid characterization — drop it, or if the behavior matters record the plugin's ACTUAL current result as the expected value. (This applies ONLY to the plugin's genuine domain logic — e.g. it deliberately rejects malformed user input. It does NOT apply to mock-setup failures: a "… is not defined"/missing-dependency error, an empty render, or a crash because you didn't load a library or feed data is a BROKEN MOCK to fix, NEVER a "characterized" behavior to assert green.) window.__ok MUST be true for the unmodified plugin; a failing self-test here means you mis-characterized, not that the plugin is broken.
 - NEVER ASSERT A GUESSED CONSTANT FOR A VALUE/STATE/PROPERTY. Do not assume what an option resolves to, what a class/icon will be, how many nodes stay in the DOM, or what an internal state equals — READ the plugin's ACTUAL value at runtime (after init / after the action) and assert THAT exact observed value. The check exists to detect a CHANGE after migration, so derive its expected value from the live plugin, not from your expectation. Concretely: read the actual value from the real plugin/DOM/options now into a variable, then assert it equals that just-observed value (or, for "did X change" checks, snapshot before, act, compare after). If your hardcoded guess differs from what the unmodified plugin produces, the guess is wrong — use the observed value. A red here is a mis-read, never a plugin defect.
 - PLAN MULTIPLE VIEWS / TEST SCENARIOS — one configuration is NOT enough; the default leaves most behavior unprotected. If a DISCOVERED VIEW PLAN is given above, implement EXACTLY those views (they were derived from this plugin's analysis). Otherwise go through the OPTION/MODE SURFACE + source SYSTEMATICALLY and plan a view for EVERY mode/value the plugin supports — EXHAUSTIVELY, not a sample: each discrete value of every multi-valued option, each boolean option on AND off where it changes behavior, plus the data states (static/lazy, filtered/unfiltered, cached, empty, error). Take the concrete modes/values from THIS plugin's own contract+source — never from generic examples, never invent capabilities it lacks, never skip ones it has. Render the plugin SEPARATELY per view (own mount + that view's config/data) so all are visible, and self-test EACH view independently. Expose the plan as window.__views = array of { view, config }.
 - FIRST UNDERSTAND the plugin from the source: what it is, EVERY feature it offers, and how each one works. THEN make this page a SELF-TEST HARNESS that characterizes those features (ACROSS ALL planned views) as the spec a future migration must preserve. For EACH feature IN EACH view, run a check that ASSERTS its REAL EFFECT (not merely that code ran), e.g.:
@@ -579,9 +580,18 @@ export async function runMockSelfTests(url, deps = {}) {
       rendered: window.__rendered === true,
       views: Array.isArray(window.__views) ? window.__views.length : 0,
       features: Array.isArray(window.__features) ? window.__features : [],
+      errors: Array.isArray(window.__mockErrors) ? window.__mockErrors.map(String) : [],
     }));
-    const failed = (data.features || []).filter((f) => f && f.ok === false).map((f) => ({ view: f.view, feature: f.feature, detail: f.detail }));
-    return { ran: true, ok: data.ok, rendered: data.rendered, views: data.views, total: (data.features || []).length, failed };
+    const feats = data.features || [];
+    const failed = feats.filter((f) => f && f.ok === false).map((f) => ({ view: f.view, feature: f.feature, detail: f.detail }));
+    // FALSCH-GRÜN aufspüren: ein „bestandener" Check, der in Wirklichkeit einen Dependency-/Ladefehler ODER
+    // ein leeres Rendern beschreibt, ist KEINE gültige Charakterisierung — er muss korrigiert werden.
+    const BROKEN = /is not defined|is not a function|is undefined|cannot read|threw before|empty (?:mx)?graph|empty svg|rect=0 ellipse=0 path=0|0 (?:nodes|cards|rows|shapes|cells)\b|nothing rendered|no .* rendered/i;
+    const falseGreen = feats.filter((f) => f && f.ok !== false && BROKEN.test(String(f.detail || ''))).map((f) => ({ view: f.view, feature: f.feature, detail: f.detail }));
+    const errBroken = (data.errors || []).filter((e) => /is not defined|is not a function|cannot read/i.test(e));
+    const problems = [...failed, ...falseGreen];
+    if (errBroken.length) problems.push({ view: 'global', feature: 'uncaught dependency error — a required library/global is missing, load it', detail: errBroken.slice(0, 3).join(' | ') });
+    return { ran: true, ok: data.ok, rendered: data.rendered, views: data.views, total: feats.length, failed, errors: data.errors, falseGreen, problems };
   } catch (e) {
     return { ran: false, reason: String(e?.message ?? e) };
   } finally {
@@ -589,16 +599,23 @@ export async function runMockSelfTests(url, deps = {}) {
   }
 }
 
-/** Prompt der KORREKTUR-Stufe: rote Self-Tests am unveränderten Plugin = Fehl-Charakterisierungen → fixen. */
-export function aiRefinePrompt(name, html, failures) {
-  const list = (failures || []).map((f, i) => `${i + 1}. [view: ${f.view}] ${f.feature}\n   observed: ${String(f.detail || '').slice(0, 200)}`).join('\n');
-  return `You wrote this self-testing characterization mock for the Oracle APEX plugin "${name}". Running it against the UNMODIFIED plugin, these self-tests are RED:
-${list}
+/** Prompt der KORREKTUR-Stufe: rote Checks UND falsch-grüne (Dependency-/Leer-Render-)Probleme → fixen. */
+export function aiRefinePrompt(name, html, problems, opts = {}) {
+  const list = (problems || []).map((f, i) => `${i + 1}. [view: ${f.view}] ${f.feature}\n   observed: ${String(f.detail || '').slice(0, 220)}`).join('\n');
+  const renderWarn = opts.rendered === false ? '\nIMPORTANT: window.__rendered is FALSE — the plugin currently produces NO real output. The mock is broken (a missing library/global or wrong data), not the plugin.' : '';
+  return `You wrote this self-testing characterization mock for the Oracle APEX plugin "${name}". Running it against the UNMODIFIED plugin, these problems remain:
+${list}${renderWarn}
 
-A red self-test on the UNMODIFIED plugin is ALWAYS a mis-characterization (a wrong/guessed expected value), NEVER a plugin defect — this page must be 100% green now (it is the "works exactly as before" baseline). Fix EACH failing check so it reflects the plugin's ACTUAL current behavior:
-- Read the REAL current value/state/property from the live plugin/DOM/options and assert THAT exact observed value (do not assert a guessed constant). The "observed" note above shows what the plugin actually produced — make the assertion match reality.
-- If a check tests something the plugin genuinely does not do (an invalid/aspirational check), DROP that check entirely rather than leaving it red.
-- Keep EVERYTHING else identical: all the existing views, the real <script>/<link> tags and paths, the sample data, the apex shim, the non-destructive cleanup, and the window.__ok/__rendered/__views/__features/__selftested contract.
+This page is the "works exactly as before" baseline: the REAL plugin must actually run and render, and every self-test must be green by reflecting that real behavior. Two kinds of problems and how to fix each:
+
+A) A "… is not defined" / "is not a function" / missing-dependency error, an empty render (empty mxGraph/SVG with 0 shapes, empty list/board), or "threw before … rendered": this is a BROKEN MOCK, not characterized behavior. FIX the mock — do NOT assert the error/emptiness as green:
+   - Load the missing library/global with a <script src> BEFORE the plugin code. It is most likely already in the page's lib list (e.g. a JSONPath/parser/util lib) — just add the script tag in the right order; otherwise load it from an official CDN.
+   - Feed the correct data shape and call the plugin the way APEX does, so the real visual output appears (the SVG/graph has real shapes, the list/board has real items). Use realistic, human-readable data — never joke/placeholder strings.
+   - Set window.__rendered true ONLY when the real output is actually present.
+
+B) A genuinely RED check (wrong expected value): read the REAL current value/state from the live plugin/DOM/options and assert THAT exact observed value (never a guessed constant). If a check tests something the plugin does not do, DROP it.
+
+Keep EVERYTHING else identical: all existing views, the real <script>/<link> tags and paths, the apex shim, the non-destructive cleanup, and the window.__ok/__rendered/__views/__features/__selftested contract.
 
 Return ONLY the complete corrected HTML document, starting at <!DOCTYPE html> and ending at </html>. No prose, no markdown fences.`;
 }
@@ -611,8 +628,9 @@ Return ONLY the complete corrected HTML document, starting at <!DOCTYPE html> an
  */
 export async function refineMock(gen, deps = {}) {
   const { ai, url, name, write, launch, timeoutMs } = deps;
-  const maxRounds = deps.maxRounds ?? 2;
+  const maxRounds = deps.maxRounds ?? 3;
   const log = deps.log || (() => {});
+  const probsOf = (st) => (st.problems || st.failed || []); // rot + falsch-grün + Dependency-Fehler
   let html = gen.html;
   let first = null;
   let last = null;
@@ -622,20 +640,21 @@ export async function refineMock(gen, deps = {}) {
     if (!st.ran) { log(`Self-Test nicht ausführbar (${st.reason}) — Korrektur übersprungen`); break; }
     if (first === null) first = st;
     last = st;
-    if (!st.failed.length) { log(`Self-Korrektur: alle ${st.total} Checks grün (${st.views} Sichten)`); break; }
-    if (round > maxRounds) break;
-    log(`Self-Korrektur Runde ${round}: ${st.failed.length}/${st.total} rot → KI bessert nach`);
+    const probs = probsOf(st);
+    const extra = (st.falseGreen?.length || 0) || (st.rendered === false ? 1 : 0);
+    if (!probs.length && st.rendered !== false) { log(`Self-Korrektur: alle ${st.total} Checks grün, Plugin rendert echt (${st.views} Sichten)`); break; }
+    const note = st.falseGreen?.length ? ` (davon ${st.falseGreen.length} falsch-grün: Dependency/leeres Rendern)` : (st.rendered === false ? ' (Plugin rendert NICHTS — Dependency/Daten fehlen)' : '');
+    log(`Self-Korrektur Runde ${round}: ${probs.length || extra} Problem(e)${note} → KI bessert nach`);
     let raw;
-    try { raw = String(await ai.complete(aiRefinePrompt(name, html, st.failed), {})); }
+    try { raw = String(await ai.complete(aiRefinePrompt(name, html, probs.length ? probs : [{ view: 'global', feature: 'plugin renders no real output', detail: 'load missing libs + feed data so the plugin truly renders' }], { rendered: st.rendered }), {})); }
     catch (e) { log(`Korrektur-KI-Fehler: ${e?.message ?? e}`); break; }
     const fin = finalizeAiHtml(raw, gen);
     if (fin.error) { log(`Korrektur verworfen: ${fin.error}`); break; }
-    const prevFailed = st.failed.length;
+    const prev = probs.length;
     html = fin.html; write(html);
-    // nach dem Schreiben in der nächsten Iteration neu messen; wenn die letzte Runde war, einmal final messen
-    if (round === maxRounds) { const fst = await runMockSelfTests(url, { launch, timeoutMs }); if (fst.ran) last = fst; if (fst.ran && fst.failed.length >= prevFailed) log('Self-Korrektur: keine weitere Besserung'); }
+    if (round === maxRounds) { const fst = await runMockSelfTests(url, { launch, timeoutMs }); if (fst.ran) { last = fst; if (probsOf(fst).length >= prev) log('Self-Korrektur: keine weitere Besserung'); } }
   }
-  return { rounds: (first ? 1 : 0), before: first, after: last, html, failed: last?.failed || [] };
+  return { rounds: (first ? 1 : 0), before: first, after: last, html, failed: last ? probsOf(last) : [] };
 }
 
 const slug = (s) => String(s).toLowerCase().replace(/[^a-z0-9.-]+/g, '-').replace(/^-|-$/g, '') || 'plugin';
