@@ -54,7 +54,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const DATA_DIR = process.env.AISPP_DATA_DIR || path.join(__dirname, 'data');
 // Build-Marker: muss mit APP_BUILD in public/app.html übereinstimmen. Bei Backend-Änderungen erhöhen.
 // Das Frontend vergleicht beide und warnt, wenn der laufende Dienst veraltet ist (Neustart nötig).
-const BUILD = '2026-06-27.48';
+const BUILD = '2026-06-27.49';
 const C = { reset: '\x1b[0m', bold: '\x1b[1m', dim: '\x1b[2m', green: '\x1b[32m', yellow: '\x1b[33m', red: '\x1b[31m', cyan: '\x1b[36m' };
 const c = (col, s) => `${C[col]}${s}${C.reset}`;
 
@@ -181,7 +181,7 @@ function cmdServe(portArg) {
       const fp = mockInputFingerprint(component.path);
       let fpFile = null;
       try { fpFile = JSON.parse(fs.readFileSync(fpPath, 'utf8')); } catch { fpFile = null; }
-      const known = exists && fp && fpFile?.fp === fp;
+      const known = exists && fp && fpFile?.fp === fp && fpFile?.mode === 'ai'; // nur ECHTE KI-Mocks gelten als bekannt; static-Fallbacks immer neu versuchen
       if (exists && known && !upgrade) {
         if (opts.force) writeLog(component, '[mock] bekannte Version (Fingerprint match) — KI-Untersuchung übersprungen, eingecheckter Mock wiederverwendet');
         // Self-Test-Bilanz + Modus aus der Fingerprint-Datei wiederherstellen (Badge/Anzeige stimmt auch beim Cache-Treffer).
@@ -211,7 +211,9 @@ function cmdServe(portArg) {
       fs.mkdirSync(testsDir, { recursive: true });
       fs.writeFileSync(path.join(testsDir, gen.spec.name), gen.spec.content);
       // Fingerprint neben dem (eingecheckten) Mock ablegen → künftige Builds bekannter Versionen sparen die KI.
-      try { if (fp) fs.writeFileSync(fpPath, JSON.stringify({ fp, spec: MOCK_SPEC_VERSION, mode: gen.mode, views: gen.selfCheck?.views ?? null, total: gen.selfCheck?.total ?? null, failed: gen.selfCheck?.failed ?? null }, null, 2)); } catch { /* best effort */ }
+      // Fingerprint NUR für echte KI-Mocks schreiben — einen static-Fallback (KI nicht verfügbar) nicht cachen,
+      // sonst bliebe ein Fehlschlag „bekannt". So wird bei verfügbarer KI automatisch neu gebaut.
+      try { if (fp && gen.mode === 'ai') fs.writeFileSync(fpPath, JSON.stringify({ fp, spec: MOCK_SPEC_VERSION, mode: gen.mode, views: gen.selfCheck?.views ?? null, total: gen.selfCheck?.total ?? null, failed: gen.selfCheck?.failed ?? null }, null, 2)); else if (gen.mode !== 'ai') { try { fs.rmSync(fpPath, { force: true }); } catch { /* egal */ } } } catch { /* best effort */ }
       const cur = store.get(component.id) || {};
       const patch = { mockUrl, mockMode: gen.mode, mockNote: gen.fallbackReason || null, mockFingerprint: fp || null, mockSelfCheck: gen.selfCheck || null, codedTests: [...(cur.codedTests || []).filter((t) => t.name !== gen.spec.name), gen.spec] };
       if (!cur.uiTestUrl) patch.uiTestUrl = mockUrl; // Default-Ziel, falls der Nutzer keine eigene URL gesetzt hat
