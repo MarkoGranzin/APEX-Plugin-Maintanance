@@ -278,6 +278,19 @@ function libWarnBadge(w){
 function rebuiltBadge(c){
   return c && c.rebuilt ? ` <span class="badge" title="Rebuilt on ${esc(c.rebuiltTo||'latest')} — verified as before" style="color:#3fb950;border-color:#3fb95066">🚀 rebuilt</span>` : '';
 }
+// Mock-Status sofort in der Liste sichtbar: grün = KI-Mock + Self-Test-Bilanz, rot = auf statischen Stub gefallen.
+function mockBadge(c){
+  if(!c || !c.mockUrl) return '';
+  if(c.mockMode==='ai'){
+    const sc=c.mockSelfCheck;
+    if(sc && typeof sc.total==='number'){
+      const pass=sc.total-(sc.failed||0);
+      return ` <span class="badge" title="AI mock self-tests${sc.views?` · ${sc.views} views`:''}${sc.failed?` · ${sc.failed} red`:''}" style="color:${sc.failed?'#d29922':'#3fb950'};border-color:${sc.failed?'#d2992266':'#3fb95066'}">🧪 ${pass}/${sc.total}</span>`;
+    }
+    return ` <span class="badge" title="AI-written mock" style="color:#3fb950;border-color:#3fb95066">🧪 AI</span>`;
+  }
+  return ` <span class="badge" title="Mock build fell back to a static stub${c.mockNote?': '+esc(c.mockNote):''} — re-import/▶ to rebuild" style="color:#f85149;border-color:#f8514966">🧪 mock failed</span>`;
+}
 
 let current = null;
 
@@ -287,10 +300,12 @@ let current = null;
 const BUSY = new Set();
 const SRUN = new Set();
 function rowBusy(id){ return BUSY.has(id) || SRUN.has(id); }
+const SSTEP = new Map(); // serverseitiger aktueller Schritt je laufender Komponente (F-29+)
 function applySpin(id){
   const on = rowBusy(id);
   document.querySelectorAll(`.spin[data-cid="${id}"]`).forEach(s=>s.hidden=!on);
-  document.querySelectorAll(`.runlbl[data-cid="${id}"]`).forEach(s=>s.hidden=!on);
+  const step = SSTEP.get(id);
+  document.querySelectorAll(`.runlbl[data-cid="${id}"]`).forEach(s=>{ s.hidden=!on; s.textContent = on ? ` · ${step||'running…'}` : ''; });
   const d=$('dSpin'); if(d && current && current.id===id) d.hidden=!on;
 }
 function setBusy(id, on){ if(on) BUSY.add(id); else BUSY.delete(id); applySpin(id); }
@@ -301,6 +316,7 @@ async function pollRunning(){
     const next = new Set(r.running||[]);
     const touched = new Set([...next, ...SRUN]);
     SRUN.clear(); next.forEach(id=>SRUN.add(id));
+    SSTEP.clear(); for(const [id,st] of Object.entries(r.steps||{})) SSTEP.set(id, st);
     touched.forEach(applySpin);
   }catch{ /* offline → ignorieren */ }
 }
@@ -321,7 +337,7 @@ async function load(){
     const badgeCls = c.formatBadge==='APEX-SQL-Export'?'export':'';
     const typeBadge = c.type==='template_component'?'<span class="badge tc">Template Component</span>':'<span class="badge">Plugin</span>';
     tr.innerHTML = `
-      <td><span class="spin" data-cid="${c.id}"${rowBusy(c.id)?'':' hidden'}></span><b>${esc(c.name)}</b>${libWarnBadge(c.libWarning)}${rebuiltBadge(c)}<span class="runlbl muted small" data-cid="${c.id}"${rowBusy(c.id)?'':' hidden'}> · running…</span></td>
+      <td><span class="spin" data-cid="${c.id}"${rowBusy(c.id)?'':' hidden'}></span><b>${esc(c.name)}</b>${libWarnBadge(c.libWarning)}${rebuiltBadge(c)}${mockBadge(c)}<span class="runlbl muted small" data-cid="${c.id}"${rowBusy(c.id)?'':' hidden'}> · running…</span></td>
       <td class="small muted">${esc(c.repo||'—')}</td>
       <td>${typeBadge}</td>
       <td><span class="badge ${badgeCls}">${esc(c.formatBadge)}</span></td>
@@ -998,7 +1014,7 @@ async function loadLibraries(){
 }
 
 // Build-Marker: muss mit BUILD in start.js übereinstimmen. Erkennt einen veralteten Backend-Prozess.
-const APP_BUILD = '2026-06-27.43';
+const APP_BUILD = '2026-06-27.44';
 async function checkBackend(){
   const b = $('staleBanner');
   try{

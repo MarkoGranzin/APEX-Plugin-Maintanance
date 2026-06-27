@@ -295,6 +295,19 @@ describe('F-28 T-97 Auto-Mock', () => {
       expect(gen.fallbackReason).toMatch(/not an HTML|missing|empty/i);
     });
 
+    it('generateAiMock: transienter KI-Fehlschlag (kein HTML) wird EINMAL wiederholt, dann grün (kein stiller Fallback)', async () => {
+      let n = 0;
+      const ai = { kind: 'cli', complete: async (prompt) => {
+        // Analyse-Call (JSON erwartet) zuerst — der zählt nicht als Mock-Versuch
+        if (/DISCOVER, from THIS plugin itself/.test(prompt)) return '[]';
+        n++;
+        return n === 1 ? 'sorry, no html this time' : '<!DOCTYPE html><html><body><div id="mock-root">x</div><script>window.__ok=true;</script></body></html>';
+      } };
+      const gen = await generateAiMock(dir, { ai, name: 'Widget' });
+      expect(gen.mode).toBe('ai');     // Retry hat gerettet
+      expect(n).toBe(2);               // genau ein Wiederholversuch
+    });
+
     it('generateAiMock: KI-Fehler → Fallback meldet den Fehler', async () => {
       const gen = await generateAiMock(dir, { ai: { kind: 'cli', complete: async () => { throw new Error('spawn claude ENOENT'); } }, name: 'Widget' });
       expect(gen.mode).toBe('static');

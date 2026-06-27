@@ -35,6 +35,8 @@ export function overviewViewModel(store) {
     rebuiltTo: c.rebuiltTo ?? null,
     mockUrl: c.mockUrl ?? null,   // F-29: „Open mock"-Button direkt in der Liste
     mockMode: c.mockMode ?? null,
+    mockNote: c.mockNote ?? null,        // Fallback-Grund sichtbar machen (statt still „static")
+    mockSelfCheck: c.mockSelfCheck ?? null, // Self-Test-Ergebnis (views/total/failed) fürs Listen-Badge
     notesCount: c.notes.length,
     reviewsCount: c.reviews.length,
   }));

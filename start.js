@@ -54,7 +54,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const DATA_DIR = process.env.AISPP_DATA_DIR || path.join(__dirname, 'data');
 // Build-Marker: muss mit APP_BUILD in public/app.html übereinstimmen. Bei Backend-Änderungen erhöhen.
 // Das Frontend vergleicht beide und warnt, wenn der laufende Dienst veraltet ist (Neustart nötig).
-const BUILD = '2026-06-27.43';
+const BUILD = '2026-06-27.44';
 const C = { reset: '\x1b[0m', bold: '\x1b[1m', dim: '\x1b[2m', green: '\x1b[32m', yellow: '\x1b[33m', red: '\x1b[31m', cyan: '\x1b[36m' };
 const c = (col, s) => `${C[col]}${s}${C.reset}`;
 
@@ -156,6 +156,9 @@ function cmdServe(portArg) {
   // F-29: laufende Operationen je Komponente serverseitig merken (clone/maintain/migrate/…),
   // damit die GUI auch nach Reload / bei woanders gestartetem Lauf „läuft gerade" anzeigen kann.
   const RUNNING = new Set();
+  // F-29+: aktueller Schritt je laufender Komponente (z.B. „Mock: Analyse…") → GUI zeigt, WAS gerade passiert.
+  const STEP = new Map();
+  const setStep = (id, step) => { if (id) STEP.set(id, step); };
   // Auto-Mock je Plugin (F-28/T-97/T-99): self-contained Testseite + generierte Tests INS REPO schreiben
   // (unter <repo>/.maintenance/), damit sie beim Upload mitcommittet werden; von dort statisch ausliefern.
   // KI-first (T-101): die KI schreibt aus der Analyse einen plugin-spezifischen Mock; ohne KI Fallback
@@ -183,15 +186,17 @@ function cmdServe(portArg) {
         store.update(component.id, { mockUrl, mockFingerprint: fp, ...(cur0.uiTestUrl ? {} : { uiTestUrl: mockUrl }) });
         return mockUrl;
       }
-      const gen = await generateAiMock(component.path, { ai, name: component.name }); // KI schreibt; Fallback statisch
+      setStep(component.id, 'Mock: Plugin wird untersucht…');
+      const gen = await generateAiMock(component.path, { ai, name: component.name, onStep: (s) => setStep(component.id, `Mock: ${s}`) }); // KI schreibt; Fallback statisch
       writeMock(mockDir, component.path, gen); // committet (git add .)
       // Selbstkorrektur-Schleife: Self-Tests headless laufen lassen; rote (Fehl-Charakterisierungen) lässt die KI
       // generisch nachbessern (Ist-Werte statt geratener Konstanten) → bis grün. Für JEDES Plugin, ohne Handarbeit.
       try {
+        setStep(component.id, 'Mock: Self-Tests prüfen…');
         const ref = await refineMock(gen, {
           ai, url: mockUrl, name: component.name,
           write: (html) => writeMock(mockDir, component.path, { ...gen, html }),
-          log: (m) => writeLog(component, `[mock-selfcheck] ${m}`),
+          log: (m) => { writeLog(component, `[mock-selfcheck] ${m}`); setStep(component.id, `Mock: ${m}`); },
         });
         if (ref.after) {
           gen.html = ref.html;
@@ -362,7 +367,7 @@ function cmdServe(portArg) {
       RUNNING.add(id);
       try { return await fn(c, id); }
       catch (err) { return json(res, { error: String(err?.message ?? err) }, 500); }
-      finally { RUNNING.delete(id); }
+      finally { RUNNING.delete(id); STEP.delete(id); }
     };
 
     // Web-GUI + Doku
@@ -388,7 +393,7 @@ function cmdServe(portArg) {
 
     // Health/Build-Marker: das Frontend vergleicht ihn mit seinem APP_BUILD und warnt bei Abweichung
     // F-29: welche Komponenten gerade einen langen Lauf haben (clone/maintain/migrate/…) → GUI-Spinner
-    if (p === '/api/running') return json(res, { running: [...RUNNING] });
+    if (p === '/api/running') return json(res, { running: [...RUNNING], steps: Object.fromEntries(STEP) });
 
     if (p === '/api/health') return json(res, { ok: true, build: BUILD, hasPlaywright: fs.existsSync(path.join(__dirname, 'node_modules', '@playwright', 'test')), aiReady: resolveAiBackend(settings, secretStore).kind !== 'stub', features: ['vendored-libs', 'sbom', 'deep-tests', 'maintain', 'web-libcheck', 'ui-tests', 'pr-upload', 'lib-update', 'auto-repair', 'characterization', 'redev', 'licenses'] });
 

@@ -500,16 +500,28 @@ export async function generateAiMock(dir, deps = {}) {
   const name = deps.name || 'plugin';
   const c = collectMock(dir);
   const ai = deps.ai;
+  const onStep = typeof deps.onStep === 'function' ? deps.onStep : () => {};
   const fallback = (reason) => ({ ...generateMock(dir, { name }), fallbackReason: reason });
   if (!ai || ai.kind === 'stub' || typeof ai.complete !== 'function') return fallback('no AI backend (Settings → Test connection)');
   // Analyse-Stufe zuerst: die KI leitet die zu testenden Sichten/Modes AUS DEM PLUGIN ab (kein Beispiel-Bias).
+  onStep('Analyse (Sichten/Modes aus dem Plugin ableiten)');
   try { c.viewPlan = await analyzeViews(deps, name, c); } catch { c.viewPlan = []; }
-  let raw = '';
-  try { raw = String(await ai.complete(aiMockPrompt(name, c), {})); }
-  catch (e) { return fallback('AI error: ' + (e?.message ?? e)); }
-  const fin = finalizeAiHtml(raw, c);
-  if (fin.error) return fallback(fin.error);
-  return { html: fin.html, spec: { name: `${slug(name)}.ui.spec.js`, content: buildMockSpec(name) }, libFiles: c.libFiles, extraLibFiles: c.extraLibFiles || [], cssFiles: c.cssFiles || [], pluginFiles: c.pluginFiles, selectors: c.selectors, entryPoints: c.entryPoints, mode: 'ai' };
+  // Mock generieren; ein transienter KI-Fehlschlag (kein HTML/leer) wird EINMAL wiederholt, statt still
+  // in den statischen Fallback zu kippen. Erst nach dem Retry geben wir den (sichtbaren) Fallback-Grund zurück.
+  const attempts = Math.max(1, deps.attempts ?? 2);
+  let lastErr = 'AI returned no usable HTML';
+  for (let i = 1; i <= attempts; i++) {
+    onStep(attempts > 1 ? `Mock generieren (Versuch ${i}/${attempts})` : 'Mock generieren');
+    let raw = '';
+    try { raw = String(await ai.complete(aiMockPrompt(name, c), {})); }
+    catch (e) { lastErr = 'AI error: ' + (e?.message ?? e); continue; }
+    const fin = finalizeAiHtml(raw, c);
+    if (!fin.error) {
+      return { html: fin.html, spec: { name: `${slug(name)}.ui.spec.js`, content: buildMockSpec(name) }, libFiles: c.libFiles, extraLibFiles: c.extraLibFiles || [], cssFiles: c.cssFiles || [], pluginFiles: c.pluginFiles, selectors: c.selectors, entryPoints: c.entryPoints, mode: 'ai', viewPlan: c.viewPlan || [] };
+    }
+    lastErr = fin.error;
+  }
+  return fallback(lastErr);
 }
 
 /**
