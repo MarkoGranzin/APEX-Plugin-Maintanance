@@ -467,9 +467,10 @@ async function load(){
 }
 
 async function openDetail(id){
-  current = await api('GET','/api/components/'+id);
+  let c; try{ c = await api('GET','/api/components/'+id); }
+  catch(e){ toast('Detail nicht ladbar — läuft der Dienst? ('+(e.message||e)+')'); return; }
+  current = c;
   $('dNameTxt').textContent = current.name;
-  const c = current;
   const libDot = c.libWarning ? ` <span style="color:${c.libWarning.vulnerable?'#f85149':'#d29922'}">●</span>` : '';
   $('dBody').innerHTML = `
     <div class="hero">
