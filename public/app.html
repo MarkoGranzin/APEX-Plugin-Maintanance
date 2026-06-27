@@ -346,11 +346,15 @@ async function pollRunning(){
     const r = await api('GET','/api/running');
     const next = new Set(r.running||[]);
     const touched = new Set([...next, ...SRUN]);
+    // Hat sich die Lauf-Menge geändert (ein Lauf startete/endete)? → Liste + Header frisch laden,
+    // damit Status/Badges/Kennzahlen live mitlaufen (z.B. wenn ein Plugin fertig gepflegt ist).
+    let changed = next.size !== SRUN.size; if(!changed){ for(const id of next){ if(!SRUN.has(id)){ changed=true; break; } } }
     SRUN.clear(); next.forEach(id=>SRUN.add(id));
     SSTEP.clear(); for(const [id,st] of Object.entries(r.steps||{})) SSTEP.set(id, st);
     touched.forEach(applySpin);
     lastRunInfo = { lastScheduledRunAt: r.lastScheduledRunAt, scheduledRunning: r.scheduledRunning };
     renderOverview(); // „letzter Lauf"/running im Header aktuell halten
+    if(changed) load(); // ein Lauf begann/endete → Daten neu holen (Header zählt neu, Badges aktuell)
   }catch{ /* offline → ignorieren */ }
 }
 // Datei-Download aus In-Memory-Inhalt (vorher 4× dupliziert: SBOM/Log/Testplan/Coded-Test)
@@ -974,7 +978,7 @@ function uiConfirm(msg, okLabel){
 }
 async function delComponent(c){
   if(!(await uiConfirm(`Really delete component “${c.name}”? This removes it from the list.`, 'Delete'))) return;
-  await api('DELETE','/api/components/'+c.id); load(); toast('Deleted');
+  await api('DELETE','/api/components/'+c.id); await load(); toast('Deleted'); // await → Header/Kennzahlen sofort aktualisiert
 }
 
 // --- Einstellungen (Arbeitsverzeichnis, KI, Zeitplan, SMTP) ---
