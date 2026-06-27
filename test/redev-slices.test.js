@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { licenseGate, planSlices, buildSliceRebuildPrompt, rebuildSlices } from '../src/service/redev-slices.js';
+import { licenseGate, planSlices, buildSliceRebuildPrompt, rebuildSlices, redevelopDeadLib } from '../src/service/redev-slices.js';
 import { acceptanceFromSelfTest } from '../src/service/acceptance.js';
 
 const contract = acceptanceFromSelfTest({
@@ -98,5 +98,41 @@ describe('F-30 T-117 slice-weise Neuentwicklung', () => {
   it('rebuildSlices: ohne Vertrag → ok:false', async () => {
     const r = await rebuildSlices({ criteria: [] }, { license: 'MIT', implementSlice: async () => {}, runSelfTests: async () => ({}) });
     expect(r.ok).toBe(false);
+  });
+
+  describe('T-118 redevelopDeadLib (Flow-Orchestrierung)', () => {
+    const green = { ran: true, rendered: true, views: 2, features: [
+      { view: 'default', feature: 'renders board', ok: true },
+      { view: 'default', feature: 'drag moves card', ok: true },
+      { view: 'compact', feature: 'renders compact', ok: true },
+    ] };
+    const mkStore = () => { const calls = { update: [], review: [] }; return { calls, get: () => ({ libs: [{ name: 'mxgraph', status: 'nicht gepflegt' }] }), update: (id, p) => calls.update.push(p), addReview: (id, r) => calls.review.push(r) }; };
+
+    it('grün → toten Lib erkannt, slice-weise neu, Store als rebuilt markiert', async () => {
+      const store = mkStore();
+      const r = await redevelopDeadLib(store, { id: '1', name: 'Kanban', path: 'x' }, {
+        contract, implementSlice: async () => {}, runSelfTests: async () => green, log: () => {},
+      });
+      expect(r.ok).toBe(true);
+      expect(r.deadLib).toBe('mxgraph');           // aus dem Lib-Status abgeleitet
+      expect(store.calls.update.some((p) => p.rebuilt && p.verifiedAsBefore)).toBe(true);
+      expect(store.calls.review.some((x) => x.kind === 'redev-dead-lib' && x.pass)).toBe(true);
+    });
+
+    it('ohne Akzeptanz-Vertrag → error', async () => {
+      const r = await redevelopDeadLib(mkStore(), { id: '1', name: 'X', path: 'x' }, { contract: { criteria: [] }, implementSlice: async () => {}, runSelfTests: async () => green });
+      expect(r.ok).toBe(false);
+      expect(r.error).toMatch(/Akzeptanz-Vertrag/);
+    });
+
+    it('Fehlschlag → rollbackAll wird aufgerufen', async () => {
+      let rolledBack = false;
+      const partial = { ran: true, rendered: true, features: [{ view: 'default', feature: 'renders board', ok: false }] };
+      const r = await redevelopDeadLib(mkStore(), { id: '1', name: 'X', path: 'x' }, {
+        contract, implementSlice: async () => {}, runSelfTests: async () => partial, rollbackAll: async () => { rolledBack = true; }, maxRounds: 1, log: () => {},
+      });
+      expect(r.ok).toBe(false);
+      expect(rolledBack).toBe(true);
+    });
   });
 });

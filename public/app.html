@@ -446,10 +446,11 @@ function renderTable(){
       <td class="small">${esc(c.changeSummary)}</td>
       <td><div class="actions">
         ${c.mockUrl?`<button class="ghost small" data-act="mock" title="Open the rendered mock in a new tab${c.mockMode==='ai'?' (AI-written)':c.mockMode?' (static fallback)':''}">🧪 Open mock</button>`:''}
+        ${(c.libActions&&c.libActions.redevelop)?`<button class="ghost small" data-act="redev" title="Dead library without successor → slice-wise re-development against the acceptance contract (license-gated)">🧬 Re-develop</button>`:''}
         <button class="ghost small" data-act="edit">Edit</button>
         <button class="ghost small danger" data-act="del">Delete</button>
       </div></td>`;
-    tr.onclick = (e)=>{ const a=e.target.getAttribute('data-act'); if(a==='mock'){e.stopPropagation();window.open(c.mockUrl,'_blank','noopener');} else if(a==='edit'){e.stopPropagation();openEdit(c);} else if(a==='del'){e.stopPropagation();delComponent(c);} else openDetail(c.id); };
+    tr.onclick = (e)=>{ const a=e.target.getAttribute('data-act'); if(a==='mock'){e.stopPropagation();window.open(c.mockUrl,'_blank','noopener');} else if(a==='redev'){e.stopPropagation();redevelopDeadLib(c);} else if(a==='edit'){e.stopPropagation();openEdit(c);} else if(a==='del'){e.stopPropagation();delComponent(c);} else openDetail(c.id); };
     rows.appendChild(tr);
   }
   renderOverview();
@@ -988,6 +989,18 @@ async function delComponent(c){
   if(!(await uiConfirm(`Really delete component “${c.name}”? This removes it from the list.`, 'Delete'))) return;
   await api('DELETE','/api/components/'+c.id); await load(); toast('Deleted'); // await → Header/Kennzahlen sofort aktualisiert
 }
+// F-30/T-118: tote Lib slice-weise gegen den Akzeptanz-Vertrag neu bauen (tech-frei, lizenzrein). Läuft länger.
+async function redevelopDeadLib(c){
+  if(!(await uiConfirm(`Re-develop “${c.name}” slice-by-slice against its acceptance contract (replacing a dead library with any clean, permissively-licensed technology)? Runs several AI passes; nothing is pushed.`, 'Re-develop'))) return;
+  setBusy(c.id,true); toast('Re-development started…');
+  try{
+    const r = await api('POST',`/api/components/${c.id}/redevelop-dead-lib`,{});
+    if(r.error){ toast('Error: '+r.error); }
+    else { const okN=(r.slices||[]).filter(s=>s.pass).length, n=(r.slices||[]).length; toast(r.ok?`Re-developed ✓ (${okN}/${n} slices green)`:`Not adopted — ${okN}/${n} slices green, rolled back`); }
+    await load();
+  }catch(e){ toast('Error: '+e.message); }
+  finally{ setBusy(c.id,false); }
+}
 
 // --- Einstellungen (Arbeitsverzeichnis, KI, Zeitplan, SMTP) ---
 let settingsCache = {};
@@ -1121,7 +1134,7 @@ async function loadLibraries(){
 }
 
 // Build-Marker: muss mit BUILD in start.js übereinstimmen. Erkennt einen veralteten Backend-Prozess.
-const APP_BUILD = '2026-06-27.52';
+const APP_BUILD = '2026-06-27.53';
 async function checkBackend(){
   const b = $('staleBanner');
   try{

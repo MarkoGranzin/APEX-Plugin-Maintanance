@@ -36,8 +36,11 @@ import { maintainComponent } from './src/service/maintain.js';
 import { runUiTests } from './src/test/run-ui.js';
 import { captureBaseline } from './src/service/baseline.js';
 import { redevelopComponent } from './src/service/redev.js';
-import { generateAiMock, writeMock, refineMock, mockInputFingerprint, MOCK_SPEC_VERSION } from './src/test/mock.js';
-import { acceptanceFromSelfTest, writeAcceptance } from './src/service/acceptance.js';
+import { generateAiMock, writeMock, refineMock, mockInputFingerprint, MOCK_SPEC_VERSION, runMockSelfTests } from './src/test/mock.js';
+import { acceptanceFromSelfTest, writeAcceptance, readAcceptance } from './src/service/acceptance.js';
+import { redevelopDeadLib, buildSliceRebuildPrompt } from './src/service/redev-slices.js';
+import { inspectAssets, parseOk } from './src/extract/assets.js';
+import { reinjectAsset } from './src/extract/reinject.js';
 import { uploadFix } from './src/service/upload.js';
 import { slug as slugify } from './src/util/slug.js';
 import { resolveAiBackend, aiBackendView } from './src/ai/configure.js';
@@ -56,7 +59,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const DATA_DIR = process.env.AISPP_DATA_DIR || path.join(__dirname, 'data');
 // Build-Marker: muss mit APP_BUILD in public/app.html übereinstimmen. Bei Backend-Änderungen erhöhen.
 // Das Frontend vergleicht beide und warnt, wenn der laufende Dienst veraltet ist (Neustart nötig).
-const BUILD = '2026-06-27.52';
+const BUILD = '2026-06-27.53';
 const C = { reset: '\x1b[0m', bold: '\x1b[1m', dim: '\x1b[2m', green: '\x1b[32m', yellow: '\x1b[33m', red: '\x1b[31m', cyan: '\x1b[36m' };
 const c = (col, s) => `${C[col]}${s}${C.reset}`;
 
@@ -575,6 +578,40 @@ function cmdServe(portArg) {
         hasPlaywright,
         reviewFix: dualReviewFix, // T-119/2: 2 unabhängige Review-Voten + Rework vor dem works-as-before-Gate
         upload: uploadFor(true), // Push nur bei settings.allowPush (T-76)
+      });
+      return json(res, r, r?.error ? 400 : 200);
+    });
+
+    // F-30/T-118 — Tote-Lib-Neuentwicklung: slice-weise gegen den Akzeptanz-Vertrag neu bauen (tech-frei,
+    // lizenz-gegatet), je Slice KI-Implementierung + Mock-Selbsttest; Übernahme nur „grün wie zuvor", sonst Rollback.
+    if (p.startsWith('/api/components/') && p.endsWith('/redevelop-dead-lib') && req.method === 'POST') return withComponentRunning(async (c, id) => {
+      const ai = resolveAiBackend(settings, secretStore);
+      if (!ai || ai.kind === 'stub') return json(res, { error: 'Kein KI-Backend (Einstellungen → KI).' }, 400);
+      const dir = c.path;
+      if (!dir || !fs.existsSync(dir)) return json(res, { error: 'Kein Repo zugeordnet.' }, 400);
+      const sl = slugify(c.name);
+      const mockUrl = `http://localhost:${port}/mock/${sl}/index.html`;
+      const contract = readAcceptance(dir);
+      const backups = new Map();
+      // Eine Slice (= Sicht) implementieren: KI baut die Funktionalität tech-frei/lizenzrein neu, re-injiziert
+      // in das primäre Plugin-Asset. Backups je Datei → vollständiger Rollback bei Misserfolg.
+      const implementSlice = async (slice, ctx) => {
+        setStep(id, `Redev Slice „${slice.view}"`);
+        const asset = inspectAssets(dir).find((a) => a.origin);
+        if (!asset) return;
+        let out = '';
+        try { out = String(await ai.complete(buildSliceRebuildPrompt(slice, contract, { name: c.name, deadLib: ctx.deadLib }), {})); } catch { return; }
+        out = out.replace(/^```[a-z]*\n?|```$/g, '').trim();
+        if (!out || !parseOk(out) || out === asset.code.trim()) return;
+        const tgt = asset.origin.type === 'file' ? path.join(dir, asset.origin.path) : path.join(dir, asset.origin.sqlFile);
+        if (!backups.has(tgt) && fs.existsSync(tgt)) backups.set(tgt, fs.readFileSync(tgt, 'utf8'));
+        reinjectAsset(asset.origin, out, { rootDir: dir });
+      };
+      const runSelfTests = async () => { await buildMockFor(store.get(id), { force: true }); return runMockSelfTests(mockUrl, { timeoutMs: 14000 }); };
+      const rollbackAll = async () => { for (const [t, content] of backups) { try { fs.writeFileSync(t, content); } catch { /* ignore */ } } try { await buildMockFor(store.get(id), { force: true }); } catch { /* ignore */ } };
+      const r = await redevelopDeadLib(store, store.get(id), {
+        ai, contract, implementSlice, runSelfTests, rollbackAll,
+        log: (m) => { writeLog(c, `[redev-dead-lib] ${m}`); setStep(id, `Redev: ${m}`); },
       });
       return json(res, r, r?.error ? 400 : 200);
     });

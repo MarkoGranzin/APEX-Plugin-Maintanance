@@ -13,7 +13,8 @@
  */
 
 import { classifyLicense } from '../sbom/licenses.js';
-import { compareAcceptance } from './acceptance.js';
+import { compareAcceptance, readAcceptance } from './acceptance.js';
+import { decideLibAction } from './lib-decision.js';
 
 /**
  * Lizenz-Gate für eine frei gewählte Technologie: erlaubt nur kommerziell nutzbare, NICHT-copyleft Lizenzen
@@ -101,4 +102,38 @@ export async function rebuildSlices(contract, deps = {}) {
   try { full = compareAcceptance(contract, await runSelfTests()); } catch { /* best effort */ }
   const ok = results.length === slices.length && results.every((r) => r.pass) && (full ? full.pass : true);
   return { ok, license: gate, slices: results, full };
+}
+
+/**
+ * T-118 — Tote-Lib-Neuentwicklung als Flow: Akzeptanz-Vertrag lesen, toten Lib bestimmen, slice-weise
+ * neu bauen (rebuildSlices) und das Ergebnis in den Store schreiben. implementSlice/runSelfTests werden
+ * vom Aufrufer (start.js) injiziert (echte KI + Mock-Selbsttest); hier liegt die testbare Orchestrierung.
+ * @param {{ai?, contract?, deadLib?, license?, implementSlice:Function, runSelfTests:Function, adopt?, rollback?, rollbackAll?:Function, log?, now?, classify?}} deps
+ */
+export async function redevelopDeadLib(store, comp, deps = {}) {
+  const dir = comp.path;
+  const contract = deps.contract ?? readAcceptance(dir);
+  if (!contract || !(contract.criteria || []).length) return { ok: false, error: 'Kein Akzeptanz-Vertrag — erst einen grünen Mock bauen.' };
+  if (typeof deps.implementSlice !== 'function' || typeof deps.runSelfTests !== 'function') return { ok: false, error: 'implementSlice/runSelfTests müssen injiziert werden (KI + Mock-Selbsttest).' };
+
+  // Toten Lib bestimmen: erste Lib, deren Entscheidung „replace" ist (kein sicheres Update / nicht gepflegt).
+  const libs = (store?.get?.(comp.id)?.libs) ?? comp.libs ?? [];
+  const dead = libs.find((l) => decideLibAction(l, { classify: deps.classify }).action === 'replace');
+  const deadLib = deps.deadLib ?? dead?.name ?? null;
+  // Technologiewahl ist frei; Default = Eigenbau unter MIT. Lizenz-Gate prüft (in rebuildSlices) erneut.
+  const license = deps.license ?? 'MIT';
+
+  const result = await rebuildSlices(contract, {
+    license, name: comp.name, deadLib,
+    implementSlice: deps.implementSlice, runSelfTests: deps.runSelfTests,
+    adopt: deps.adopt, rollback: deps.rollback, log: deps.log, classify: deps.classify, maxRounds: deps.maxRounds,
+  });
+
+  if (!result.ok && typeof deps.rollbackAll === 'function') { try { await deps.rollbackAll(); } catch { /* ignore */ } }
+  const now = deps.now ?? (() => new Date().toISOString());
+  try {
+    store?.addReview?.(comp.id, { kind: 'redev-dead-lib', pass: result.ok, deadLib, slices: result.slices });
+    if (result.ok) store?.update?.(comp.id, { rebuilt: true, rebuiltAt: now(), rebuiltTo: deadLib ? `${deadLib} ersetzt (slice-weise neu)` : 'slice-weise neu', verifiedAsBefore: true });
+  } catch { /* store best effort */ }
+  return { ...result, deadLib };
 }
