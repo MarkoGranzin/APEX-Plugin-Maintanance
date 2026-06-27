@@ -405,8 +405,10 @@ function cmpRow(a,b){
   return d;
 }
 function renderOverview(){
-  const crit=ALL.filter(c=>c.libWarning&&c.libWarning.vulnerable).length;
-  const warn=ALL.filter(c=>{const w=c.libWarning||{};return !w.vulnerable && (w.unmaintained||w.outdated||w.unknown);}).length;
+  // Auf LIB-Ebene zählen (deckungsgleich mit den Lib-Warn-Badges der Zeilen): ein Plugin kann zugleich
+  // vulnerable UND unmaintained/outdated sein — beide Beiträge werden gezählt, nicht nur einer.
+  let crit=0, warn=0;
+  for(const c of ALL){ const w=c.libWarning||{}; crit+=w.vulnerable||0; warn+=(w.unmaintained||0)+(w.outdated||0)+(w.unknown||0); }
   const action=ALL.filter(c=>ACTION(c.status)).length;
   const lr=lastRunInfo.lastScheduledRunAt? fmtDate(lastRunInfo.lastScheduledRunAt) : 'never';
   const run=lastRunInfo.scheduledRunning?' <span class="badge" style="color:#3fb950;border-color:#3fb95066">running…</span>':'';
@@ -414,8 +416,8 @@ function renderOverview(){
   ov.innerHTML = `
     <div class="ov-stat"><b>${ALL.length}</b><span>Plugins</span></div>
     <div class="ov-sep"></div>
-    <div class="ov-stat crit"><b>${crit}</b><span>Critical</span></div>
-    <div class="ov-stat warn"><b>${warn}</b><span>Warnings</span></div>
+    <div class="ov-stat crit"><b>${crit}</b><span>Vulnerable libs</span></div>
+    <div class="ov-stat warn"><b>${warn}</b><span>Warning libs</span></div>
     <div class="ov-stat"><b>${action}</b><span>Action needed</span></div>
     <div class="ov-sep"></div>
     <div class="ov-stat"><b style="font-size:.92rem">${lr}${run}</b><span>Last auto-run</span></div>`;
