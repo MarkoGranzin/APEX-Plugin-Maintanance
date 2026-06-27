@@ -2,7 +2,7 @@ import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { acceptanceFromSelfTest, compareAcceptance, criterionKey, writeAcceptance, readAcceptance } from '../src/service/acceptance.js';
+import { acceptanceFromSelfTest, compareAcceptance, criterionKey, writeAcceptance, readAcceptance, acceptanceToScenarios, acceptanceFeatureFile, acceptanceToDevhub } from '../src/service/acceptance.js';
 
 describe('F-30 T-116 Akzeptanz-Vertrag aus der Mock-Charakterisierung', () => {
   const stGreen = {
@@ -85,6 +85,37 @@ describe('F-30 T-116 Akzeptanz-Vertrag aus der Mock-Charakterisierung', () => {
   it('compareAcceptance: renderedRequired & Plugin rendert nicht → fail', () => {
     const c = acceptanceFromSelfTest(stGreen);
     expect(compareAcceptance(c, { ran: true, rendered: false, features: stGreen.features }).pass).toBe(false);
+  });
+
+  it('T-120 acceptanceToScenarios: devhub-taugliche Gherkin-Szenarien (je Kriterium + Render)', () => {
+    const c = acceptanceFromSelfTest(stGreen, { name: 'Widget' });
+    const scen = acceptanceToScenarios(c, { name: 'Widget' });
+    expect(scen.length).toBe(c.total + 1); // + „rendert echt"
+    expect(scen[0].title).toMatch(/rendert echte Ausgabe/);
+    const s = scen.find((x) => x.title.includes('renders 12 nodes'));
+    expect(s).toBeTruthy();
+    expect(s.gherkin).toMatch(/Angenommen/);
+    expect(s.gherkin).toMatch(/Wenn/);
+    expect(s.gherkin).toMatch(/Dann renders 12 nodes/);
+    // Form passt 1:1 zu set_tests (title + gherkin Strings)
+    expect(scen.every((x) => typeof x.title === 'string' && typeof x.gherkin === 'string')).toBe(true);
+  });
+
+  it('T-120 acceptanceFeatureFile: exportierbare .feature mit Funktionalität + Szenarien', () => {
+    const c = acceptanceFromSelfTest(stGreen, { name: 'Widget' });
+    const f = acceptanceFeatureFile(c, { name: 'Widget' });
+    expect(f).toMatch(/Funktionalität: Widget/);
+    expect(f).toMatch(/Szenario:/);
+    expect(f).toMatch(/Angenommen das Plugin "Widget"/);
+    expect(f).toMatch(/works as before/i);
+  });
+
+  it('T-120 acceptanceToDevhub: Item-Titel + Szenarien für create_item/set_tests', () => {
+    const c = acceptanceFromSelfTest(stGreen, { name: 'Widget' });
+    const d = acceptanceToDevhub(c, { name: 'Widget' });
+    expect(d.itemTitle).toMatch(/Widget: Akzeptanzkriterien/);
+    expect(Array.isArray(d.scenarios)).toBe(true);
+    expect(d.scenarios.length).toBeGreaterThan(0);
   });
 
   it('write/readAcceptance: Roundtrip neben dem Mock', () => {

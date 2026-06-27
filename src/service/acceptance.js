@@ -87,3 +87,47 @@ export function writeAcceptance(dir, contract) {
 export function readAcceptance(dir) {
   try { return JSON.parse(fs.readFileSync(acceptancePath(dir), 'utf8')); } catch { return null; }
 }
+
+// ── T-120: Anforderungen exportierbar + devhub-tauglich ───────────────────────────────────────────
+
+/**
+ * Wandelt den Akzeptanz-Vertrag in Gherkin-Szenarien [{title, gherkin}] um — exakt das Format, das
+ * devhub set_tests erwartet (1:1 importierbar). Je Kriterium ein Szenario; technologie-unabhängig.
+ */
+export function acceptanceToScenarios(contract, opts = {}) {
+  const name = opts.name || contract?.name || 'plugin';
+  const out = [];
+  if (contract?.renderedRequired) {
+    out.push({ title: `${name}: rendert echte Ausgabe`, gherkin: `Angenommen das Plugin "${name}" ist geladen\nWenn es initialisiert\nDann erzeugt es echte sichtbare Ausgabe (kein leerer/Fehler-Zustand)` });
+  }
+  for (const c of contract?.criteria || []) {
+    const view = c.view || 'default';
+    out.push({
+      title: `${view}: ${c.feature}`.slice(0, 120),
+      gherkin: `Angenommen das Plugin "${name}" ist in der Sicht "${view}" geladen\nWenn die Sicht gerendert und bedient wird\nDann ${c.feature}`,
+    });
+  }
+  return out;
+}
+
+/** Exportierbare .feature-Datei (Gherkin) des Akzeptanz-Vertrags — technologie-unabhängiges Soll. */
+export function acceptanceFeatureFile(contract, opts = {}) {
+  const name = opts.name || contract?.name || 'plugin';
+  const scen = acceptanceToScenarios(contract, { name });
+  const head = [
+    `# Akzeptanz-Vertrag für ${name} — "works as before"`,
+    `# Automatisch aus der Mock-Charakterisierung abgeleitet (technologieunabhängig).`,
+    `# ${contract?.views ?? '?'} Sicht(en), ${contract?.total ?? scen.length} Kriterium/Kriterien${contract?.capturedAt ? `, Stand ${contract.capturedAt}` : ''}.`,
+    '',
+    `Funktionalität: ${name} — Akzeptanzkriterien (Migration/Neuentwicklung muss alle erfüllen)`,
+    '',
+  ].join('\n');
+  const body = scen.map((s) => `  Szenario: ${s.title}\n` + s.gherkin.split('\n').map((l) => '    ' + l).join('\n')).join('\n\n');
+  return head + body + '\n';
+}
+
+/** devhub-tauglicher Block: vorgeschlagener Item-Titel + Szenarien (für create_item + set_tests). */
+export function acceptanceToDevhub(contract, opts = {}) {
+  const name = opts.name || contract?.name || 'plugin';
+  return { itemTitle: `${name}: Akzeptanzkriterien (works as before)`, type: 'feature', scenarios: acceptanceToScenarios(contract, { name }) };
+}
