@@ -35,7 +35,7 @@ import { maintainComponent } from './src/service/maintain.js';
 import { runUiTests } from './src/test/run-ui.js';
 import { captureBaseline } from './src/service/baseline.js';
 import { redevelopComponent } from './src/service/redev.js';
-import { generateAiMock, writeMock } from './src/test/mock.js';
+import { generateAiMock, writeMock, refineMock } from './src/test/mock.js';
 import { uploadFix } from './src/service/upload.js';
 import { slug as slugify } from './src/util/slug.js';
 import { resolveAiBackend, aiBackendView } from './src/ai/configure.js';
@@ -54,7 +54,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const DATA_DIR = process.env.AISPP_DATA_DIR || path.join(__dirname, 'data');
 // Build-Marker: muss mit APP_BUILD in public/app.html übereinstimmen. Bei Backend-Änderungen erhöhen.
 // Das Frontend vergleicht beide und warnt, wenn der laufende Dienst veraltet ist (Neustart nötig).
-const BUILD = '2026-06-27.41';
+const BUILD = '2026-06-27.42';
 const C = { reset: '\x1b[0m', bold: '\x1b[1m', dim: '\x1b[2m', green: '\x1b[32m', yellow: '\x1b[33m', red: '\x1b[31m', cyan: '\x1b[36m' };
 const c = (col, s) => `${C[col]}${s}${C.reset}`;
 
@@ -176,12 +176,26 @@ function cmdServe(portArg) {
         return mockUrl;
       }
       const gen = await generateAiMock(component.path, { ai, name: component.name }); // KI schreibt; Fallback statisch
-      writeMock(path.join(component.path, '.maintenance', 'mock'), component.path, gen); // committet (git add .)
+      const mockDir = path.join(component.path, '.maintenance', 'mock');
+      writeMock(mockDir, component.path, gen); // committet (git add .)
+      // Selbstkorrektur-Schleife: Self-Tests headless laufen lassen; rote (Fehl-Charakterisierungen) lässt die KI
+      // generisch nachbessern (Ist-Werte statt geratener Konstanten) → bis grün. Für JEDES Plugin, ohne Handarbeit.
+      try {
+        const ref = await refineMock(gen, {
+          ai, url: mockUrl, name: component.name,
+          write: (html) => writeMock(mockDir, component.path, { ...gen, html }),
+          log: (m) => writeLog(component, `[mock-selfcheck] ${m}`),
+        });
+        if (ref.after) {
+          gen.html = ref.html;
+          gen.selfCheck = { views: ref.after.views, total: ref.after.total, failed: ref.after.failed.length };
+        }
+      } catch (e) { writeLog(component, `[mock-selfcheck] übersprungen: ${e?.message ?? e}`); }
       const testsDir = path.join(component.path, '.maintenance', 'tests');
       fs.mkdirSync(testsDir, { recursive: true });
       fs.writeFileSync(path.join(testsDir, gen.spec.name), gen.spec.content);
       const cur = store.get(component.id) || {};
-      const patch = { mockUrl, mockMode: gen.mode, mockNote: gen.fallbackReason || null, codedTests: [...(cur.codedTests || []).filter((t) => t.name !== gen.spec.name), gen.spec] };
+      const patch = { mockUrl, mockMode: gen.mode, mockNote: gen.fallbackReason || null, mockSelfCheck: gen.selfCheck || null, codedTests: [...(cur.codedTests || []).filter((t) => t.name !== gen.spec.name), gen.spec] };
       if (!cur.uiTestUrl) patch.uiTestUrl = mockUrl; // Default-Ziel, falls der Nutzer keine eigene URL gesetzt hat
       store.update(component.id, patch);
       return mockUrl;

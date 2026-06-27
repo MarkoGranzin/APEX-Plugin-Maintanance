@@ -2,7 +2,7 @@ import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { buildMockPage, buildMockSpec, generateMock, writeMock, generateAiMock, aiMockPrompt, aiAnalyzePrompt, analyzeViews, collectMock, normalizeLibPaths, HARNESS_RESET } from '../src/test/mock.js';
+import { buildMockPage, buildMockSpec, generateMock, writeMock, generateAiMock, aiMockPrompt, aiAnalyzePrompt, analyzeViews, finalizeAiHtml, runMockSelfTests, aiRefinePrompt, refineMock, collectMock, normalizeLibPaths, HARNESS_RESET } from '../src/test/mock.js';
 
 describe('F-28 T-97 Auto-Mock', () => {
   it('buildMockPage: self-contained HTML mit Shim, Libs (src), Plugin-Dateien (src), DOM, Entry-Calls, Events, __rendered/__features', () => {
@@ -315,6 +315,76 @@ describe('F-28 T-97 Auto-Mock', () => {
       const gen = await generateAiMock(dir, { ai, name: 'Widget' });
       expect(gen.mode).toBe('ai');
       expect(gen.html).toMatch(/window\.__ok/);
+    });
+  });
+
+  describe('Selbstkorrektur-Schleife (2te Schleife) — generisch, für jedes Plugin', () => {
+    // Fake-Chromium: liefert pro page.evaluate() den nächsten vorbereiteten Charakterisierungs-Stand.
+    const fakeLaunch = (evals) => { let i = 0; return async () => ({ newPage: async () => ({ goto: async () => {}, waitForFunction: async () => {}, waitForTimeout: async () => {}, evaluate: async () => evals[Math.min(i++, evals.length - 1)], screenshot: async () => {} }), close: async () => {} }); };
+
+    it('finalizeAiHtml: bereinigt Zaun/Prosa, injiziert Reset, sichert __ok; Müll → error', () => {
+      const fin = finalizeAiHtml('```html\nI think:\n<!DOCTYPE html><html><head></head><body><div id="mock-root">x</div><script>window.__ok=true;</script></body></html>\n```', { cssFiles: ['css/style.min.css'] });
+      expect(fin.error).toBeUndefined();
+      expect(fin.html).toMatch(/^<!DOCTYPE html>/);
+      expect(fin.html).toMatch(/id="harness-reset"/);
+      expect(fin.html).not.toMatch(/```|I think/);
+      expect(finalizeAiHtml('sorry, no html', {}).error).toBeTruthy();
+    });
+
+    it('runMockSelfTests: liest __ok/__views/__features aus, extrahiert die roten Checks', async () => {
+      const launch = fakeLaunch([{ ok: false, rendered: true, views: 3, features: [{ view: 'a', feature: 'x', ok: true }, { view: 'a', feature: 'y', ok: false, detail: 'real=2' }] }]);
+      const st = await runMockSelfTests('http://x/index.html', { launch });
+      expect(st.ran).toBe(true);
+      expect(st.views).toBe(3);
+      expect(st.total).toBe(2);
+      expect(st.failed).toEqual([{ view: 'a', feature: 'y', detail: 'real=2' }]);
+    });
+
+    it('runMockSelfTests: ohne Playwright/Launch → ran:false (kein Crash)', async () => {
+      const st = await runMockSelfTests('', {});
+      expect(st.ran).toBe(false);
+    });
+
+    it('aiRefinePrompt: nennt die roten Checks + Ist-Werte und die Korrektur-Regel', () => {
+      const p = aiRefinePrompt('Widget', '<html></html>', [{ view: 'v1', feature: 'toggleEffect===false', detail: 'real={effect:slide}' }]);
+      expect(p).toMatch(/are RED/);
+      expect(p).toMatch(/mis-characterization/);
+      expect(p).toMatch(/v1/);
+      expect(p).toMatch(/toggleEffect===false/);
+      expect(p).toMatch(/real=\{effect:slide\}/);
+      expect(p).toMatch(/ACTUAL current behavior/);
+      expect(p).toMatch(/DROP that check/);
+    });
+
+    it('refineMock: rot → KI bessert nach → grün (konvergiert, schreibt korrigierten Mock)', async () => {
+      const launch = fakeLaunch([
+        { ok: false, rendered: true, views: 2, features: [{ view: 'v', feature: 'f', ok: false, detail: 'real=X' }] }, // Runde 1 misst: 1 rot
+        { ok: true, rendered: true, views: 2, features: [{ view: 'v', feature: 'f', ok: true }] },                       // Runde 2 misst: grün
+      ]);
+      let aiCalls = 0; const written = [];
+      const ai = { kind: 'cli', complete: async (p) => { aiCalls++; expect(p).toMatch(/are RED/); return '<!DOCTYPE html><html><body><div id="mock-root">x</div><script>window.__ok=true;window.__selftested=true;</script></body></html>'; } };
+      const gen = { html: '<!DOCTYPE html><html><body><div id="mock-root">x</div><script>window.__ok=true;</script></body></html>', mode: 'ai', libFiles: [], extraLibFiles: [], cssFiles: [] };
+      const ref = await refineMock(gen, { ai, url: 'http://x/index.html', name: 'Widget', write: (h) => written.push(h), launch });
+      expect(aiCalls).toBe(1);            // genau eine Korrektur nötig
+      expect(written.length).toBe(1);     // korrigierter Mock geschrieben
+      expect(ref.after.failed.length).toBe(0); // am Ende grün
+      expect(ref.before.failed.length).toBe(1); // vorher 1 rot
+    });
+
+    it('refineMock: ohne KI/URL oder mode!=ai → no-op (keine Korrektur, kein Crash)', async () => {
+      const r1 = await refineMock({ html: 'x', mode: 'ai' }, { ai: { kind: 'stub' }, url: 'http://x', name: 'P', write: () => {} });
+      expect(r1.rounds).toBe(0);
+      const r2 = await refineMock({ html: 'x', mode: 'static' }, { ai: { kind: 'cli', complete: async () => 'x' }, url: 'http://x', name: 'P', write: () => {} });
+      expect(r2.rounds).toBe(0);
+    });
+
+    it('refineMock: bereits grün → keine KI-Korrektur', async () => {
+      const launch = fakeLaunch([{ ok: true, rendered: true, views: 2, features: [{ view: 'v', feature: 'f', ok: true }] }]);
+      let aiCalls = 0;
+      const ai = { kind: 'cli', complete: async () => { aiCalls++; return '<html></html>'; } };
+      const ref = await refineMock({ html: '<html></html>', mode: 'ai', libFiles: [], extraLibFiles: [], cssFiles: [] }, { ai, url: 'http://x', name: 'P', write: () => {}, launch });
+      expect(aiCalls).toBe(0);
+      expect(ref.after.failed.length).toBe(0);
     });
   });
 });

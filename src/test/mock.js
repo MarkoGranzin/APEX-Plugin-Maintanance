@@ -480,20 +480,30 @@ export async function generateAiMock(dir, deps = {}) {
   if (!ai || ai.kind === 'stub' || typeof ai.complete !== 'function') return fallback('no AI backend (Settings → Test connection)');
   // Analyse-Stufe zuerst: die KI leitet die zu testenden Sichten/Modes AUS DEM PLUGIN ab (kein Beispiel-Bias).
   try { c.viewPlan = await analyzeViews(deps, name, c); } catch { c.viewPlan = []; }
-  let html = '';
-  try { html = String(await ai.complete(aiMockPrompt(name, c), {})); }
+  let raw = '';
+  try { raw = String(await ai.complete(aiMockPrompt(name, c), {})); }
   catch (e) { return fallback('AI error: ' + (e?.message ?? e)); }
-  html = html.replace(/```[a-z]*\n?/gi, '').replace(/```/g, '');
-  // Die KI stellt der HTML manchmal Prosa voran ("I now understand…"). Sauber das Dokument extrahieren:
-  // vom ersten <!doctype>/<html> bis zum letzten </html>.
+  const fin = finalizeAiHtml(raw, c);
+  if (fin.error) return fallback(fin.error);
+  return { html: fin.html, spec: { name: `${slug(name)}.ui.spec.js`, content: buildMockSpec(name) }, libFiles: c.libFiles, extraLibFiles: c.extraLibFiles || [], cssFiles: c.cssFiles || [], pluginFiles: c.pluginFiles, selectors: c.selectors, entryPoints: c.entryPoints, mode: 'ai' };
+}
+
+/**
+ * Bereinigt eine KI-HTML-Antwort zum lauffähigen Mock: Markdown-Zäune weg, sauber <!doctype…</html>
+ * extrahieren, lokale Lib-/CSS-Pfade normalisieren, Harness-Reset injizieren, __ok-Vertrag sicherstellen.
+ * Genutzt von generateAiMock UND der Selbstkorrektur-Schleife (refineMock). @returns {{html}|{error}}
+ */
+export function finalizeAiHtml(raw, c = {}) {
+  let html = String(raw || '').replace(/```[a-z]*\n?/gi, '').replace(/```/g, '');
+  // Die KI stellt der HTML manchmal Prosa voran ("I now understand…"). Vom ersten <!doctype>/<html> bis zum letzten </html>.
   const low = html.toLowerCase();
   let s = low.indexOf('<!doctype'); if (s < 0) s = low.indexOf('<html');
   if (s > 0) html = html.slice(s);
   const e = html.toLowerCase().lastIndexOf('</html>');
   if (e >= 0) html = html.slice(0, e + 7);
   html = html.trim();
-  if (!html) return fallback('AI returned empty');
-  if (!/<html[\s>]/i.test(html)) return fallback('AI response was not an HTML document');
+  if (!html) return { error: 'AI returned empty' };
+  if (!/<html[\s>]/i.test(html)) return { error: 'AI response was not an HTML document' };
   html = normalizeLibPaths(html, [...(c.libFiles || []), ...(c.extraLibFiles || []), ...(c.cssFiles || [])]); // B-21: lokale Lib-/CSS-Pfade auf die kopierten Dateien zurücksetzen
   // Generischer CSS-Reset (wie APEX/Frameworks) als ERSTES im <head>, vor der echten Plugin-CSS → diese gewinnt.
   if (!/id=["']harness-reset["']/.test(html)) {
@@ -504,9 +514,92 @@ export async function generateAiMock(dir, deps = {}) {
   }
   if (!/__ok/.test(html)) { // gültige HTML ohne Vertrag → Vertrag injizieren statt verwerfen
     html = html.replace(/<\/body>/i, '<script>window.__mockErrors=window.__mockErrors||[];window.addEventListener("error",function(ev){window.__mockErrors.push(String(ev.message||ev));});if(typeof window.__ok==="undefined")window.__ok=(window.__mockErrors.length===0);</script></body>');
-    if (!/__ok/.test(html)) return fallback('AI HTML missing the window.__ok contract');
+    if (!/__ok/.test(html)) return { error: 'AI HTML missing the window.__ok contract' };
   }
-  return { html, spec: { name: `${slug(name)}.ui.spec.js`, content: buildMockSpec(name) }, libFiles: c.libFiles, extraLibFiles: c.extraLibFiles || [], cssFiles: c.cssFiles || [], pluginFiles: c.pluginFiles, selectors: c.selectors, entryPoints: c.entryPoints, mode: 'ai' };
+  return { html };
+}
+
+/**
+ * Führt die Self-Tests des Mocks headless aus (Chromium) und liest das Charakterisierungs-Ergebnis aus:
+ * window.__ok / __views / __features. launch ist injizierbar (Tests). @returns Ergebnis inkl. roter Checks.
+ */
+export async function runMockSelfTests(url, deps = {}) {
+  if (!url) return { ran: false, reason: 'no url' };
+  let launch = deps.launch;
+  if (!launch) {
+    try { const pw = await import('@playwright/test'); launch = () => pw.chromium.launch(); }
+    catch { return { ran: false, reason: 'Playwright not installed' }; }
+  }
+  let browser;
+  try {
+    browser = await launch();
+    const page = await browser.newPage({ viewport: { width: 1000, height: 700 } });
+    await page.goto(url, { waitUntil: 'load' });
+    // auf die Selbst-Charakterisierung warten (async-Render/selftest), dann lesen
+    await page.waitForFunction(() => window.__selftested === true || window.__ok === true, null, { timeout: deps.timeoutMs ?? 12000 }).catch(() => {});
+    await page.waitForTimeout(300);
+    const data = await page.evaluate(() => ({
+      ok: window.__ok === true,
+      rendered: window.__rendered === true,
+      views: Array.isArray(window.__views) ? window.__views.length : 0,
+      features: Array.isArray(window.__features) ? window.__features : [],
+    }));
+    const failed = (data.features || []).filter((f) => f && f.ok === false).map((f) => ({ view: f.view, feature: f.feature, detail: f.detail }));
+    return { ran: true, ok: data.ok, rendered: data.rendered, views: data.views, total: (data.features || []).length, failed };
+  } catch (e) {
+    return { ran: false, reason: String(e?.message ?? e) };
+  } finally {
+    try { await browser?.close(); } catch { /* egal */ }
+  }
+}
+
+/** Prompt der KORREKTUR-Stufe: rote Self-Tests am unveränderten Plugin = Fehl-Charakterisierungen → fixen. */
+export function aiRefinePrompt(name, html, failures) {
+  const list = (failures || []).map((f, i) => `${i + 1}. [view: ${f.view}] ${f.feature}\n   observed: ${String(f.detail || '').slice(0, 200)}`).join('\n');
+  return `You wrote this self-testing characterization mock for the Oracle APEX plugin "${name}". Running it against the UNMODIFIED plugin, these self-tests are RED:
+${list}
+
+A red self-test on the UNMODIFIED plugin is ALWAYS a mis-characterization (a wrong/guessed expected value), NEVER a plugin defect — this page must be 100% green now (it is the "works exactly as before" baseline). Fix EACH failing check so it reflects the plugin's ACTUAL current behavior:
+- Read the REAL current value/state/property from the live plugin/DOM/options and assert THAT exact observed value (do not assert a guessed constant). The "observed" note above shows what the plugin actually produced — make the assertion match reality.
+- If a check tests something the plugin genuinely does not do (an invalid/aspirational check), DROP that check entirely rather than leaving it red.
+- Keep EVERYTHING else identical: all the existing views, the real <script>/<link> tags and paths, the sample data, the apex shim, the non-destructive cleanup, and the window.__ok/__rendered/__views/__features/__selftested contract.
+
+Return ONLY the complete corrected HTML document, starting at <!DOCTYPE html> and ending at </html>. No prose, no markdown fences.`;
+}
+
+/**
+ * Selbstkorrektur-Schleife: führt die Self-Tests aus; bei roten Checks lässt die KI den Mock nachbessern
+ * (Ist-Werte statt geratener Konstanten), schreibt neu und prüft erneut — bis grün oder keine Besserung.
+ * @param {{ai,url,name,write:(html)=>void,maxRounds?,launch?,timeoutMs?,log?}} deps
+ * @returns {Promise<{rounds, before, after, html, failed}>}
+ */
+export async function refineMock(gen, deps = {}) {
+  const { ai, url, name, write, launch, timeoutMs } = deps;
+  const maxRounds = deps.maxRounds ?? 2;
+  const log = deps.log || (() => {});
+  let html = gen.html;
+  let first = null;
+  let last = null;
+  if (!ai || ai.kind === 'stub' || typeof ai.complete !== 'function' || !url || gen.mode !== 'ai') return { rounds: 0, before: null, after: null, html, failed: [] };
+  for (let round = 1; round <= maxRounds; round++) {
+    const st = await runMockSelfTests(url, { launch, timeoutMs });
+    if (!st.ran) { log(`Self-Test nicht ausführbar (${st.reason}) — Korrektur übersprungen`); break; }
+    if (first === null) first = st;
+    last = st;
+    if (!st.failed.length) { log(`Self-Korrektur: alle ${st.total} Checks grün (${st.views} Sichten)`); break; }
+    if (round > maxRounds) break;
+    log(`Self-Korrektur Runde ${round}: ${st.failed.length}/${st.total} rot → KI bessert nach`);
+    let raw;
+    try { raw = String(await ai.complete(aiRefinePrompt(name, html, st.failed), {})); }
+    catch (e) { log(`Korrektur-KI-Fehler: ${e?.message ?? e}`); break; }
+    const fin = finalizeAiHtml(raw, gen);
+    if (fin.error) { log(`Korrektur verworfen: ${fin.error}`); break; }
+    const prevFailed = st.failed.length;
+    html = fin.html; write(html);
+    // nach dem Schreiben in der nächsten Iteration neu messen; wenn die letzte Runde war, einmal final messen
+    if (round === maxRounds) { const fst = await runMockSelfTests(url, { launch, timeoutMs }); if (fst.ran) last = fst; if (fst.ran && fst.failed.length >= prevFailed) log('Self-Korrektur: keine weitere Besserung'); }
+  }
+  return { rounds: (first ? 1 : 0), before: first, after: last, html, failed: last?.failed || [] };
 }
 
 const slug = (s) => String(s).toLowerCase().replace(/[^a-z0-9.-]+/g, '-').replace(/^-|-$/g, '') || 'plugin';
