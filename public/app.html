@@ -309,6 +309,14 @@ function libWarnBadge(w){
 function rebuiltBadge(c){
   return c && c.rebuilt ? ` <span class="badge" title="Rebuilt on ${esc(c.rebuiltTo||'latest')} — verified as before" style="color:#3fb950;border-color:#3fb95066">🚀 rebuilt</span>` : '';
 }
+// Empfohlene Lib-Aktionen je Komponente (T-114/T-119): update / replace (Nachfolger) / redevelop (tote Lib, slice-weise neu).
+function libActionBadge(c){
+  const a=c.libActions||{}; let h='';
+  if(a.update) h+=` <span class="badge" style="color:#58a6ff;border-color:#58a6ff66" title="${a.update} librar(y/ies) → update to latest stable (works-as-before gate)">↻ ${a.update} update</span>`;
+  if(a.replace) h+=` <span class="badge" style="color:#d29922;border-color:#d2992266" title="${a.replace} librar(y/ies) → replace with a clean, permissively-licensed successor">♻ ${a.replace} replace</span>`;
+  if(a.redevelop) h+=` <span class="badge" style="color:#f85149;border-color:#f8514966" title="${a.redevelop} dead librar(y/ies) without successor → slice-wise re-development (F-30)">🧬 ${a.redevelop} redevelop</span>`;
+  return h;
+}
 // Mock-Status sofort in der Liste sichtbar: grün = KI-Mock + Self-Test-Bilanz, rot = auf statischen Stub gefallen.
 function mockBadge(c){
   if(!c || !c.mockUrl) return '';
@@ -428,12 +436,12 @@ function renderTable(){
     const badgeCls = c.formatBadge==='APEX-SQL-Export'?'export':'';
     const typeBadge = c.type==='template_component'?'<span class="badge tc">Template Component</span>':'<span class="badge">Plugin</span>';
     tr.innerHTML = `
-      <td><span class="spin" data-cid="${c.id}"${rowBusy(c.id)?'':' hidden'}></span><b>${esc(c.name)}</b>${libWarnBadge(c.libWarning)}${rebuiltBadge(c)}${mockBadge(c)}<span class="runlbl muted small" data-cid="${c.id}"${rowBusy(c.id)?'':' hidden'}> · running…</span></td>
+      <td><span class="spin" data-cid="${c.id}"${rowBusy(c.id)?'':' hidden'}></span><b>${esc(c.name)}</b>${libWarnBadge(c.libWarning)}${libActionBadge(c)}${rebuiltBadge(c)}${mockBadge(c)}<span class="runlbl muted small" data-cid="${c.id}"${rowBusy(c.id)?'':' hidden'}> · running…</span></td>
       <td class="small muted">${esc(c.repo||'—')}</td>
       <td>${typeBadge}</td>
       <td><span class="badge ${badgeCls}">${esc(c.formatBadge)}</span></td>
       <td><span class="dot ${dot}"></span>${esc(statusLabel(c.status))}</td>
-      <td class="small muted">${(c.libs||[]).slice(0,4).map(l=>`<span class="badge" style="${l.status==='verwundbar'?'color:var(--red);border-color:#f8514966':(l.status==='nicht gepflegt'||l.status==='veraltet')?'color:var(--yellow);border-color:#d2992266':l.status==='unbekannt'?'color:var(--muted)':''}" title="${esc(libStatusLabel(l.status)||l.status||'')}">${esc(l.name)}@${esc(l.version)}</span>`).join(' ')||'—'}${(c.libs||[]).length>4?` <span class="muted">+${c.libs.length-4}</span>`:''}</td>
+      <td class="small muted">${(c.libs||[]).slice(0,4).map(l=>`<span class="badge" style="${l.status==='verwundbar'?'color:var(--red);border-color:#f8514966':(l.status==='nicht gepflegt'||l.status==='veraltet')?'color:var(--yellow);border-color:#d2992266':l.status==='unbekannt'?'color:var(--muted)':''}" title="${esc((libStatusLabel(l.status)||l.status||'')+(l.action&&l.action!=='ok'?' → '+l.action+(l.actionPath?' ('+l.actionPath+')':''):''))}">${esc(l.name)}@${esc(l.version)}</span>`).join(' ')||'—'}${(c.libs||[]).length>4?` <span class="muted">+${c.libs.length-4}</span>`:''}</td>
       <td class="small muted">${fmtDate(c.lastChange&&c.lastChange.at)}</td>
       <td class="small">${esc(c.changeSummary)}</td>
       <td><div class="actions">
@@ -1113,7 +1121,7 @@ async function loadLibraries(){
 }
 
 // Build-Marker: muss mit BUILD in start.js übereinstimmen. Erkennt einen veralteten Backend-Prozess.
-const APP_BUILD = '2026-06-27.50';
+const APP_BUILD = '2026-06-27.51';
 async function checkBackend(){
   const b = $('staleBanner');
   try{

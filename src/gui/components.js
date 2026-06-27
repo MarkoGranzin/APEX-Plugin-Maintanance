@@ -14,12 +14,17 @@ import fs from 'node:fs';
 import { detectArtifacts } from '../inventory/inventory.js';
 import { extractArtifact } from '../extract/extract.js';
 import { reviewGate as defaultReviewGate } from '../run/review.js';
+import { decideLibAction } from '../service/lib-decision.js';
 
 const FORMAT_BADGE = { export: 'APEX-SQL-Export', source: 'JS+CSS roh', mixed: 'gemischt', unclear: 'noch nicht erkannt' };
 
 /** Übersichts-View-Model: eine kompakte Zeile je Komponente. */
 export function overviewViewModel(store) {
-  return store.list().map((c) => ({
+  return store.list().map((c) => {
+  // T-114/T-119: je Lib die empfohlene Aktion (update/replace/redevelop) ableiten + je Komponente summieren.
+  const libs = (c.libs ?? []).map((l) => { const d = decideLibAction(l); return { ...l, action: d.action, actionPath: d.path, actionReason: d.reason }; });
+  const libActions = libs.reduce((a, l) => { if (l.action === 'update') a.update++; else if (l.action === 'replace') a[l.actionPath === 'redevelop' ? 'redevelop' : 'replace']++; return a; }, { update: 0, replace: 0, redevelop: 0 });
+  return ({
     id: c.id,
     name: c.name,
     type: c.type,
@@ -29,7 +34,8 @@ export function overviewViewModel(store) {
     critical: c.critical,
     lastChange: c.lastChange ?? null,
     changeSummary: c.lastChange?.summary ?? '—',
-    libs: c.libs ?? [],
+    libs,
+    libActions, // {update, replace, redevelop} — empfohlene Aktionen je Komponente (T-114/T-119)
     libWarning: c.libWarning ?? null,
     rebuilt: !!c.rebuilt,
     rebuiltTo: c.rebuiltTo ?? null,
@@ -39,7 +45,8 @@ export function overviewViewModel(store) {
     mockSelfCheck: c.mockSelfCheck ?? null, // Self-Test-Ergebnis (views/total/failed) fürs Listen-Badge
     notesCount: c.notes.length,
     reviewsCount: c.reviews.length,
-  }));
+  });
+  });
 }
 
 /** Detail-View-Model: volle Komponente mit zeitlich absteigenden Notizen/Reviews. */
