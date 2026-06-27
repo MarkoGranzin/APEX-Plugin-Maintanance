@@ -28,6 +28,7 @@ import { autoUpdateComponent } from './src/service/update-component.js';
 import { applyVendoredUpdates } from './src/service/lib-update.js';
 import { assignRepoToComponent } from './src/service/assign-repo.js';
 import { autoReviewFix } from './src/service/autoreview.js';
+import { dualReviewFix } from './src/service/dual-review-fix.js';
 import { checkLibrariesOnline, libWarningFrom } from './src/service/lib-check.js';
 import { buildSbom } from './src/sbom/sbom.js';
 import { autoFixComponent } from './src/service/autofix.js';
@@ -55,7 +56,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const DATA_DIR = process.env.AISPP_DATA_DIR || path.join(__dirname, 'data');
 // Build-Marker: muss mit APP_BUILD in public/app.html übereinstimmen. Bei Backend-Änderungen erhöhen.
 // Das Frontend vergleicht beide und warnt, wenn der laufende Dienst veraltet ist (Neustart nötig).
-const BUILD = '2026-06-27.51';
+const BUILD = '2026-06-27.52';
 const C = { reset: '\x1b[0m', bold: '\x1b[1m', dim: '\x1b[2m', green: '\x1b[32m', yellow: '\x1b[33m', red: '\x1b[31m', cyan: '\x1b[36m' };
 const c = (col, s) => `${C[col]}${s}${C.reset}`;
 
@@ -326,7 +327,7 @@ function cmdServe(portArg) {
         let comp = store.get(id);
         if (!comp.baseline || !(comp.baseline.green > 0)) { await captureBaseline(store, comp, { specsDir, hasPlaywright, onBaseline }); comp = store.get(id); }
         if (comp.baseline && comp.baseline.green > 0) {
-          r.migration = await redevelopComponent(store, store.get(id), { ai, specsDir, hasPlaywright, reviewFix: autoReviewFix, upload: uploadFor(true) });
+          r.migration = await redevelopComponent(store, store.get(id), { ai, specsDir, hasPlaywright, reviewFix: dualReviewFix, upload: uploadFor(true) });
           const fresh = store.get(id); r.after = fresh.status; r.rebuilt = !!fresh.rebuilt;
         } else {
           r.migration = { skipped: true, reason: comp.baseline ? 'Mock baseline not green — migration cannot be verified “as before” (the mock does not load the plugin cleanly)' : 'No baseline could be captured' };
@@ -572,6 +573,7 @@ function cmdServe(portArg) {
         pluginUrl: c.uiTestUrl,
         specsDir: path.join(DATA_DIR, 'ui-tests', slugify(c.name)),
         hasPlaywright,
+        reviewFix: dualReviewFix, // T-119/2: 2 unabhängige Review-Voten + Rework vor dem works-as-before-Gate
         upload: uploadFor(true), // Push nur bei settings.allowPush (T-76)
       });
       return json(res, r, r?.error ? 400 : 200);
