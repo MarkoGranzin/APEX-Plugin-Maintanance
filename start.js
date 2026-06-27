@@ -36,6 +36,7 @@ import { runUiTests } from './src/test/run-ui.js';
 import { captureBaseline } from './src/service/baseline.js';
 import { redevelopComponent } from './src/service/redev.js';
 import { generateAiMock, writeMock, refineMock, mockInputFingerprint, MOCK_SPEC_VERSION } from './src/test/mock.js';
+import { acceptanceFromSelfTest, writeAcceptance } from './src/service/acceptance.js';
 import { uploadFix } from './src/service/upload.js';
 import { slug as slugify } from './src/util/slug.js';
 import { resolveAiBackend, aiBackendView } from './src/ai/configure.js';
@@ -54,7 +55,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const DATA_DIR = process.env.AISPP_DATA_DIR || path.join(__dirname, 'data');
 // Build-Marker: muss mit APP_BUILD in public/app.html übereinstimmen. Bei Backend-Änderungen erhöhen.
 // Das Frontend vergleicht beide und warnt, wenn der laufende Dienst veraltet ist (Neustart nötig).
-const BUILD = '2026-06-27.49';
+const BUILD = '2026-06-27.50';
 const C = { reset: '\x1b[0m', bold: '\x1b[1m', dim: '\x1b[2m', green: '\x1b[32m', yellow: '\x1b[33m', red: '\x1b[31m', cyan: '\x1b[36m' };
 const c = (col, s) => `${C[col]}${s}${C.reset}`;
 
@@ -205,6 +206,9 @@ function cmdServe(portArg) {
           gen.html = ref.html;
           // „failed" zählt ALLE verbliebenen Probleme (rote Checks + falsch-grüne Dependency-/Leer-Render-Fälle)
           gen.selfCheck = { views: ref.after.views, total: ref.after.total, failed: (ref.failed || ref.after.failed || []).length };
+          // T-116: Akzeptanz-Vertrag (technologieunabhängiges Soll) aus der grünen Charakterisierung festhalten
+          // → Grundlage für eine spätere slice-weise Neuentwicklung (F-30/T-117).
+          try { const contract = acceptanceFromSelfTest(ref.after, { name: component.name, at: new Date().toISOString() }); if (!contract.error) writeAcceptance(component.path, contract); } catch { /* best effort */ }
         }
       } catch (e) { writeLog(component, `[mock-selfcheck] übersprungen: ${e?.message ?? e}`); }
       const testsDir = path.join(component.path, '.maintenance', 'tests');
