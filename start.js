@@ -54,7 +54,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const DATA_DIR = process.env.AISPP_DATA_DIR || path.join(__dirname, 'data');
 // Build-Marker: muss mit APP_BUILD in public/app.html übereinstimmen. Bei Backend-Änderungen erhöhen.
 // Das Frontend vergleicht beide und warnt, wenn der laufende Dienst veraltet ist (Neustart nötig).
-const BUILD = '2026-06-27.45';
+const BUILD = '2026-06-27.46';
 const C = { reset: '\x1b[0m', bold: '\x1b[1m', dim: '\x1b[2m', green: '\x1b[32m', yellow: '\x1b[33m', red: '\x1b[31m', cyan: '\x1b[36m' };
 const c = (col, s) => `${C[col]}${s}${C.reset}`;
 
@@ -396,7 +396,7 @@ function cmdServe(portArg) {
 
     // Health/Build-Marker: das Frontend vergleicht ihn mit seinem APP_BUILD und warnt bei Abweichung
     // F-29: welche Komponenten gerade einen langen Lauf haben (clone/maintain/migrate/…) → GUI-Spinner
-    if (p === '/api/running') return json(res, { running: [...RUNNING], steps: Object.fromEntries(STEP) });
+    if (p === '/api/running') return json(res, { running: [...RUNNING], steps: Object.fromEntries(STEP), lastScheduledRunAt, scheduledRunning });
 
     if (p === '/api/health') return json(res, { ok: true, build: BUILD, hasPlaywright: fs.existsSync(path.join(__dirname, 'node_modules', '@playwright', 'test')), aiReady: resolveAiBackend(settings, secretStore).kind !== 'stub', features: ['vendored-libs', 'sbom', 'deep-tests', 'maintain', 'web-libcheck', 'ui-tests', 'pr-upload', 'lib-update', 'auto-repair', 'characterization', 'redev', 'licenses'] });
 
@@ -659,6 +659,7 @@ function cmdServe(portArg) {
   // Lib-Migration) für jede verwaltete Komponente — nicht nur scannen — und mailt danach den Report.
   let lastTick = '';
   let scheduledRunning = false;
+  let lastScheduledRunAt = null; // Zeitstempel des letzten abgeschlossenen automatischen Laufs (für die GUI-Header-Region)
   setInterval(() => {
     try {
       if (!settings.scheduleEnabled || !settings.schedule) return;
@@ -680,7 +681,7 @@ function cmdServe(portArg) {
             let pass; try { pass = secretStore.get('smtp-pass'); } catch {}
             await sendReportMail(buildReport(), { smtp: settings.smtp, pass, recipients: settings.recipients }).catch(() => {});
           }
-        } finally { scheduledRunning = false; }
+        } finally { scheduledRunning = false; lastScheduledRunAt = new Date().toISOString(); }
       })();
     } catch { scheduledRunning = false; }
   }, 60000);

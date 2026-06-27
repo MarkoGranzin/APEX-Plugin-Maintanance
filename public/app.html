@@ -38,6 +38,17 @@
   .muted{color:var(--muted)} .small{font-size:.85rem}
   .actions{display:flex;gap:6px;justify-content:flex-end}
   .empty{padding:50px;text-align:center;color:var(--muted)}
+  /* Header-Region (Kennzahlen) + Filter/Sortierung */
+  .overview{display:flex;gap:18px;flex-wrap:wrap;align-items:center;margin-bottom:12px;padding:10px 14px;border:1px solid var(--line);border-radius:10px;background:var(--panel,#11161d)}
+  .ov-stat{display:flex;flex-direction:column;line-height:1.15}
+  .ov-stat b{font-size:1.15rem} .ov-stat span{font-size:.72rem;color:var(--muted);text-transform:uppercase;letter-spacing:.04em}
+  .ov-stat.crit b{color:#f85149} .ov-stat.warn b{color:#d29922} .ov-stat.ok b{color:#3fb950}
+  .ov-sep{width:1px;align-self:stretch;background:var(--line)}
+  .chip{font-size:.8rem;padding:4px 11px;border-radius:999px;border:1px solid var(--line);background:transparent;color:var(--muted);cursor:pointer}
+  .chip:hover{color:var(--text,#e6edf3);border-color:var(--muted)}
+  .chip.active{background:var(--accent);border-color:var(--accent);color:#fff}
+  th.srt{cursor:pointer;user-select:none} th.srt:hover{color:var(--text,#e6edf3)}
+  th.srt .arr{opacity:.5;font-size:.8em;margin-left:3px}
   /* Drawer */
   .drawer-bg{position:fixed;inset:0;background:rgba(0,0,0,.5);display:none}
   .drawer-bg.open{display:block}
@@ -124,9 +135,29 @@
   </div>
 
   <div id="pluginsView">
+    <!-- Header-Region: Kennzahlen + letzter automatischer Lauf -->
+    <div id="overview" class="overview"></div>
+    <!-- Filterleiste (Default: alles sichtbar) -->
+    <div class="inline filterbar" style="margin-bottom:10px;gap:6px;flex-wrap:wrap;align-items:center">
+      <input id="fltText" type="text" placeholder="Filter name/repo…" oninput="setFilterText(this.value)" style="min-width:200px">
+      <span class="sp" style="width:6px"></span>
+      <button class="chip" data-flt="all" onclick="setFilterStatus('all')">All</button>
+      <button class="chip" data-flt="action" onclick="setFilterStatus('action')">Action needed</button>
+      <button class="chip" data-flt="vulnerable" onclick="setFilterStatus('vulnerable')">Vulnerable</button>
+      <button class="chip" data-flt="unmaintained" onclick="setFilterStatus('unmaintained')">Unmaintained</button>
+      <button class="chip" data-flt="outdated" onclick="setFilterStatus('outdated')">Outdated</button>
+      <button class="chip" data-flt="ok" onclick="setFilterStatus('ok')">OK</button>
+      <span class="muted small" id="fltCount" style="margin-left:6px"></span>
+    </div>
     <table id="tbl">
       <thead><tr>
-        <th>Name</th><th>Repo</th><th>Type</th><th>Format</th><th>Status</th><th>Libraries</th><th>Last change</th><th>Summary</th><th></th>
+        <th class="srt" data-sort="name" onclick="setSort('name')">Name</th>
+        <th>Repo</th><th>Type</th><th>Format</th>
+        <th class="srt" data-sort="severity" onclick="setSort('severity')">Status</th>
+        <th class="srt" data-sort="libs" onclick="setSort('libs')">Libraries</th>
+        <th class="srt" data-sort="change" onclick="setSort('change')">Last change</th>
+        <th class="srt" data-sort="summary" onclick="setSort('summary')">Summary</th>
+        <th></th>
       </tr></thead>
       <tbody id="rows"></tbody>
     </table>
@@ -318,6 +349,8 @@ async function pollRunning(){
     SRUN.clear(); next.forEach(id=>SRUN.add(id));
     SSTEP.clear(); for(const [id,st] of Object.entries(r.steps||{})) SSTEP.set(id, st);
     touched.forEach(applySpin);
+    lastRunInfo = { lastScheduledRunAt: r.lastScheduledRunAt, scheduledRunning: r.scheduledRunning };
+    renderOverview(); // „letzter Lauf"/running im Header aktuell halten
   }catch{ /* offline → ignorieren */ }
 }
 // Datei-Download aus In-Memory-Inhalt (vorher 4× dupliziert: SBOM/Log/Testplan/Coded-Test)
@@ -327,11 +360,65 @@ function saveBlob(name, content, type){
   URL.revokeObjectURL(url);
 }
 
-async function load(){
-  const list = await api('GET','/api/components');
-  const rows = $('rows'); rows.innerHTML='';
-  $('empty').style.display = list.length ? 'none' : 'block';
-  for(const c of list){
+// Übersicht: Daten + Sortier-/Filter-Zustand (Default: alles sichtbar, nach Dringlichkeit sortiert)
+let ALL = [];
+let sortKey = 'severity', sortDir = 'desc';
+let filterText = '', filterStatus = 'all';
+let lastRunInfo = {};
+const ACTION = (s)=> s && !['ok','getestet','neu'].includes(s); // „action needed" = Status weder ok/getestet/neu
+// Dringlichkeits-Rang: verwundbar > nicht gepflegt > veraltet > action needed > unbekannt > ok
+function sevRank(c){ const w=c.libWarning||{}; if(w.vulnerable) return 5; if(w.unmaintained) return 4; if(w.outdated) return 3; if(ACTION(c.status)) return 2; if(w.unknown) return 1; return 0; }
+function matchesFilter(c){
+  const t=filterText.trim().toLowerCase();
+  if(t && !((c.name||'').toLowerCase().includes(t) || (c.repo||'').toLowerCase().includes(t))) return false;
+  const w=c.libWarning||{};
+  switch(filterStatus){
+    case 'vulnerable': return !!w.vulnerable;
+    case 'unmaintained': return !!w.unmaintained;
+    case 'outdated': return !!w.outdated;
+    case 'action': return ACTION(c.status);
+    case 'ok': return c.status==='ok'||c.status==='getestet';
+    default: return true;
+  }
+}
+function cmpRow(a,b){
+  let d=0;
+  if(sortKey==='name') d=(a.name||'').localeCompare(b.name||'');
+  else if(sortKey==='libs') d=((a.libs||[]).length)-((b.libs||[]).length);
+  else if(sortKey==='change') d=(new Date((a.lastChange&&a.lastChange.at)||0))-(new Date((b.lastChange&&b.lastChange.at)||0));
+  else if(sortKey==='summary') d=(a.changeSummary||'').localeCompare(b.changeSummary||'');
+  else d=sevRank(a)-sevRank(b); // severity (default)
+  d = sortDir==='asc'? d : -d;
+  if(d===0) d=(a.name||'').localeCompare(b.name||''); // stabiler Tiebreak: Name A–Z
+  return d;
+}
+function renderOverview(){
+  const crit=ALL.filter(c=>c.libWarning&&c.libWarning.vulnerable).length;
+  const warn=ALL.filter(c=>{const w=c.libWarning||{};return !w.vulnerable && (w.unmaintained||w.outdated||w.unknown);}).length;
+  const action=ALL.filter(c=>ACTION(c.status)).length;
+  const lr=lastRunInfo.lastScheduledRunAt? fmtDate(lastRunInfo.lastScheduledRunAt) : 'never';
+  const run=lastRunInfo.scheduledRunning?' <span class="badge" style="color:#3fb950;border-color:#3fb95066">running…</span>':'';
+  const ov=$('overview'); if(!ov) return;
+  ov.innerHTML = `
+    <div class="ov-stat"><b>${ALL.length}</b><span>Plugins</span></div>
+    <div class="ov-sep"></div>
+    <div class="ov-stat crit"><b>${crit}</b><span>Critical</span></div>
+    <div class="ov-stat warn"><b>${warn}</b><span>Warnings</span></div>
+    <div class="ov-stat"><b>${action}</b><span>Action needed</span></div>
+    <div class="ov-sep"></div>
+    <div class="ov-stat"><b style="font-size:.92rem">${lr}${run}</b><span>Last auto-run</span></div>`;
+}
+function renderTable(){
+  const rows=$('rows'); if(!rows) return;
+  rows.innerHTML='';
+  $('empty').style.display = ALL.length ? 'none' : 'block';
+  const view = ALL.filter(matchesFilter).slice().sort(cmpRow);
+  const fc=$('fltCount'); if(fc) fc.textContent = view.length===ALL.length? `${ALL.length} shown` : `${view.length} of ${ALL.length} shown`;
+  // Filter-Chips: aktiven markieren
+  document.querySelectorAll('.chip[data-flt]').forEach(b=>b.classList.toggle('active', b.getAttribute('data-flt')===filterStatus));
+  // Sortier-Pfeile in den Spaltenköpfen
+  document.querySelectorAll('th.srt').forEach(th=>{ const k=th.getAttribute('data-sort'); const base=th.textContent.replace(/[▲▼]\s*$/,'').trim(); th.innerHTML = base + (k===sortKey?` <span class="arr">${sortDir==='asc'?'▲':'▼'}</span>`:''); });
+  for(const c of view){
     const tr = document.createElement('tr'); tr.className='row';
     const dot = (c.libWarning&&c.libWarning.vulnerable) ? 'err' : (c.status==='ok'||c.status==='getestet') ? 'ok' : c.status==='neu' ? '' : 'warn';
     const badgeCls = c.formatBadge==='APEX-SQL-Export'?'export':'';
@@ -353,6 +440,14 @@ async function load(){
     tr.onclick = (e)=>{ const a=e.target.getAttribute('data-act'); if(a==='mock'){e.stopPropagation();window.open(c.mockUrl,'_blank','noopener');} else if(a==='edit'){e.stopPropagation();openEdit(c);} else if(a==='del'){e.stopPropagation();delComponent(c);} else openDetail(c.id); };
     rows.appendChild(tr);
   }
+  renderOverview();
+}
+function setSort(key){ if(sortKey===key){ sortDir = sortDir==='asc'?'desc':'asc'; } else { sortKey=key; sortDir = key==='name'||key==='summary' ? 'asc' : 'desc'; } renderTable(); }
+function setFilterStatus(s){ filterStatus=s; renderTable(); }
+function setFilterText(t){ filterText=t; renderTable(); }
+async function load(){
+  ALL = await api('GET','/api/components');
+  renderTable();
 }
 
 async function openDetail(id){
@@ -1014,7 +1109,7 @@ async function loadLibraries(){
 }
 
 // Build-Marker: muss mit BUILD in start.js übereinstimmen. Erkennt einen veralteten Backend-Prozess.
-const APP_BUILD = '2026-06-27.45';
+const APP_BUILD = '2026-06-27.46';
 async function checkBackend(){
   const b = $('staleBanner');
   try{
