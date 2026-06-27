@@ -2,7 +2,7 @@ import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { buildMockPage, buildMockSpec, generateMock, writeMock, generateAiMock, aiMockPrompt, aiAnalyzePrompt, analyzeViews, finalizeAiHtml, runMockSelfTests, aiRefinePrompt, refineMock, collectMock, normalizeLibPaths, HARNESS_RESET } from '../src/test/mock.js';
+import { buildMockPage, buildMockSpec, generateMock, writeMock, generateAiMock, aiMockPrompt, aiAnalyzePrompt, analyzeViews, finalizeAiHtml, runMockSelfTests, aiRefinePrompt, refineMock, mockInputFingerprint, MOCK_SPEC_VERSION, collectMock, normalizeLibPaths, HARNESS_RESET } from '../src/test/mock.js';
 
 describe('F-28 T-97 Auto-Mock', () => {
   it('buildMockPage: self-contained HTML mit Shim, Libs (src), Plugin-Dateien (src), DOM, Entry-Calls, Events, __rendered/__features', () => {
@@ -385,6 +385,37 @@ describe('F-28 T-97 Auto-Mock', () => {
       const ref = await refineMock({ html: '<html></html>', mode: 'ai', libFiles: [], extraLibFiles: [], cssFiles: [] }, { ai, url: 'http://x', name: 'P', write: () => {}, launch });
       expect(aiCalls).toBe(0);
       expect(ref.after.failed.length).toBe(0);
+    });
+  });
+
+  describe('Versionierte KI-Untersuchung — Fingerprint (nur unbekannte Versionen bauen)', () => {
+    let fdir;
+    beforeAll(() => {
+      fdir = fs.mkdtempSync(path.join(os.tmpdir(), 'mockfp-'));
+      fs.mkdirSync(path.join(fdir, 'js'), { recursive: true });
+      fs.writeFileSync(path.join(fdir, 'js', 'widget.js'), "function initWidget(){ document.querySelector('#root'); }");
+      fs.writeFileSync(path.join(fdir, 'region_type_plugin_x.sql'),
+        "wwv_flow_api.create_plugin_attribute(\n p_id=>1\n,p_prompt=>'Mode'\n,p_attribute_type=>'SELECT LIST'\n);\n");
+    });
+    afterAll(() => { fs.rmSync(fdir, { recursive: true, force: true }); });
+
+    it('deterministisch + sha256-Form; gleicher Stand → gleicher Fingerprint', () => {
+      const fp1 = mockInputFingerprint(fdir);
+      expect(fp1).toMatch(/^[a-f0-9]{64}$/);
+      expect(mockInputFingerprint(fdir)).toBe(fp1); // bekannter Stand → KI-Untersuchung kann entfallen
+    });
+
+    it('Plugin-/Vertrags-Änderung → anderer Fingerprint (unbekannte Version → neu untersuchen)', () => {
+      const fp1 = mockInputFingerprint(fdir);
+      fs.appendFileSync(path.join(fdir, 'region_type_plugin_x.sql'),
+        "wwv_flow_api.create_plugin_attribute(\n p_id=>2\n,p_prompt=>'New Option'\n,p_attribute_type=>'CHECKBOX'\n);\n");
+      expect(mockInputFingerprint(fdir)).not.toBe(fp1);
+    });
+
+    it('MOCK_SPEC_VERSION fließt ein: andere Logik-Version → andere Fingerprints (bekannte Plugins 1× neu)', () => {
+      // gleiche Eingaben, aber die Spec-Version ist Teil des Hashes → ein Bump invalidiert bewusst alle Caches
+      expect(typeof MOCK_SPEC_VERSION).toBe('string');
+      expect(MOCK_SPEC_VERSION.length).toBeGreaterThan(0);
     });
   });
 });

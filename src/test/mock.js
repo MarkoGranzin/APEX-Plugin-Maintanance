@@ -14,6 +14,7 @@
 
 import fs from 'node:fs';
 import path from 'node:path';
+import crypto from 'node:crypto';
 import { detectVendoredLibraries } from '../sbom/vendored.js';
 import { inspectAssets, parseOk } from '../extract/assets.js';
 import { isLibraryFile } from '../inventory/format.js';
@@ -323,6 +324,29 @@ export function collectMock(dir) {
     }
   } catch { /* best effort */ }
   return { libFiles, extraLibFiles, cssFiles, attributes, optionSurface, pluginFiles, selectors: [...selectors], entryPoints: [...entryPoints], functions, events: [...events.values()] };
+}
+
+/**
+ * Spec-Version der Mock-/Analyse-LOGIK. HOCHZÄHLEN, wenn sich Analyse-Stufe, Prompt oder Mock-Aufbau
+ * fachlich ändern → bekannte Plugins werden einmalig neu untersucht, gleicher Stand bleibt gecacht.
+ */
+export const MOCK_SPEC_VERSION = '2026-06-27.42';
+
+/**
+ * Fingerprint der EINGABEN, die den Mock bestimmen: Plugin-Code + deklarierter Vertrag (Options-Surface)
+ * + verdrahtete Libs/CSS + Spec-Version. Gleicher Fingerprint = bekannte Version → KI-Untersuchung sparen
+ * und den eingecheckten Mock wiederverwenden. Ändert sich Plugin-Quelle/Vertrag (oder unsere Logik) → neu.
+ */
+export function mockInputFingerprint(dir) {
+  let c; try { c = collectMock(dir); } catch { return null; }
+  const canon = JSON.stringify({
+    spec: MOCK_SPEC_VERSION,
+    plugin: (c.pluginFiles || []).map((p) => [p.name, p.code]).sort((a, b) => a[0] < b[0] ? -1 : 1),
+    surface: c.optionSurface || '',
+    libs: [...(c.libFiles || []), ...(c.extraLibFiles || [])].slice().sort(),
+    css: (c.cssFiles || []).slice().sort(),
+  });
+  return crypto.createHash('sha256').update(canon).digest('hex');
 }
 
 /**

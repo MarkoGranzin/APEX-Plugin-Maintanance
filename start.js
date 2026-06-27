@@ -35,7 +35,7 @@ import { maintainComponent } from './src/service/maintain.js';
 import { runUiTests } from './src/test/run-ui.js';
 import { captureBaseline } from './src/service/baseline.js';
 import { redevelopComponent } from './src/service/redev.js';
-import { generateAiMock, writeMock, refineMock } from './src/test/mock.js';
+import { generateAiMock, writeMock, refineMock, mockInputFingerprint, MOCK_SPEC_VERSION } from './src/test/mock.js';
 import { uploadFix } from './src/service/upload.js';
 import { slug as slugify } from './src/util/slug.js';
 import { resolveAiBackend, aiBackendView } from './src/ai/configure.js';
@@ -54,7 +54,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const DATA_DIR = process.env.AISPP_DATA_DIR || path.join(__dirname, 'data');
 // Build-Marker: muss mit APP_BUILD in public/app.html übereinstimmen. Bei Backend-Änderungen erhöhen.
 // Das Frontend vergleicht beide und warnt, wenn der laufende Dienst veraltet ist (Neustart nötig).
-const BUILD = '2026-06-27.42';
+const BUILD = '2026-06-27.43';
 const C = { reset: '\x1b[0m', bold: '\x1b[1m', dim: '\x1b[2m', green: '\x1b[32m', yellow: '\x1b[33m', red: '\x1b[31m', cyan: '\x1b[36m' };
 const c = (col, s) => `${C[col]}${s}${C.reset}`;
 
@@ -166,17 +166,24 @@ function cmdServe(portArg) {
       if (!component?.path || !fs.existsSync(component.path)) return null;
       const sl = slugify(component.name);
       const mockUrl = `http://localhost:${port}/mock/${sl}/index.html`;
-      const exists = fs.existsSync(path.join(component.path, '.maintenance', 'mock', 'index.html'));
+      const mockDir = path.join(component.path, '.maintenance', 'mock');
+      const fpPath = path.join(mockDir, '.mock-fingerprint.json');
+      const exists = fs.existsSync(path.join(mockDir, 'index.html'));
       const ai = resolveAiBackend(settings, secretStore);
       const cur0 = store.get(component.id) || {};
       // Alten/statischen Mock auf den KI-Mock hochstufen, sobald ein KI-Backend da ist (einmalig).
       const upgrade = ai.kind !== 'stub' && cur0.mockMode !== 'ai';
-      if (exists && !opts.force && !upgrade) { // vorhandenen (KI-)Mock wiederverwenden — kein erneuter KI-Lauf
-        store.update(component.id, { mockUrl, ...(cur0.uiTestUrl ? {} : { uiTestUrl: mockUrl }) });
+      // Versionierte KI-Untersuchung: nur bei UNBEKANNTER Version bauen. Stimmt der eingecheckte Mock-Fingerprint
+      // (Plugin-Code + Vertrag + Libs/CSS + Spec-Version) mit dem aktuellen Stand überein → KI sparen, wiederverwenden.
+      const fp = mockInputFingerprint(component.path);
+      let known = false;
+      try { known = exists && fp && JSON.parse(fs.readFileSync(fpPath, 'utf8'))?.fp === fp; } catch { known = false; }
+      if (exists && known && !upgrade) {
+        if (opts.force) writeLog(component, '[mock] bekannte Version (Fingerprint match) — KI-Untersuchung übersprungen, eingecheckter Mock wiederverwendet');
+        store.update(component.id, { mockUrl, mockFingerprint: fp, ...(cur0.uiTestUrl ? {} : { uiTestUrl: mockUrl }) });
         return mockUrl;
       }
       const gen = await generateAiMock(component.path, { ai, name: component.name }); // KI schreibt; Fallback statisch
-      const mockDir = path.join(component.path, '.maintenance', 'mock');
       writeMock(mockDir, component.path, gen); // committet (git add .)
       // Selbstkorrektur-Schleife: Self-Tests headless laufen lassen; rote (Fehl-Charakterisierungen) lässt die KI
       // generisch nachbessern (Ist-Werte statt geratener Konstanten) → bis grün. Für JEDES Plugin, ohne Handarbeit.
@@ -194,8 +201,10 @@ function cmdServe(portArg) {
       const testsDir = path.join(component.path, '.maintenance', 'tests');
       fs.mkdirSync(testsDir, { recursive: true });
       fs.writeFileSync(path.join(testsDir, gen.spec.name), gen.spec.content);
+      // Fingerprint neben dem (eingecheckten) Mock ablegen → künftige Builds bekannter Versionen sparen die KI.
+      try { if (fp) fs.writeFileSync(fpPath, JSON.stringify({ fp, spec: MOCK_SPEC_VERSION, mode: gen.mode, views: gen.selfCheck?.views ?? null, total: gen.selfCheck?.total ?? null }, null, 2)); } catch { /* best effort */ }
       const cur = store.get(component.id) || {};
-      const patch = { mockUrl, mockMode: gen.mode, mockNote: gen.fallbackReason || null, mockSelfCheck: gen.selfCheck || null, codedTests: [...(cur.codedTests || []).filter((t) => t.name !== gen.spec.name), gen.spec] };
+      const patch = { mockUrl, mockMode: gen.mode, mockNote: gen.fallbackReason || null, mockFingerprint: fp || null, mockSelfCheck: gen.selfCheck || null, codedTests: [...(cur.codedTests || []).filter((t) => t.name !== gen.spec.name), gen.spec] };
       if (!cur.uiTestUrl) patch.uiTestUrl = mockUrl; // Default-Ziel, falls der Nutzer keine eigene URL gesetzt hat
       store.update(component.id, patch);
       return mockUrl;
