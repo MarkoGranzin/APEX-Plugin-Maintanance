@@ -591,7 +591,7 @@ export async function runMockSelfTests(url, deps = {}) {
     const errBroken = (data.errors || []).filter((e) => /is not defined|is not a function|cannot read/i.test(e));
     const problems = [...failed, ...falseGreen];
     if (errBroken.length) problems.push({ view: 'global', feature: 'uncaught dependency error — a required library/global is missing, load it', detail: errBroken.slice(0, 3).join(' | ') });
-    return { ran: true, ok: data.ok, rendered: data.rendered, views: data.views, total: feats.length, failed, errors: data.errors, falseGreen, problems };
+    return { ran: true, ok: data.ok, rendered: data.rendered, views: data.views, total: feats.length, features: feats, failed, errors: data.errors, falseGreen, problems };
   } catch (e) {
     return { ran: false, reason: String(e?.message ?? e) };
   } finally {

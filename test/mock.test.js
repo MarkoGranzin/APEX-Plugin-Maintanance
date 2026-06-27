@@ -380,6 +380,8 @@ describe('F-28 T-97 Auto-Mock', () => {
       expect(st.failed.length).toBe(0);          // formal kein roter Check
       expect(st.falseGreen.length).toBe(1);      // aber ein falsch-grüner (jsonpath/empty)
       expect(st.problems.length).toBe(1);        // → zählt als Problem
+      expect(Array.isArray(st.features)).toBe(true); // features mitgeben (für Akzeptanz-Vertrag T-116/T-120)
+      expect(st.features.length).toBe(2);
     });
 
     it('refineMock: rot → KI bessert nach → grün (konvergiert, schreibt korrigierten Mock)', async () => {
