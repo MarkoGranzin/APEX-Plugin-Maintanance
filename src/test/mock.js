@@ -195,32 +195,92 @@ function scanCssFiles(dir) {
  * dass die KI MEHRERE Sichten/Testfälle (je Modus/Option) plant und charakterisiert, statt nur einer
  * Default-Konfiguration. Kein plugin-spezifisches Wissen nötig — kommt aus dem Plugin selbst.
  */
+/**
+ * Liest die GENERISCHE, bei JEDEM APEX-Plugin standardisierte Vertragsbasis aus dem SQL-Export:
+ * die `wwv_flow_api.create_plugin_attribute`-Deklarationen (Prompt, Typ, Default, Hilfetext) plus die
+ * zugehörigen `create_plugin_attr_value`-LOV-Werte. KEINE Annahme über config-JSON/<li>/o.ä. — wie ein
+ * Plugin seine Modes konkret umsetzt (Select-List-Attribut, Checkbox, freier JS/JSON-Config-Blob …) steht
+ * IN dieser Deklaration (Werte/Default/Hilfetext sind die plugin-eigene Doku). Fehlt sie → leer (ehrlich).
+ * Diese Fakten sind die Eingabe der KI-Analyse (analyzeViews), die daraus die Sichten ABLEITET.
+ */
 function scanPluginAttributes(dir) {
-  const names = new Set();
-  const docs = [];
+  const attrs = []; // {prompt, type, def, help, values:[]}
   walkRepoFiles(dir, (rel, abs) => {
     if (!/\.sql$/i.test(rel) || tooBig(abs)) return;
     let txt = ''; try { txt = fs.readFileSync(abs, 'utf8'); } catch { return; }
-    for (const m of txt.matchAll(/p_prompt\s*=>\s*'((?:[^']|'')+)'/gi)) {
-      const label = m[1].replace(/''/g, "'").trim();
-      if (label && label.length <= 60) names.add(label);
-    }
-    // Options-/Mode-Surface ZEILENWEISE (robust, wenig Rauschen): Config-Default-JSON-Keys ("key":),
-    // Hilfetext-Listen (<li>…</li>) und „name (type): werte". So sieht die KI ALLE Modes/Werte je Option.
-    for (const raw of txt.split(/\r?\n/)) {
-      const u = raw.replace(/''/g, "'");
-      if (!(/"[\w$-]+"\s*:/.test(u) || /<li[ >]/i.test(u) || /\([a-z][a-z ]*\)\s*:/i.test(u))) continue;
-      const s = u.replace(/<[^>]+>/g, ' ').replace(/&[a-z]+;/gi, ' ').replace(/^[\s,'|]+|[\s,'|]+$/g, '').replace(/\s+/g, ' ').trim();
-      if (s.length >= 4 && s.length <= 220) docs.push(s);
+    let last = null;
+    for (const call of plsqlApiCalls(txt, /wwv_flow_api\.(create_plugin_attribute|create_plugin_attr_value)\s*\(/gi)) {
+      const p = plsqlParams(call.body);
+      if (call.name === 'create_plugin_attribute') {
+        const a = {
+          prompt: (plsqlText(p.p_prompt) || '').trim(),
+          type: (plsqlText(p.p_attribute_type) || '').trim(),
+          def: (plsqlText(p.p_default_value) || '').replace(/\s+/g, ' ').trim(),
+          help: (plsqlText(p.p_help_text) || '').replace(/\s+/g, ' ').trim(),
+          values: [],
+        };
+        if (a.prompt) { attrs.push(a); last = a; }
+      } else if (last) {
+        const disp = (plsqlText(p.p_display_value) || '').trim();
+        const ret = (plsqlText(p.p_return_value) || '').trim();
+        const v = disp && ret && disp !== ret ? `${disp}=${ret}` : (disp || ret);
+        if (v) last.values.push(v);
+      }
     }
   });
-  const seen = new Set(); const lines = []; let len = 0;
-  for (const p of docs) {
-    const k = p.toLowerCase(); if (seen.has(k)) continue; seen.add(k);
-    if (len + p.length > 2600) break;
-    lines.push(p); len += p.length;
+  // Vertragstext rendern: pro Attribut Prompt [Typ], erlaubte Werte, Default + Hilfetext (plugin-eigene Doku).
+  const lines = []; let len = 0;
+  for (const a of attrs) {
+    let line = `• ${a.prompt}${a.type ? ` [${a.type}]` : ''}`;
+    if (a.values.length) line += ` — allowed values: ${a.values.join(' | ')}`;
+    const doc = [a.help, a.def].filter(Boolean).join(' || ');
+    if (doc) line += ` — ${doc}`;
+    line = line.slice(0, 1400); // Config-Blob-Defaults (wo Modes stehen) komplett mitnehmen
+    if (len + line.length > 4500) break;
+    lines.push(line); len += line.length;
   }
-  return { names: [...names], surface: lines.join('\n') };
+  return { names: attrs.map((a) => a.prompt), surface: lines.join('\n'), attrs };
+}
+
+/** Findet `pkg.fn(...)`-Aufrufe mit balancierten Klammern (PL/SQL-String-' bewusst). Liefert {name, body}. */
+function plsqlApiCalls(txt, re) {
+  const out = [];
+  let m;
+  while ((m = re.exec(txt)) !== null) {
+    let i = re.lastIndex, depth = 1, inStr = false;
+    while (i < txt.length && depth > 0) {
+      const ch = txt[i];
+      if (inStr) { if (ch === "'") { if (txt[i + 1] === "'") i++; else inStr = false; } }
+      else if (ch === "'") inStr = true;
+      else if (ch === '(') depth++;
+      else if (ch === ')') depth--;
+      i++;
+    }
+    out.push({ name: m[1].toLowerCase(), body: txt.slice(re.lastIndex, i - 1) });
+    re.lastIndex = i;
+  }
+  return out;
+}
+
+/** Zerlegt einen Aufrufkörper in `p_name => <rohwert>` (Wert bis zum nächsten Parameter-Token). */
+function plsqlParams(body) {
+  const re = /(?:^|[\s,(])(p_[a-z0-9_]+)\s*=>/gi;
+  const marks = []; let m;
+  while ((m = re.exec(body)) !== null) marks.push({ name: m[1].toLowerCase(), tok: m.index, val: re.lastIndex });
+  const params = {};
+  for (let k = 0; k < marks.length; k++) {
+    const end = k + 1 < marks.length ? marks[k + 1].tok : body.length;
+    if (!(marks[k].name in params)) params[marks[k].name] = body.slice(marks[k].val, end);
+  }
+  return params;
+}
+
+/** Verkettet alle einfach-quotierten Literale eines Rohwerts (deckt Skalar '…' und wwv_flow_string.join-Listen). */
+function plsqlText(raw) {
+  if (!raw) return '';
+  const parts = []; const re = /'((?:[^']|'')*)'/g; let m;
+  while ((m = re.exec(raw)) !== null) parts.push(m[1].replace(/''/g, "'"));
+  return parts.join('');
 }
 
 /**
@@ -277,6 +337,51 @@ export function generateMock(dir, opts = {}) {
   return { html, spec: { name: `${slug(name)}.ui.spec.js`, content: buildMockSpec(name) }, libFiles: c.libFiles, extraLibFiles: c.extraLibFiles || [], cssFiles: c.cssFiles || [], pluginFiles: c.pluginFiles, selectors: c.selectors, entryPoints: c.entryPoints, mode: 'static' };
 }
 
+/**
+ * Prompt der ANALYSE-Stufe: die KI untersucht NUR dieses Plugin (deklarierte Attribute + Quellcode) und
+ * leitet daraus die zu testenden Sichten/Modes AB. Bewusst OHNE Beispiel-Modes von uns — was es an Modes
+ * gibt, ist das Ergebnis der Analyse, nicht vorgegeben. Output: JSON-Array [{view, why, config}].
+ */
+export function aiAnalyzePrompt(name, c) {
+  const src = (c.pluginFiles || []).map((p) => `// ${p.name}\n${p.code}`).join('\n\n').slice(0, 16000);
+  return `You are a senior test engineer analyzing ONE Oracle APEX plugin to plan its characterization tests.
+Plugin: ${name}
+
+Your ONLY job: DISCOVER, from THIS plugin itself, the distinct configurations / modes / behaviors that need SEPARATE test coverage — then output them as a plan. Derive EVERY entry from the evidence below; do NOT assume any particular config format and do NOT invent capabilities the plugin lacks.
+
+The plugin's OWN declared attributes (APEX standard contract — per attribute: prompt, type, allowed values, default value and help text). HOW this plugin exposes modes lives here: a select-list lists its values; a checkbox is a boolean mode; a free-text / JS / JSON config attribute documents its option keys and allowed values inside its default value & help text. Read them as the source of truth:
+${c.optionSurface || '(no declared attributes found)'}
+
+Plugin source (excerpt) — read it to see how each option is READ and which branches/modes/data states it drives (look for where option values are compared, switched on, or change rendering):
+${src || '(none)'}
+
+Enumerate EXHAUSTIVELY (not a sample), but ONLY modes THIS plugin actually has (evidence in the contract or source):
+- one scenario per discrete value of every multi-valued option (take the values from the contract/source — an enum/numeric mode with N documented values ⇒ N scenarios),
+- a scenario for each boolean option both ON and OFF where it changes behavior,
+- the data states the source actually supports (e.g. static vs lazy/async, filtered/unfiltered, cached, empty, error),
+- always include the plugin's default configuration as one scenario.
+
+Output ONLY a JSON array (no prose, no markdown fences). Each element:
+{ "view": "<short unique label>", "why": "<which option value or data state this exercises, citing the evidence>", "config": { <the concrete option values / data state for THIS scenario, exactly as the plugin expects them> } }
+Cover the contract above completely. Start the response with [ and end with ].`;
+}
+
+/**
+ * Führt die Analyse-Stufe aus: liefert den von der KI aus dem Plugin abgeleiteten Sichten-Plan
+ * (Array {view, why, config}). Ohne KI/auf Fehler → [] (der Mock-Prompt plant dann selbst aus dem Vertrag).
+ */
+export async function analyzeViews(deps, name, c) {
+  const ai = deps?.ai;
+  if (!ai || ai.kind === 'stub' || typeof ai.complete !== 'function') return [];
+  let out = '';
+  try { out = String(await ai.complete(aiAnalyzePrompt(name, c), {})); } catch { return []; }
+  out = out.replace(/```[a-z]*\n?/gi, '').replace(/```/g, '');
+  const s = out.indexOf('['); const e = out.lastIndexOf(']');
+  if (s < 0 || e <= s) return [];
+  let arr; try { arr = JSON.parse(out.slice(s, e + 1)); } catch { return []; }
+  return Array.isArray(arr) ? arr.filter((v) => v && typeof v.view === 'string' && v.view.trim()) : [];
+}
+
 /** Baut den Prompt, mit dem die KI einen plugin-spezifischen Mock schreibt (rein/testbar). */
 export function aiMockPrompt(name, c) {
   const fns = (c.functions || []).slice(0, 40).map((f) => `${f.name}(${(f.params || []).join(', ')})${f.apexCalls?.length ? ' [apex: ' + f.apexCalls.slice(0, 6).join(', ') + ']' : ''}`).join('\n');
@@ -297,8 +402,10 @@ Detected DOM selectors the plugin uses: ${(c.selectors || []).join(', ') || '(no
 Likely entry points: ${(c.entryPoints || []).join(', ') || '(none)'}
 Detected interactions/events the plugin binds (trigger EACH on its element): ${(c.events || []).map((e) => e.type + '→' + e.selector).join(', ') || '(none)'}
 DECLARED PLUGIN OPTIONS/ATTRIBUTES (the plugin's own capability contract — each is a configurable mode/feature to characterize): ${(c.attributes || []).join(' · ') || '(none)'}
-OPTION/MODE SURFACE — config defaults + help text from the plugin definition (every option key and its ALLOWED VALUES/modes; PLAN a view for each — including each discrete value of multi-valued options, e.g. selectMode 1/2/3):
-${(c.optionSurface || '(none)').slice(0, 2600)}
+OPTION/MODE SURFACE — the plugin's OWN declared attribute contract (prompt, type, allowed values, default, help text). This is where its modes live (a select-list's values, a checkbox's on/off, or the option keys + allowed values documented inside a free-text/JSON config attribute). Treat it as the source of truth for which modes exist:
+${(c.optionSurface || '(none)').slice(0, 4500)}
+${(c.viewPlan && c.viewPlan.length) ? `DISCOVERED VIEW PLAN — a prior analysis pass derived these distinct test scenarios FROM THIS PLUGIN. Render and self-test EXACTLY these views (do not drop any; you may add one only if you find a clear additional mode in the source). Each: view label, rationale, and the concrete config to apply:
+${c.viewPlan.map((v, i) => `  ${i + 1}. ${v.view}${v.why ? ` — ${String(v.why).slice(0, 160)}` : ''}\n     config: ${JSON.stringify(v.config || {}).slice(0, 400)}`).join('\n')}` : ''}
 Functions/signatures (with apex.* usage):
 ${fns || '(none)'}
 
@@ -322,13 +429,13 @@ Requirements for the page:
 - VISUAL QUALITY MATTERS — and THE PLUGIN MUST LOOK RIGHT BECAUSE ITS REAL CSS IS LOADED — NOT BECAUSE YOU PATCHED IT: load EVERY real CSS file listed above via <link> with the EXACT paths (a wrong path → 404 → broken/unstyled). A generic CSS reset (box-sizing + margins, APEX-like) is auto-injected before your stylesheets — rely on it, don't re-add one. Never hand-write/approximate the plugin's own classes to "fix" the look (that fakes it). Your ONLY layout job: give #mock-root a sensible size and the page enough height (it may scroll) so the whole plugin is visible. Load libs + plugin files via <script src> (exact paths, not inline); then init the plugin the way APEX would.
 - Wrap initialization in try/catch; collect errors in window.__mockErrors (array); add window.onerror to push to it. Set window.__ok = (window.__mockErrors.length === 0). Also set window.__rendered = (document.querySelector('#mock-root') has non-trivial child content, i.e. the plugin produced output).
 - CHARACTERIZE THE PLUGIN AS IT IS — NOT AS IT SHOULD BE. This page is the "works EXACTLY as before" spec: after the libraries are updated the plugin must do the SAME — no more, no less. Therefore EVERY self-test must describe the CURRENT behavior of the unmodified plugin and MUST PASS right now. Do NOT invent aspirational/robustness checks the current plugin does not already satisfy (e.g. "handles missing/undefined input gracefully", error-handling or edge cases it was never built for). If a check would be RED against the current unmodified plugin, it is NOT a valid characterization — drop it, or if the behavior matters record the plugin's ACTUAL current result as the expected value (e.g. if it currently throws on bad input, that IS the characterized behavior). window.__ok MUST be true for the unmodified plugin; a failing self-test here means you mis-characterized, not that the plugin is broken.
-- PLAN MULTIPLE VIEWS / TEST SCENARIOS — one configuration is NOT enough; the default leaves most behavior unprotected. Go through the OPTION/MODE SURFACE + source SYSTEMATICALLY and plan a view for EVERY mode/value the plugin supports — EXHAUSTIVELY, not a sample: each discrete value of every multi-valued option (e.g. selectMode 1 AND 2 AND 3), each boolean option on AND off where it changes behavior, plus the data states (static/lazy, filtered/unfiltered, cached, empty, error). Derive views ONLY from THIS plugin's own surface (don't invent capabilities it lacks, don't skip ones it has). Render the plugin SEPARATELY per view (own mount + that view's config/data) so all are visible, and self-test EACH view independently. Expose the plan as window.__views = array of { view, config }.
+- PLAN MULTIPLE VIEWS / TEST SCENARIOS — one configuration is NOT enough; the default leaves most behavior unprotected. If a DISCOVERED VIEW PLAN is given above, implement EXACTLY those views (they were derived from this plugin's analysis). Otherwise go through the OPTION/MODE SURFACE + source SYSTEMATICALLY and plan a view for EVERY mode/value the plugin supports — EXHAUSTIVELY, not a sample: each discrete value of every multi-valued option, each boolean option on AND off where it changes behavior, plus the data states (static/lazy, filtered/unfiltered, cached, empty, error). Take the concrete modes/values from THIS plugin's own contract+source — never from generic examples, never invent capabilities it lacks, never skip ones it has. Render the plugin SEPARATELY per view (own mount + that view's config/data) so all are visible, and self-test EACH view independently. Expose the plan as window.__views = array of { view, config }.
 - FIRST UNDERSTAND the plugin from the source: what it is, EVERY feature it offers, and how each one works. THEN make this page a SELF-TEST HARNESS that characterizes those features (ACROSS ALL planned views) as the spec a future migration must preserve. For EACH feature IN EACH view, run a check that ASSERTS its REAL EFFECT (not merely that code ran), e.g.:
    • render: #mock-root actually contains the expected output (the right number of nodes/cards/rows/svg etc.).
    • each interaction/event above: perform it and verify the resulting DOM change — e.g. a click toggles/opens the expected element; selection/sort/filter changes what is shown.
    • DRAG & DROP (and other pointer-driven gestures): inspect the source to see which mechanism the plugin actually listens for and reproduce EXACTLY that full sequence — HTML5 DnD (dragstart → dragenter → dragover → drop → dragend, all sharing ONE DataTransfer object) OR pointer/mouse events (pointerdown → pointermove(s) → pointerup, or mousedown → mousemove → mouseup, with realistic clientX/clientY on the right elements). Then verify the item really moved containers. IMPORTANT: synthetic drag is often NOT reliably triggerable in a headless harness even though it works for a real user. So if — after faithfully reproducing the real sequence — the move still cannot be observed, record this check as ok:true with detail "works for a real user; not reliably simulable headlessly — verify manually" — do NOT mark it failed. A feature that genuinely works must never be a red characterization.
    • ANIMATION (if the plugin animates, e.g. canvas/WebGL/SVG/CSS): verify it REALLY runs over time — capture the canvas/element state, wait ~300ms, capture again, and assert it CHANGED (a frozen/static frame = FAIL). The real library must be driving it, not a screenshot.
-   • BUTTONS / mode switches (if present, e.g. type tabs like net/waves/clouds): click EACH button and assert it actually switches AND the new mode then animates/renders — not merely that the button exists.
+   • BUTTONS / mode switches (if the plugin has any, discovered from its source/markup): click EACH and assert it actually switches AND the new mode then animates/renders — not merely that the button exists.
    • each entry point and each main option/mode produces its expected result.
   Wrap every check in try/catch (non-fatal) and push ONE result per feature-and-view to window.__features = array of { view, feature, ok, detail } where ok is TRUE only if the effect really happened (false + detail otherwise) and view names which planned scenario it belongs to. Then set window.__selftested = true. These window.__features entries (across ALL views) ARE the test cases the migration must keep green — make them concrete and meaningful, covering every planned view and the plugin's real features (selection modes, filter, async, caching, drag & drop, etc.).
 - KEEP THE VISIBLE STATE CLEAN: the self-tests must be NON-DESTRUCTIVE to the view. After all checks, the visible page MUST show the clean, correctly-rendered plugin with the original sample data — exactly what a user would see. Undo any mutation your tests caused (remove test-added cards/groups, restore toggles/collapses, move dragged items back), or run the checks on cloned/detached nodes. A screenshot taken at the end (for the visual "looks-as-before" gate) must show the tidy plugin, NOT a cluttered post-test board.
@@ -370,6 +477,8 @@ export async function generateAiMock(dir, deps = {}) {
   const ai = deps.ai;
   const fallback = (reason) => ({ ...generateMock(dir, { name }), fallbackReason: reason });
   if (!ai || ai.kind === 'stub' || typeof ai.complete !== 'function') return fallback('no AI backend (Settings → Test connection)');
+  // Analyse-Stufe zuerst: die KI leitet die zu testenden Sichten/Modes AUS DEM PLUGIN ab (kein Beispiel-Bias).
+  try { c.viewPlan = await analyzeViews(deps, name, c); } catch { c.viewPlan = []; }
   let html = '';
   try { html = String(await ai.complete(aiMockPrompt(name, c), {})); }
   catch (e) { return fallback('AI error: ' + (e?.message ?? e)); }

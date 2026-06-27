@@ -2,7 +2,7 @@ import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { buildMockPage, buildMockSpec, generateMock, writeMock, generateAiMock, aiMockPrompt, collectMock, normalizeLibPaths, HARNESS_RESET } from '../src/test/mock.js';
+import { buildMockPage, buildMockSpec, generateMock, writeMock, generateAiMock, aiMockPrompt, aiAnalyzePrompt, analyzeViews, collectMock, normalizeLibPaths, HARNESS_RESET } from '../src/test/mock.js';
 
 describe('F-28 T-97 Auto-Mock', () => {
   it('buildMockPage: self-contained HTML mit Shim, Libs (src), Plugin-Dateien (src), DOM, Entry-Calls, Events, __rendered/__features', () => {
@@ -60,11 +60,17 @@ describe('F-28 T-97 Auto-Mock', () => {
       fs.writeFileSync(path.join(dir, 'css', 'style.css'), ".kb-col-header-content{min-height:48px}\n@font-face{font-family:i;src:url(../fonts/icon.woff)}");
       fs.writeFileSync(path.join(dir, 'css', 'style.min.css'), ".kb-col-header-content{min-height:48px}"); // min-Zwilling → wird entdoppelt
       fs.writeFileSync(path.join(dir, 'css', 'bootstrap.min.css'), ".row{display:flex}");
-      // APEX-SQL-Export deklariert den Funktionsumfang als Attribut-Prompts → Basis für mehrere geplante Sichten
+      // APEX-SQL-Export: generischer STANDARD-Vertrag (create_plugin_attribute + LOV-Werte). Egal WIE ein Plugin
+      // Modes umsetzt (Select-List, Checkbox, freier JSON-Config-Blob) — es steht in dieser Deklaration.
       fs.writeFileSync(path.join(dir, 'region_type_plugin_widget.sql'),
-        ",p_prompt=>'Selection Mode'\n,p_prompt=>'Use Client Side Caching',p_attribute_type=>'YES_NO'\n,p_prompt=>'Search Item'\n" +
-        // Options-/Mode-Surface: Config-Default (JSON-Keys) + Hilfetext (erlaubte Werte je Option)
-        "'  \"selectMode\": 2,'\n'  \"enableCheckBox\": true,'\n'<li>selectMode (number): 1 - single selection; 2 - multi-selection; 3 - hierarchical</li>'");
+        "wwv_flow_api.create_plugin_attribute(\n p_id=>1\n,p_attribute_scope=>'COMPONENT'\n,p_prompt=>'Selection Mode'\n,p_attribute_type=>'SELECT LIST'\n,p_help_text=>'Controls how nodes get selected'\n);\n" +
+        "wwv_flow_api.create_plugin_attr_value(\n p_id=>11\n,p_display_value=>'Single'\n,p_return_value=>'1'\n);\n" +
+        "wwv_flow_api.create_plugin_attr_value(\n p_id=>12\n,p_display_value=>'Multi'\n,p_return_value=>'2'\n);\n" +
+        "wwv_flow_api.create_plugin_attr_value(\n p_id=>13\n,p_display_value=>'Hierarchical'\n,p_return_value=>'3'\n);\n" +
+        "wwv_flow_api.create_plugin_attribute(\n p_id=>2\n,p_attribute_scope=>'COMPONENT'\n,p_prompt=>'Use Client Side Caching'\n,p_attribute_type=>'CHECKBOX'\n);\n" +
+        "wwv_flow_api.create_plugin_attribute(\n p_id=>3\n,p_attribute_scope=>'COMPONENT'\n,p_prompt=>'Search Item'\n,p_attribute_type=>'PAGE ITEM'\n);\n" +
+        // Plugin mit freiem JS/JSON-Config-Blob: Modes stehen im Default-Wert + Hilfetext, nicht in LOVs.
+        "wwv_flow_api.create_plugin_attribute(\n p_id=>4\n,p_attribute_scope=>'COMPONENT'\n,p_prompt=>'ConfigJSON'\n,p_attribute_type=>'JAVASCRIPT'\n,p_default_value=>wwv_flow_string.join(wwv_flow_t_varchar2(\n'{',\n'  \"enableCheckBox\": true,',\n'  \"animationDuration\": 200',\n'}'))\n,p_help_text=>'Free JSON config; enableCheckBox toggles checkboxes'\n);\n");
       mockDir = fs.mkdtempSync(path.join(os.tmpdir(), 'mockout-'));
     });
     afterAll(() => { fs.rmSync(dir, { recursive: true, force: true }); fs.rmSync(mockDir, { recursive: true, force: true }); });
@@ -99,22 +105,59 @@ describe('F-28 T-97 Auto-Mock', () => {
       expect(aigen.html.indexOf('harness-reset')).toBeLessThan(aigen.html.indexOf('style.min.css'));
     });
 
-    it('Mehrere Sichten: collectMock liest deklarierte Plugin-Attribute (SQL), Prompt plant Views pro Modus', () => {
+    it('Generischer Vertrag: collectMock liest APEX-Standard-Attribute (Prompt+Typ+LOV+Default), KEINE config-JSON-Annahme', () => {
       const c = collectMock(dir);
       expect(c.attributes).toContain('Selection Mode');
       expect(c.attributes).toContain('Use Client Side Caching');
       expect(c.attributes).toContain('Search Item');
-      expect(c.optionSurface).toMatch(/selectMode/);                // Options-Surface aus SQL (Werte/Modes)
+      expect(c.attributes).toContain('ConfigJSON');
+      // Modes kommen aus dem plugin-eigenen Vertrag: Typ + LOV-Werte des Select-List-Attributs
+      expect(c.optionSurface).toMatch(/Selection Mode \[SELECT LIST\]/);
+      expect(c.optionSurface).toMatch(/Single=1/);
+      expect(c.optionSurface).toMatch(/Multi=2/);
+      expect(c.optionSurface).toMatch(/Hierarchical=3/);
+      expect(c.optionSurface).toMatch(/Use Client Side Caching \[CHECKBOX\]/);
+      // freier JSON-Config-Blob: Modes stehen im Default/Hilfetext, ebenfalls erfasst
+      expect(c.optionSurface).toMatch(/enableCheckBox/);
       const p = aiMockPrompt('Widget', c);
       expect(p).toMatch(/DECLARED PLUGIN OPTIONS\/ATTRIBUTES/);      // Attribut-Umfang gelistet
       expect(p).toMatch(/Selection Mode/);                          // konkretes Attribut im Prompt
       expect(p).toMatch(/OPTION\/MODE SURFACE/);                    // Mode-Surface eingespeist
-      expect(p).toMatch(/selectMode 1\/2\/3/);                      // erschöpfend je Wert
+      expect(p).toMatch(/source of truth for which modes exist/);    // Vertrag = Wahrheit, keine Beispiele
+      expect(p).not.toMatch(/selectMode 1\/2\/3/);                  // KEINE von uns geprompteten Beispiel-Modes
+      expect(p).not.toMatch(/net\/waves\/clouds/);                  // dito
       expect(p).toMatch(/PLAN MULTIPLE VIEWS \/ TEST SCENARIOS/);   // mehrere Sichten planen
       expect(p).toMatch(/EXHAUSTIVELY, not a sample/);              // alle Modes, nicht Stichprobe
+      expect(p).toMatch(/never from generic examples/);            // Werte aus dem Plugin, nicht Beispielen
       expect(p).toMatch(/Render the plugin SEPARATELY per view/);
       expect(p).toMatch(/window\.__views/);                         // Plan explizit
       expect(p).toMatch(/\{ view, feature, ok, detail \}/);         // Self-Test je View+Feature
+    });
+
+    it('Analyse-Stufe: aiAnalyzePrompt fragt NUR aus dem Plugin abgeleitete Modes (keine Beispiele), analyzeViews parst den Plan', async () => {
+      const c = collectMock(dir);
+      const ap = aiAnalyzePrompt('Widget', c);
+      expect(ap).toMatch(/DISCOVER, from THIS plugin itself/);
+      expect(ap).toMatch(/do NOT assume any particular config format/);
+      expect(ap).toMatch(/Selection Mode/);                         // Vertrag eingespeist
+      expect(ap).toMatch(/EXHAUSTIVELY/);
+      expect(ap).not.toMatch(/selectMode 1\/2\/3/);                 // keine Beispiel-Modes
+      // analyzeViews: JSON-Array (auch mit Prosa-Rahmen) wird robust geparst und gefiltert
+      const ai = { kind: 'cli', complete: async () => 'Here is the plan:\n[{"view":"Single","why":"Selection Mode=1","config":{"selectMode":1}},{"bad":1},{"view":"Multi","config":{"selectMode":2}}]\nDone.' };
+      const plan = await analyzeViews({ ai }, 'Widget', c);
+      expect(plan.map((v) => v.view)).toEqual(['Single', 'Multi']);  // ungültiger Eintrag gefiltert
+      // ohne KI → leer (Mock-Prompt plant dann selbst aus dem Vertrag)
+      expect(await analyzeViews({ ai: { kind: 'stub' } }, 'Widget', c)).toEqual([]);
+    });
+
+    it('Entdeckter Sichten-Plan landet im Mock-Prompt (genau diese Views umsetzen)', () => {
+      const c = collectMock(dir);
+      c.viewPlan = [{ view: 'Single selection', why: 'Selection Mode=1', config: { selectMode: 1 } }, { view: 'Hierarchical', why: 'Selection Mode=3', config: { selectMode: 3 } }];
+      const p = aiMockPrompt('Widget', c);
+      expect(p).toMatch(/DISCOVERED VIEW PLAN/);
+      expect(p).toMatch(/Single selection/);
+      expect(p).toMatch(/Hierarchical/);
+      expect(p).toMatch(/implement EXACTLY those views/);
     });
 
     it('CSS generisch: collectMock sammelt echte CSS (min entdoppelt), Mock verlinkt sie, statt Optik nachzubauen', () => {
