@@ -218,6 +218,8 @@ describe('F-28 T-97 Auto-Mock', () => {
       expect(p).toMatch(/MUST PASS right now/);
       expect(p).toMatch(/Do NOT invent aspirational/);
       expect(p).toMatch(/__ok MUST be true for the unmodified plugin/);
+      expect(p).toMatch(/NEVER ASSERT A GUESSED CONSTANT/);          // Ist-Wert auslesen statt raten (3-rote-Fix)
+      expect(p).toMatch(/READ the plugin's ACTUAL value at runtime/);
       // T-106: Optik realistisch + Self-Tests nicht-destruktiv (sichtbarer Stand bleibt sauber)
       expect(p).toMatch(/VISUAL QUALITY MATTERS/);
       expect(p).toMatch(/REAL CSS IS LOADED — NOT BECAUSE YOU PATCHED IT/); // Optik kommt aus echter CSS, nicht aus plugin-spezifischem Hand-CSS
