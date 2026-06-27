@@ -15,6 +15,7 @@ import { inspectAssets, parseOk } from '../extract/assets.js';
 import { reinjectAsset } from '../extract/reinject.js';
 import { runUiTestsDetailed } from '../test/run-ui.js';
 import { compareToBaseline } from './baseline.js';
+import { readAcceptance, compareAcceptance } from './acceptance.js';
 import { applyVendoredUpdates } from './lib-update.js';
 import { analyzeDeep } from '../test/analyze-deep.js';
 import { captureShot, aiVisualCheck } from '../test/visual.js';
@@ -176,8 +177,12 @@ async function defaultMigrate(store, comp, deps = {}) {
 export async function redevelopComponent(store, comp, deps = {}) {
   const now = deps.now ?? (() => new Date().toISOString());
   const baseline = (store.get(comp.id)?.baseline ?? comp.baseline);
-  if (!baseline || !baseline.scenarios?.length) {
-    return { error: 'Keine Baseline — erst „Capture baseline" auf dem funktionierenden Build ausführen.' };
+  // works-as-before-Maßstab: ENTWEDER eine Playwright-Baseline ODER ein Akzeptanz-Vertrag (Mock-Charakterisierung).
+  const contract = deps.acceptanceContract ?? readAcceptance(comp.path);
+  const haveContract = !!(contract && (contract.criteria || []).length && typeof deps.runMockSelfTests === 'function');
+  const haveBaseline = !!(baseline && baseline.scenarios?.length);
+  if (!haveBaseline && !haveContract) {
+    return { error: 'Weder Baseline noch Akzeptanz-Vertrag — erst „Capture baseline" ausführen oder einen grünen Mock erzeugen.' };
   }
   const migrate = deps.migrate ?? defaultMigrate;
   const ai = deps.ai;
@@ -198,20 +203,29 @@ export async function redevelopComponent(store, comp, deps = {}) {
     catch (e) { review = { pass: false, error: String(e?.message ?? e) }; }
   }
 
-  // 2) UI-Tests erneut gegen den migrierten Build
-  const runDetailed = deps.runDetailed ?? runUiTestsDetailed;
+  // 2+3) works-as-before-Gate gegen den MIGRIERTEN Build.
   const cur = store.get(comp.id) ?? comp;
-  const r = await runDetailed(cur, { pluginUrl: deps.pluginUrl || cur.uiTestUrl, specsDir: deps.specsDir, hasPlaywright: deps.hasPlaywright, exec: deps.exec, timeoutMs: deps.timeoutMs });
-  if (!r.ran) { if (mig.rollback) await mig.rollback(); return { adopted: false, reason: r.reason, migration: mig.summary }; }
-
-  // 3) works-as-before-Gate gegen die Baseline
-  const gate = compareToBaseline(cur, r.scenarios ?? []);
+  let gate;
+  if (haveContract) {
+    // Akzeptanz-Vertrag-Gate (T-122): Mock-Selbsttest gegen den migrierten Code, mit dem eingefrorenen Soll vergleichen.
+    const mockUrl = deps.mockUrl || cur.mockUrl;
+    const st = await deps.runMockSelfTests(mockUrl, { timeoutMs: deps.timeoutMs });
+    if (!st || !st.ran) { if (mig.rollback) await mig.rollback(); return { adopted: false, reason: 'Akzeptanz-Gate nicht ausführbar: ' + (st?.reason || 'Mock/Playwright fehlt'), migration: mig.summary }; }
+    const acc = compareAcceptance(contract, st);
+    gate = { pass: acc.pass, acceptance: acc, regressions: [...acc.broken.map((b) => ({ scenario: `${b.view}: ${b.feature}`, reason: 'rot' })), ...acc.missing.map((m) => ({ scenario: `${m.view}: ${m.feature}`, reason: 'fehlt' })), ...(acc.renderOk ? [] : [{ scenario: 'render', reason: 'kein echtes Rendern' }])] };
+  } else {
+    // UI-Tests gegen die Playwright-Baseline (Bestandsweg)
+    const runDetailed = deps.runDetailed ?? runUiTestsDetailed;
+    const r = await runDetailed(cur, { pluginUrl: deps.pluginUrl || cur.uiTestUrl, specsDir: deps.specsDir, hasPlaywright: deps.hasPlaywright, exec: deps.exec, timeoutMs: deps.timeoutMs });
+    if (!r.ran) { if (mig.rollback) await mig.rollback(); return { adopted: false, reason: r.reason, migration: mig.summary }; }
+    gate = compareToBaseline(cur, r.scenarios ?? []);
+  }
 
   if (gate.pass) {
     // 3b) T-104 — optisches Abschluss-Gate: „sieht aus wie zuvor?" KI vergleicht initialen Baseline-Screenshot
     //     mit einem frischen Screenshot des migrierten Builds. Optischer Regress = NICHT übernehmen (Rollback).
     let visual = { ran: false, reason: 'kein Baseline-Screenshot' };
-    const beforeShot = baseline.shot;
+    const beforeShot = baseline?.shot;
     const shotUrl = deps.pluginUrl || cur.uiTestUrl;
     if (beforeShot && shotUrl && deps.hasPlaywright !== false && ai && ai.kind !== 'stub') {
       const afterShot = `${deps.specsDir || '.'}/after-shot.png`;

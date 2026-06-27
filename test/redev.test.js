@@ -64,11 +64,56 @@ describe('F-28 T-93 redevelopComponent (Spec-gesicherte Migration)', () => {
     expect(uploaded).toBe(false);
   });
 
-  it('ohne Baseline → klarer Fehler', async () => {
+  it('ohne Baseline UND ohne Akzeptanz-Vertrag → klarer Fehler', async () => {
     const store = mkStore();
     const id = store.add({ name: 'P', path: '/repo' }).id;
     const r = await redevelopComponent(store, store.get(id), { migrate: async () => ({ changed: true }) });
-    expect(r.error).toMatch(/Baseline/);
+    expect(r.error).toMatch(/Baseline|Akzeptanz/);
+  });
+
+  // T-122: Akzeptanz-Vertrag-Gate — Plugin OHNE Playwright-Baseline migrierbar (gegatet am Mock-Selbsttest)
+  it('T-122: Akzeptanz-Gate, kein Regress → übernommen (ohne Baseline)', async () => {
+    const store = mkStore();
+    const id = store.add({ name: 'P', path: '/repo', mockUrl: 'http://x/mock' }).id; // KEINE baseline
+    const contract = { criteria: [{ view: 'v', feature: 'renders' }], renderedRequired: true };
+    const r = await redevelopComponent(store, store.get(id), {
+      acceptanceContract: contract,
+      migrate: async () => ({ changed: true, summary: 'm', rollback() {} }),
+      runMockSelfTests: async () => ({ ran: true, rendered: true, features: [{ view: 'v', feature: 'renders', ok: true }] }),
+    });
+    expect(r.adopted).toBe(true);
+    expect(r.gate.pass).toBe(true);
+    expect(r.gate.acceptance).toBeTruthy();
+    expect(store.get(id).verifiedAsBefore).toBe(true);
+  });
+
+  it('T-122: Akzeptanz-Gate, Regress (Kriterium rot) → Rollback, nicht übernommen', async () => {
+    const store = mkStore();
+    const id = store.add({ name: 'P', path: '/repo', mockUrl: 'http://x/mock' }).id;
+    const contract = { criteria: [{ view: 'v', feature: 'renders' }], renderedRequired: true };
+    let rolledBack = false;
+    const r = await redevelopComponent(store, store.get(id), {
+      acceptanceContract: contract,
+      migrate: async () => ({ changed: true, summary: 'm', rollback: () => { rolledBack = true; } }),
+      runMockSelfTests: async () => ({ ran: true, rendered: true, features: [{ view: 'v', feature: 'renders', ok: false }] }),
+    });
+    expect(r.adopted).toBe(false);
+    expect(rolledBack).toBe(true);
+    expect(r.regressions.some((x) => /renders/.test(x.scenario))).toBe(true);
+  });
+
+  it('T-122: Akzeptanz-Gate, Mock-Selbsttest nicht ausführbar → Rollback', async () => {
+    const store = mkStore();
+    const id = store.add({ name: 'P', path: '/repo', mockUrl: 'http://x/mock' }).id;
+    let rolledBack = false;
+    const r = await redevelopComponent(store, store.get(id), {
+      acceptanceContract: { criteria: [{ view: 'v', feature: 'renders' }] },
+      migrate: async () => ({ changed: true, summary: 'm', rollback: () => { rolledBack = true; } }),
+      runMockSelfTests: async () => ({ ran: false, reason: 'no playwright' }),
+    });
+    expect(r.adopted).toBe(false);
+    expect(rolledBack).toBe(true);
+    expect(r.reason).toMatch(/Akzeptanz-Gate nicht ausführbar/);
   });
 
   it('Migration ohne Änderung → nicht uebernommen', async () => {
