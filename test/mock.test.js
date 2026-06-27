@@ -61,7 +61,10 @@ describe('F-28 T-97 Auto-Mock', () => {
       fs.writeFileSync(path.join(dir, 'css', 'style.min.css'), ".kb-col-header-content{min-height:48px}"); // min-Zwilling → wird entdoppelt
       fs.writeFileSync(path.join(dir, 'css', 'bootstrap.min.css'), ".row{display:flex}");
       // APEX-SQL-Export deklariert den Funktionsumfang als Attribut-Prompts → Basis für mehrere geplante Sichten
-      fs.writeFileSync(path.join(dir, 'region_type_plugin_widget.sql'), "...,p_prompt=>'Selection Mode',...\n...,p_prompt=>'Use Client Side Caching',p_attribute_type=>'YES_NO'\n...,p_prompt=>'Search Item',...");
+      fs.writeFileSync(path.join(dir, 'region_type_plugin_widget.sql'),
+        ",p_prompt=>'Selection Mode'\n,p_prompt=>'Use Client Side Caching',p_attribute_type=>'YES_NO'\n,p_prompt=>'Search Item'\n" +
+        // Options-/Mode-Surface: Config-Default (JSON-Keys) + Hilfetext (erlaubte Werte je Option)
+        "'  \"selectMode\": 2,'\n'  \"enableCheckBox\": true,'\n'<li>selectMode (number): 1 - single selection; 2 - multi-selection; 3 - hierarchical</li>'");
       mockDir = fs.mkdtempSync(path.join(os.tmpdir(), 'mockout-'));
     });
     afterAll(() => { fs.rmSync(dir, { recursive: true, force: true }); fs.rmSync(mockDir, { recursive: true, force: true }); });
@@ -101,11 +104,15 @@ describe('F-28 T-97 Auto-Mock', () => {
       expect(c.attributes).toContain('Selection Mode');
       expect(c.attributes).toContain('Use Client Side Caching');
       expect(c.attributes).toContain('Search Item');
+      expect(c.optionSurface).toMatch(/selectMode/);                // Options-Surface aus SQL (Werte/Modes)
       const p = aiMockPrompt('Widget', c);
       expect(p).toMatch(/DECLARED PLUGIN OPTIONS\/ATTRIBUTES/);      // Attribut-Umfang gelistet
       expect(p).toMatch(/Selection Mode/);                          // konkretes Attribut im Prompt
+      expect(p).toMatch(/OPTION\/MODE SURFACE/);                    // Mode-Surface eingespeist
+      expect(p).toMatch(/selectMode 1\/2\/3/);                      // erschöpfend je Wert
       expect(p).toMatch(/PLAN MULTIPLE VIEWS \/ TEST SCENARIOS/);   // mehrere Sichten planen
-      expect(p).toMatch(/Render the plugin SEPARATELY for EACH planned view/);
+      expect(p).toMatch(/EXHAUSTIVELY, not a sample/);              // alle Modes, nicht Stichprobe
+      expect(p).toMatch(/Render the plugin SEPARATELY per view/);
       expect(p).toMatch(/window\.__views/);                         // Plan explizit
       expect(p).toMatch(/\{ view, feature, ok, detail \}/);         // Self-Test je View+Feature
     });

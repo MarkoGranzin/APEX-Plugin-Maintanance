@@ -196,16 +196,31 @@ function scanCssFiles(dir) {
  * Default-Konfiguration. Kein plugin-spezifisches Wissen nötig — kommt aus dem Plugin selbst.
  */
 function scanPluginAttributes(dir) {
-  const out = new Set();
+  const names = new Set();
+  const docParts = [];
   walkRepoFiles(dir, (rel, abs) => {
     if (!/\.sql$/i.test(rel) || tooBig(abs)) return;
     let txt = ''; try { txt = fs.readFileSync(abs, 'utf8'); } catch { return; }
     for (const m of txt.matchAll(/p_prompt\s*=>\s*'((?:[^']|'')+)'/gi)) {
       const label = m[1].replace(/''/g, "'").trim();
-      if (label && label.length <= 60) out.add(label);
+      if (label && label.length <= 60) names.add(label);
+    }
+    // Options-/Mode-Surface: Config-Defaults (JSON-Keys) + Hilfetext (erlaubte Werte je Option, z.B.
+    // „selectMode: 1 single; 2 multi; 3 hierarchical"). So sieht die KI ALLE Modes, nicht nur Attribut-Namen.
+    for (const m of txt.matchAll(/'((?:[^']|'')*)'/g)) {
+      const s = m[1].replace(/''/g, "'");
+      if (/"[\w-]+"\s*:/.test(s) || /<li>/i.test(s) || /\b(mode|option|enable|disable|true|false)\b/i.test(s)) docParts.push(s);
     }
   });
-  return [...out];
+  const seen = new Set(); const lines = []; let len = 0;
+  for (let p of docParts) {
+    p = p.replace(/<[^>]+>/g, ' ').replace(/&[a-z]+;/gi, ' ').replace(/\s+/g, ' ').trim();
+    if (p.length < 4 || p.length > 220) continue;
+    const k = p.toLowerCase(); if (seen.has(k)) continue; seen.add(k);
+    if (len + p.length > 2600) break;
+    lines.push(p); len += p.length;
+  }
+  return { names: [...names], surface: lines.join('\n') };
 }
 
 /**
@@ -220,8 +235,10 @@ export function collectMock(dir) {
   const extraLibFiles = scanExtraLibFiles(dir, libSet);
   // Echte CSS des Plugins laden statt von der KI nachbauen lassen (Optik = „wie zuvor", generisch).
   const cssFiles = scanCssFiles(dir);
-  // Deklarierter Funktionsumfang (APEX-Plugin-Attribute) → Basis für mehrere geplante Sichten/Testfälle.
-  const attributes = scanPluginAttributes(dir);
+  // Deklarierter Funktionsumfang (APEX-Plugin-Attribute + Options-/Mode-Surface) → Basis für mehrere Sichten.
+  const attr = scanPluginAttributes(dir);
+  const attributes = attr.names;
+  const optionSurface = attr.surface;
   const pluginFiles = [];
   const selectors = new Set();
   const entryPoints = new Set();
@@ -245,7 +262,7 @@ export function collectMock(dir) {
       for (const f of deep.functions || []) { functions.push(f); if (f.name && /^(init|refresh|render|draw|setup|load|create|destroy)/i.test(f.name)) entryPoints.add(f.name); }
     }
   } catch { /* best effort */ }
-  return { libFiles, extraLibFiles, cssFiles, attributes, pluginFiles, selectors: [...selectors], entryPoints: [...entryPoints], functions, events: [...events.values()] };
+  return { libFiles, extraLibFiles, cssFiles, attributes, optionSurface, pluginFiles, selectors: [...selectors], entryPoints: [...entryPoints], functions, events: [...events.values()] };
 }
 
 /**
@@ -280,6 +297,8 @@ Detected DOM selectors the plugin uses: ${(c.selectors || []).join(', ') || '(no
 Likely entry points: ${(c.entryPoints || []).join(', ') || '(none)'}
 Detected interactions/events the plugin binds (trigger EACH on its element): ${(c.events || []).map((e) => e.type + '→' + e.selector).join(', ') || '(none)'}
 DECLARED PLUGIN OPTIONS/ATTRIBUTES (the plugin's own capability contract — each is a configurable mode/feature to characterize): ${(c.attributes || []).join(' · ') || '(none)'}
+OPTION/MODE SURFACE — config defaults + help text from the plugin definition (every option key and its ALLOWED VALUES/modes; PLAN a view for each — including each discrete value of multi-valued options, e.g. selectMode 1/2/3):
+${(c.optionSurface || '(none)').slice(0, 2600)}
 Functions/signatures (with apex.* usage):
 ${fns || '(none)'}
 
@@ -300,13 +319,10 @@ Requirements for the page:
 - PROVIDE REALISTIC SAMPLE DATA matching that shape so the plugin renders real content (e.g. a flow chart with several nodes + edges, or a kanban board with a few realistic cards per column). Use PLAUSIBLE, HUMAN-READABLE labels — real-ish titles/names/values (e.g. "Design login screen", "In Review", "Anna M.") — NEVER random gibberish strings. Make the apex shim return it: apex.server.process(name, opts) and apex.jQuery.ajax resolve/callback with a plausible response; set item values ($v/apex.item) and pass plausible plugin attributes/options to the init call. Embed the sample data inline.
 - Provide a realistic apex.* shim covering the apex.* calls above (apex.item/$v/$s/apex.server.process/apex.jQuery/apex.message/apex.debug/apex.region/apex.util/etc.) so the plugin does not crash.
 - Create the DOM the plugin needs: a visible <div id="mock-root"> mount (give it a real size, e.g. width:900px;height:560px) plus elements for the detected selectors. The plugin's rendered output MUST appear inside #mock-root.
-- VISUAL QUALITY MATTERS: the page must LOOK like the plugin in real production use — correct layout, sensible spacing, the plugin's normal styling/colors, no overlapping/cramped/cut-off elements. If the plugin needs a CSS file, load it; if it relies on theme/host CSS that isn't present, add minimal styles so it looks clean and presentable (like a screenshot you'd show a stakeholder). Aim for a realistic, tidy result — not a raw/broken-looking dump.
-- A generic CSS reset (box-sizing + margin reset on p/headings/lists, like APEX's theme) is AUTOMATICALLY injected into the <head> before your stylesheets — so the plugin renders in a normalized environment as it would inside APEX. Rely on it; do not re-add your own reset and do not fight it with plugin-specific overrides.
-- THE PLUGIN MUST LOOK RIGHT BECAUSE ITS REAL CSS IS LOADED — NOT BECAUSE YOU PATCHED IT: clipped/overlapping headers, wrong spacing or a broken layout almost always mean the plugin's real stylesheet(s) did not load. So: load EVERY real CSS file listed above via <link> with the exact relative paths (a wrong path → 404 → the plugin falls back to unstyled/half-styled and looks broken). Do NOT "fix" the look by hand-writing CSS for the plugin's own classes — that is faking the appearance. Your ONLY layout job is the harness container: give #mock-root a sensible size and enough page height (the page may be tall and scroll) so the WHOLE plugin is visible; do not constrain the plugin into a box too small for it. With the real CSS loaded and a roomy container, headers like "To Do"/"In Progress"/"Done" render fully on their own.
-- Load libraries and plugin files via <script src> (NOT inline) using the exact paths above; then initialize the plugin the way APEX would.
+- VISUAL QUALITY MATTERS — and THE PLUGIN MUST LOOK RIGHT BECAUSE ITS REAL CSS IS LOADED — NOT BECAUSE YOU PATCHED IT: load EVERY real CSS file listed above via <link> with the EXACT paths (a wrong path → 404 → broken/unstyled). A generic CSS reset (box-sizing + margins, APEX-like) is auto-injected before your stylesheets — rely on it, don't re-add one. Never hand-write/approximate the plugin's own classes to "fix" the look (that fakes it). Your ONLY layout job: give #mock-root a sensible size and the page enough height (it may scroll) so the whole plugin is visible. Load libs + plugin files via <script src> (exact paths, not inline); then init the plugin the way APEX would.
 - Wrap initialization in try/catch; collect errors in window.__mockErrors (array); add window.onerror to push to it. Set window.__ok = (window.__mockErrors.length === 0). Also set window.__rendered = (document.querySelector('#mock-root') has non-trivial child content, i.e. the plugin produced output).
 - CHARACTERIZE THE PLUGIN AS IT IS — NOT AS IT SHOULD BE. This page is the "works EXACTLY as before" spec: after the libraries are updated the plugin must do the SAME — no more, no less. Therefore EVERY self-test must describe the CURRENT behavior of the unmodified plugin and MUST PASS right now. Do NOT invent aspirational/robustness checks the current plugin does not already satisfy (e.g. "handles missing/undefined input gracefully", error-handling or edge cases it was never built for). If a check would be RED against the current unmodified plugin, it is NOT a valid characterization — drop it, or if the behavior matters record the plugin's ACTUAL current result as the expected value (e.g. if it currently throws on bad input, that IS the characterized behavior). window.__ok MUST be true for the unmodified plugin; a failing self-test here means you mis-characterized, not that the plugin is broken.
-- PLAN MULTIPLE VIEWS / TEST SCENARIOS — one configuration is NOT enough. A real plugin has many modes and option combinations; characterizing only the default leaves most behavior unprotected. From the DECLARED PLUGIN OPTIONS/ATTRIBUTES above PLUS the source, PLAN a SET of distinct views that together cover the plugin's capabilities — e.g. each selection/display mode, each major option on vs off, async/lazy vs static data, filtered vs unfiltered, read-only/cached vs editable, empty/error state. Derive the views from THIS plugin's own option surface (do not invent capabilities it lacks, do not skip ones it has). Render the plugin SEPARATELY for EACH planned view (its own mount/container with that view's config + data) so all views are visible on the page, and self-test EACH view's behavior independently. Expose the plan as window.__views = array of { view, config } so the set of scenarios is explicit.
+- PLAN MULTIPLE VIEWS / TEST SCENARIOS — one configuration is NOT enough; the default leaves most behavior unprotected. Go through the OPTION/MODE SURFACE + source SYSTEMATICALLY and plan a view for EVERY mode/value the plugin supports — EXHAUSTIVELY, not a sample: each discrete value of every multi-valued option (e.g. selectMode 1 AND 2 AND 3), each boolean option on AND off where it changes behavior, plus the data states (static/lazy, filtered/unfiltered, cached, empty, error). Derive views ONLY from THIS plugin's own surface (don't invent capabilities it lacks, don't skip ones it has). Render the plugin SEPARATELY per view (own mount + that view's config/data) so all are visible, and self-test EACH view independently. Expose the plan as window.__views = array of { view, config }.
 - FIRST UNDERSTAND the plugin from the source: what it is, EVERY feature it offers, and how each one works. THEN make this page a SELF-TEST HARNESS that characterizes those features (ACROSS ALL planned views) as the spec a future migration must preserve. For EACH feature IN EACH view, run a check that ASSERTS its REAL EFFECT (not merely that code ran), e.g.:
    • render: #mock-root actually contains the expected output (the right number of nodes/cards/rows/svg etc.).
    • each interaction/event above: perform it and verify the resulting DOM change — e.g. a click toggles/opens the expected element; selection/sort/filter changes what is shown.
