@@ -19,12 +19,17 @@ Alternativ die **CLI** — ad-hoc/headless, token-sparsam (kompakte Ausgabe stat
 auf dem Arbeitsrechner; gleiche DB/Logik wie MCP/Web. Aufruf aus jeder Session:
 ```
 npx tsx D:/Firma/dev/src/cli.ts <verb> …        # oder im devhub-Repo: npm run devhub -- <verb> …
-# Loop:  claim <project> <slice> · next <project> · status <project>
-#        result <project> <item> <scenario> passed|failed|skipped · done <project> <item> · release <project> <slice>
-#        <mcp_tool> key=value …   (generischer Passthrough; --full = Rohdaten)
-# Lokal: sbom <project> [repo-pfad] · import <repo-pfad> [name] · test <project> <item>
+# Loop:    claim <project> <slice> · next <project> · status <project>
+#          result <project> <item> <scenario> passed|failed|skipped · done <project> <item> · release <project> <slice>
+# Backlog: add <project> <type> <titel…> [--parent=<ref>]   (type epic|feature|task|bug; task/bug brauchen --parent)
+#          tests <project> <item> <szenario…>   ·   know <project> <text…>   ·   projects
+# Pool:    pool <project>  (✓ zugewiesen / ○ verfügbar) · assign|unassign <project> <name|id> · sync <project>
+#          → materialisiert Agenten/Skills nach .claude/agents|skills + mergt .gitignore
+# Lokal:   sbom <project> [repo-pfad] · import <repo-pfad> [name] · test <project> <item> · init <pfad> [name]
+#          <mcp_tool> key=value …   (generischer Passthrough für ALLE Tools; --full = Rohdaten)
 ```
-Maschinen-lokale Funktionen (sbom/import/test) MÜSSEN dort laufen, wo das Repo liegt → dafür die CLI.
+Maschinen-lokale Funktionen (sbom/import/test) und die Skill/Agenten-Materialisierung (assign/sync schreiben
+.claude/-Dateien) MÜSSEN dort laufen, wo das Repo liegt → dafür die CLI.
 
 **RICHTUNG 1 — alles Konzept-Relevante geht ANS Tool (Pflicht):**
 Jede Design-Entscheidung, jede erkannte Anforderung, jedes Gotcha aus der Arbeit
