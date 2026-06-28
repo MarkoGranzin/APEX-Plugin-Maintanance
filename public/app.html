@@ -502,6 +502,7 @@ async function openDetail(id){
             <button onclick="openGit()" title="Open the repo URL in the browser. No changes.">🌐 Open Git</button>
             <button onclick="openDir()" title="Open the local working copy in the OS file manager. No changes.">📂 Open locally</button>
             <button onclick="runReview()" title="Security + quality gate. Read-only — reports findings, changes nothing.">🔍 Manual review</button>
+            <button onclick="rebuildRequirements()" title="Re-derive the acceptance requirements (works-as-before contract incl. the exact APEX parameter/JSON interface) freshly from the mock self-test. Writes only .maintenance/acceptance.json.">🔄 Rebuild requirements</button>
           </div>
           <div class="small muted" style="margin-top:10px">Writes files / Git <span class="muted">— fixes &amp; AI review live inside “🧰 Full maintenance now”</span></div>
           <div class="inline" style="margin-top:4px;gap:6px">
@@ -1018,6 +1019,17 @@ async function exportRequirements(c){
     toast('Requirements exported (.feature)');
   }catch(e){ toast('Error: '+e.message); }
 }
+// T-127: Requirements (Akzeptanz-Vertrag) gezielt neu anstoßen — frisch aus dem Mock-Self-Test abgeleitet.
+async function rebuildRequirements(){
+  const c = current; if(!c) return;
+  setBusy(c.id,true); toast('Rebuilding requirements…');
+  try{
+    const r = await api('POST',`/api/components/${c.id}/rebuild-requirements`,{});
+    if(!r || r.ok===false || r.error){ toast('Error: '+((r&&r.error)||'no contract built')); }
+    else { toast(`Requirements rebuilt ✓ — ${r.total} criteria, ${r.interfaceCount} interface param(s)`); await load(); if(current&&current.id===c.id){ try{ await openDetail(c.id); }catch{} } }
+  }catch(e){ toast('Error: '+e.message); }
+  finally{ setBusy(c.id,false); }
+}
 // F-30/T-118: tote Lib slice-weise gegen den Akzeptanz-Vertrag neu bauen (tech-frei, lizenzrein). Läuft länger.
 async function redevelopDeadLib(c){
   if(!(await uiConfirm(`Re-develop “${c.name}” slice-by-slice against its acceptance contract (replacing a dead library with any clean, permissively-licensed technology)? Runs several AI passes; nothing is pushed.`, 'Re-develop'))) return;
@@ -1163,7 +1175,7 @@ async function loadLibraries(){
 }
 
 // Build-Marker: muss mit BUILD in start.js übereinstimmen. Erkennt einen veralteten Backend-Prozess.
-const APP_BUILD = '2026-06-28.60';
+const APP_BUILD = '2026-06-28.61';
 async function checkBackend(){
   const b = $('staleBanner');
   try{

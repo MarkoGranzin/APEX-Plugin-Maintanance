@@ -59,7 +59,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const DATA_DIR = process.env.AISPP_DATA_DIR || path.join(__dirname, 'data');
 // Build-Marker: muss mit APP_BUILD in public/app.html übereinstimmen. Bei Backend-Änderungen erhöhen.
 // Das Frontend vergleicht beide und warnt, wenn der laufende Dienst veraltet ist (Neustart nötig).
-const BUILD = '2026-06-28.60';
+const BUILD = '2026-06-28.61';
 const C = { reset: '\x1b[0m', bold: '\x1b[1m', dim: '\x1b[2m', green: '\x1b[32m', yellow: '\x1b[33m', red: '\x1b[31m', cyan: '\x1b[36m' };
 const c = (col, s) => `${C[col]}${s}${C.reset}`;
 
@@ -655,6 +655,23 @@ function cmdServe(portArg) {
       if (fmt === 'feature') { res.writeHead(200, { 'Content-Type': 'text/plain; charset=utf-8', 'Content-Disposition': `attachment; filename="${fn}.acceptance.feature"` }); return res.end(acceptanceFeatureFile(contract, { name: c.name })); }
       if (fmt === 'devhub') return json(res, acceptanceToDevhub(contract, { name: c.name }));
       res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8', 'Content-Disposition': `attachment; filename="${fn}.acceptance.json"` }); return res.end(JSON.stringify(contract, null, 2));
+    });
+
+    // T-127 — Requirements/Akzeptanz-Vertrag GEZIELT neu anstoßen (frisch aus dem Mock-Self-Test
+    // abgeleitet, inkl. Schnittstelle). Schreibt nur .maintenance/acceptance.json, kein Push.
+    if (p.startsWith('/api/components/') && p.endsWith('/rebuild-requirements') && req.method === 'POST') return withComponentRunning(async (c, id) => {
+      const sl = slugify(c.name); const mockUrl = `http://localhost:${port}/mock/${sl}/index.html`;
+      setStep(id, 'Requirements: Mock sicherstellen…');
+      const mu = await buildMockFor(store.get(id)); // baut den Mock, falls er fehlt (sonst Fingerprint-Cache)
+      if (!mu) return json(res, { ok: false, error: 'Kein Mock baubar (Repo/Plugin fehlt) — Requirements nicht ableitbar.' }, 400);
+      setStep(id, 'Requirements: Mock-Self-Test…');
+      let st; try { st = await runMockSelfTests(mockUrl, { timeoutMs: 14000 }); } catch (e) { return json(res, { ok: false, error: 'Mock-Self-Test fehlgeschlagen: ' + (e?.message ?? e) }, 400); }
+      if (!st || st.ran !== true) return json(res, { ok: false, error: 'Mock-Self-Test lief nicht (Playwright/Mock fehlt) — kein Vertrag gebaut.' }, 400);
+      const contract = acceptanceFromSelfTest(st, { name: c.name, at: new Date().toISOString(), interface: pluginInterface(c.path) });
+      if (contract.error) return json(res, { ok: false, error: contract.error }, 400);
+      writeAcceptance(c.path, contract);
+      try { store.update(id, { mockSelfCheck: { views: st.views ?? null, total: st.total ?? contract.total, failed: (st.problems || []).length } }); } catch { /* egal */ }
+      return json(res, { ok: true, total: contract.total, views: contract.views, interfaceCount: contract.interface?.count ?? 0, capturedAt: contract.capturedAt });
     });
 
     // SBOM (CycloneDX) der Komponente — für Review/Visualisierung (T-69) → GET
