@@ -59,7 +59,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const DATA_DIR = process.env.AISPP_DATA_DIR || path.join(__dirname, 'data');
 // Build-Marker: muss mit APP_BUILD in public/app.html übereinstimmen. Bei Backend-Änderungen erhöhen.
 // Das Frontend vergleicht beide und warnt, wenn der laufende Dienst veraltet ist (Neustart nötig).
-const BUILD = '2026-06-28.63';
+const BUILD = '2026-06-28.64';
 const C = { reset: '\x1b[0m', bold: '\x1b[1m', dim: '\x1b[2m', green: '\x1b[32m', yellow: '\x1b[33m', red: '\x1b[31m', cyan: '\x1b[36m' };
 const c = (col, s) => `${C[col]}${s}${C.reset}`;
 
@@ -126,15 +126,27 @@ function cmdServe(portArg) {
   // Testplan (.feature) INS PLUGIN-VERZEICHNIS unter .maintenance/tests/ (analog Baseline/Coded-Tests) →
   // wird beim Upload mitcommittet. Fallback nach DATA_DIR/testplans, wenn (noch) kein Repo-Pfad da ist.
   const testplanDir = path.join(DATA_DIR, 'testplans');
+  // Klarer Kopf: kennzeichnet die Datei als Unit-/Charakterisierungs-Testplan, NICHT als Anforderungs-Vertrag.
+  const UNITTEST_HEADER = [
+    '# Auto-generierter UNIT-/Charakterisierungs-Testplan (je Funktion: Positiv/Negativ/Pfad/Grenzwerte,',
+    '# gegen die AKTUELLE Implementierung / Golden Master). Wird pro Implementierung neu erzeugt.',
+    '# Das ist NICHT der Anforderungs-Vertrag — Schnittstelle (APEX-Parameter/JSON) + "works as before"-Soll',
+    '# stehen in:  ../acceptance.feature',
+    '', '',
+  ].join('\n');
   const onTestPlan = (component, text) => {
     try {
+      const body = UNITTEST_HEADER + String(text ?? '');
+      const slug = slugify(component.name);
       if (component?.path && fs.existsSync(component.path)) {
         const d = path.join(component.path, '.maintenance', 'tests');
         fs.mkdirSync(d, { recursive: true });
-        fs.writeFileSync(path.join(d, `${slugify(component.name)}.feature`), text);
+        fs.writeFileSync(path.join(d, `${slug}.unit-tests.feature`), body);
+        try { fs.rmSync(path.join(d, `${slug}.feature`), { force: true }); } catch { /* alt aufräumen */ } // verwirrende Altdatei entfernen
       } else {
         fs.mkdirSync(testplanDir, { recursive: true });
-        fs.writeFileSync(path.join(testplanDir, `${slugify(component.name)}.feature`), text);
+        fs.writeFileSync(path.join(testplanDir, `${slug}.unit-tests.feature`), body);
+        try { fs.rmSync(path.join(testplanDir, `${slug}.feature`), { force: true }); } catch { /* alt aufräumen */ }
       }
     } catch { /* Datei-Fehler nicht eskalieren */ }
   };
