@@ -36,8 +36,8 @@ import { maintainComponent } from './src/service/maintain.js';
 import { runUiTests } from './src/test/run-ui.js';
 import { captureBaseline } from './src/service/baseline.js';
 import { redevelopComponent } from './src/service/redev.js';
-import { generateAiMock, writeMock, refineMock, mockInputFingerprint, MOCK_SPEC_VERSION, runMockSelfTests } from './src/test/mock.js';
-import { acceptanceFromSelfTest, writeAcceptance, readAcceptance, acceptanceFeatureFile, acceptanceToDevhub, compareAcceptance } from './src/service/acceptance.js';
+import { generateAiMock, writeMock, refineMock, mockInputFingerprint, MOCK_SPEC_VERSION, runMockSelfTests, pluginInterface } from './src/test/mock.js';
+import { acceptanceFromSelfTest, writeAcceptance, readAcceptance, acceptanceFeatureFile, acceptanceToDevhub, compareAcceptance, normalizeInterface } from './src/service/acceptance.js';
 import { redevelopDeadLib, buildSliceRebuildPrompt } from './src/service/redev-slices.js';
 import { inspectAssets, parseOk } from './src/extract/assets.js';
 import { reinjectAsset } from './src/extract/reinject.js';
@@ -59,7 +59,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const DATA_DIR = process.env.AISPP_DATA_DIR || path.join(__dirname, 'data');
 // Build-Marker: muss mit APP_BUILD in public/app.html übereinstimmen. Bei Backend-Änderungen erhöhen.
 // Das Frontend vergleicht beide und warnt, wenn der laufende Dienst veraltet ist (Neustart nötig).
-const BUILD = '2026-06-28.59';
+const BUILD = '2026-06-28.60';
 const C = { reset: '\x1b[0m', bold: '\x1b[1m', dim: '\x1b[2m', green: '\x1b[32m', yellow: '\x1b[33m', red: '\x1b[31m', cyan: '\x1b[36m' };
 const c = (col, s) => `${C[col]}${s}${C.reset}`;
 
@@ -212,7 +212,7 @@ function cmdServe(portArg) {
           gen.selfCheck = { views: ref.after.views, total: ref.after.total, failed: (ref.failed || ref.after.failed || []).length };
           // T-116: Akzeptanz-Vertrag (technologieunabhängiges Soll) aus der grünen Charakterisierung festhalten
           // → Grundlage für eine spätere slice-weise Neuentwicklung (F-30/T-117).
-          try { const contract = acceptanceFromSelfTest(ref.after, { name: component.name, at: new Date().toISOString() }); if (!contract.error) writeAcceptance(component.path, contract); } catch { /* best effort */ }
+          try { const contract = acceptanceFromSelfTest(ref.after, { name: component.name, at: new Date().toISOString(), interface: pluginInterface(component.path) }); if (!contract.error) writeAcceptance(component.path, contract); } catch { /* best effort */ }
         }
       } catch (e) { writeLog(component, `[mock-selfcheck] übersprungen: ${e?.message ?? e}`); }
       const testsDir = path.join(component.path, '.maintenance', 'tests');
@@ -642,9 +642,11 @@ function cmdServe(portArg) {
       let contract = readAcceptance(c.path);
       if (!contract || !(contract.criteria || []).length) {
         const sl0 = slugify(c.name); const mockUrl = `http://localhost:${port}/mock/${sl0}/index.html`;
-        try { const st = await runMockSelfTests(mockUrl, { timeoutMs: 14000 }); if (st.ran) { contract = acceptanceFromSelfTest(st, { name: c.name, at: new Date().toISOString() }); if (!contract.error) writeAcceptance(c.path, contract); } } catch { /* kein Mock/Playwright */ }
+        try { const st = await runMockSelfTests(mockUrl, { timeoutMs: 14000 }); if (st.ran) { contract = acceptanceFromSelfTest(st, { name: c.name, at: new Date().toISOString(), interface: pluginInterface(c.path) }); if (!contract.error) writeAcceptance(c.path, contract); } } catch { /* kein Mock/Playwright */ }
       }
       if (!contract || contract.error || !(contract.criteria || []).length) return json(res, { error: 'Kein Akzeptanz-Vertrag — erst einen grünen Mock bauen (Plugin importieren/„Open mock").' }, 400);
+      // T-126: ältere Verträge ohne Schnittstelle beim Export nachrüsten (keine Neu-Charakterisierung nötig).
+      if (!contract.interface) { try { const iff = pluginInterface(c.path); if (iff.attributes?.length) { contract = { ...contract, interface: normalizeInterface(iff) }; writeAcceptance(c.path, contract); } } catch { /* best effort */ } }
       const fn = slugify(c.name);
       if (fmt === 'feature') { res.writeHead(200, { 'Content-Type': 'text/plain; charset=utf-8', 'Content-Disposition': `attachment; filename="${fn}.acceptance.feature"` }); return res.end(acceptanceFeatureFile(contract, { name: c.name })); }
       if (fmt === 'devhub') return json(res, acceptanceToDevhub(contract, { name: c.name }));

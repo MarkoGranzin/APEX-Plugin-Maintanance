@@ -20,6 +20,26 @@ const norm = (s) => String(s ?? '').replace(/\s+/g, ' ').trim();
 export function criterionKey(view, feature) { return `${norm(view).toLowerCase()}|||${norm(feature).toLowerCase()}`; }
 
 /**
+ * T-126 — Plugin-Schnittstelle normalisieren (APEX-Parameter/Attribute, JSON-Konfig). Akzeptiert die
+ * Roh-Attribute aus mock.pluginInterface ({prompt,type,values,def,help}) ODER eine bereits normalisierte
+ * Liste. Defaults werden NICHT gekürzt (JSON-Konfig muss vollständig erhalten bleiben).
+ * @returns {{attributes:Array<{name,type,allowedValues:string[],default:string,help:string}>, count:number}}
+ */
+export function normalizeInterface(iface) {
+  const raw = Array.isArray(iface) ? iface : (iface?.attributes || []);
+  const attributes = raw
+    .map((a) => ({
+      name: norm(a.name ?? a.prompt ?? ''),
+      type: norm(a.type ?? ''),
+      allowedValues: Array.isArray(a.allowedValues) ? a.allowedValues.slice() : (Array.isArray(a.values) ? a.values.slice() : []),
+      default: String(a.default ?? a.def ?? '').trim(),   // vollständig, nicht kürzen (JSON!)
+      help: norm(a.help ?? ''),
+    }))
+    .filter((a) => a.name);
+  return { attributes, count: attributes.length };
+}
+
+/**
  * Leitet den Akzeptanz-Vertrag aus einem runMockSelfTests-Ergebnis ab: alle GRÜNEN Feature-Checks
  * (rote/falsch-grüne werden NICHT zum Soll — der Vertrag beschreibt nur verlässlich erfülltes Verhalten).
  * @param {{views?:number, rendered?:boolean, features?:Array<{view,feature,ok,detail}>, problems?:Array, total?:number}} st
@@ -45,6 +65,8 @@ export function acceptanceFromSelfTest(st, opts = {}) {
     renderedRequired: st.rendered !== false, // das Plugin MUSS echt rendern (kein leerer/Fehler-Stand)
     criteria,
     total: criteria.length,
+    // T-126: exakte Schnittstelle (APEX-Parameter/Attribute, JSON-Konfig) als Teil des Soll-Vertrags.
+    interface: opts.interface ? normalizeInterface(opts.interface) : null,
     source: 'mock-characterization',
     capturedAt: opts.at || null,
   };
@@ -102,6 +124,25 @@ export function acceptanceToScenarios(contract, opts = {}) {
   if (contract?.renderedRequired) {
     out.push({ title: `${name}: rendert echte Ausgabe`, gherkin: `Angenommen das Plugin "${name}" ist geladen\nWenn es initialisiert\nDann erzeugt es echte sichtbare Ausgabe (kein leerer/Fehler-Zustand)` });
   }
+  // T-126: Schnittstelle exakt als eigenes Szenario — Migration/Neuentwicklung muss sie 1:1 erhalten.
+  const iface = contract?.interface?.attributes || [];
+  if (iface.length) {
+    const lines = iface.map((a) => {
+      let l = `Und Parameter "${a.name}"${a.type ? ` [${a.type}]` : ''}`;
+      if (a.allowedValues?.length) l += ` erlaubt: ${a.allowedValues.join(' | ')}`;
+      if (a.default) l += ` — Default: ${a.default}`;
+      return l;
+    });
+    out.push({
+      title: `${name}: Schnittstelle (Parameter/Konfiguration) bleibt exakt erhalten`,
+      gherkin: [
+        `Angenommen das Plugin "${name}" wird mit denselben APEX-Attributen/JSON-Parametern aufgerufen wie vor der Pflege`,
+        `Wenn die migrierte/neu entwickelte Version geladen wird`,
+        `Dann akzeptiert sie exakt dieselben ${iface.length} Parameter (Name, Typ, erlaubte Werte, Default)`,
+        ...lines,
+      ].join('\n'),
+    });
+  }
   for (const c of contract?.criteria || []) {
     const view = c.view || 'default';
     out.push({
@@ -112,6 +153,24 @@ export function acceptanceToScenarios(contract, opts = {}) {
   return out;
 }
 
+/** T-126: exakter, menschenlesbarer Schnittstellen-Block für die .feature (Kommentarzeilen, ungekürzt). */
+function interfaceBlock(contract) {
+  const iface = contract?.interface?.attributes || [];
+  if (!iface.length) return '';
+  const out = [
+    `# ── Schnittstelle (APEX-Plugin-Parameter / Konfiguration) — muss EXAKT erhalten bleiben ──`,
+    `# ${iface.length} Parameter:`,
+  ];
+  for (const a of iface) {
+    out.push(`#   • ${a.name}${a.type ? ` [${a.type}]` : ''}`);
+    if (a.allowedValues?.length) out.push(`#       erlaubte Werte: ${a.allowedValues.join(' | ')}`);
+    if (a.default) out.push(`#       Default: ${a.default}`);
+    if (a.help) out.push(`#       Hilfe: ${a.help}`);
+  }
+  out.push('');
+  return out.join('\n') + '\n';
+}
+
 /** Exportierbare .feature-Datei (Gherkin) des Akzeptanz-Vertrags — technologie-unabhängiges Soll. */
 export function acceptanceFeatureFile(contract, opts = {}) {
   const name = opts.name || contract?.name || 'plugin';
@@ -119,8 +178,9 @@ export function acceptanceFeatureFile(contract, opts = {}) {
   const head = [
     `# Akzeptanz-Vertrag für ${name} — "works as before"`,
     `# Automatisch aus der Mock-Charakterisierung abgeleitet (technologieunabhängig).`,
-    `# ${contract?.views ?? '?'} Sicht(en), ${contract?.total ?? scen.length} Kriterium/Kriterien${contract?.capturedAt ? `, Stand ${contract.capturedAt}` : ''}.`,
+    `# ${contract?.views ?? '?'} Sicht(en), ${contract?.total ?? scen.length} Kriterium/Kriterien${contract?.interface?.count ? `, ${contract.interface.count} Schnittstellen-Parameter` : ''}${contract?.capturedAt ? `, Stand ${contract.capturedAt}` : ''}.`,
     '',
+    interfaceBlock(contract),
     `Funktionalität: ${name} — Akzeptanzkriterien (Migration/Neuentwicklung muss alle erfüllen)`,
     '',
   ].join('\n');

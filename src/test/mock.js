@@ -243,6 +243,16 @@ function scanPluginAttributes(dir) {
   return { names: attrs.map((a) => a.prompt), surface: lines.join('\n'), attrs };
 }
 
+/**
+ * T-126 — Strukturierte Plugin-Schnittstelle (für den exakten Akzeptanz-Vertrag/.feature-Export).
+ * Liefert je deklariertem APEX-Attribut Name/Typ/erlaubte Werte/voller Default (inkl. JSON-Konfig)/Hilfe.
+ * @returns {{attributes:Array<{prompt,type,values,def,help}>, surface:string}}
+ */
+export function pluginInterface(dir) {
+  const a = scanPluginAttributes(dir);
+  return { attributes: a.attrs, surface: a.surface };
+}
+
 /** Findet `pkg.fn(...)`-Aufrufe mit balancierten Klammern (PL/SQL-String-' bewusst). Liefert {name, body}. */
 function plsqlApiCalls(txt, re) {
   const out = [];
