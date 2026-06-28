@@ -97,6 +97,8 @@ export function readAcceptance(dir) {
 export function acceptanceToScenarios(contract, opts = {}) {
   const name = opts.name || contract?.name || 'plugin';
   const out = [];
+  // KOPF-Kriterium: das Plugin muss NATIV wie zuvor funktionieren — der Maßstab für Migration UND Selbst-Fix.
+  out.push({ title: `${name}: funktioniert nativ wie zuvor`, gherkin: `Angenommen das Plugin "${name}" wird in seiner echten (nativen) Umgebung geladen\nWenn es initialisiert wird\nDann läuft es ohne JS-Fehler und liefert dieselbe sichtbare Funktion wie vor der Pflege (alle Sichten/Features wie im Original)` });
   if (contract?.renderedRequired) {
     out.push({ title: `${name}: rendert echte Ausgabe`, gherkin: `Angenommen das Plugin "${name}" ist geladen\nWenn es initialisiert\nDann erzeugt es echte sichtbare Ausgabe (kein leerer/Fehler-Zustand)` });
   }

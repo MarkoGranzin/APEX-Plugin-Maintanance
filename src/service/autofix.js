@@ -69,8 +69,11 @@ export async function autoFixComponent(store, comp, deps = {}) {
   let aiResult = null;
   if (ai && ai.kind !== 'stub') {
     const autoReview = deps.autoReviewFix ?? defaultAutoReviewFix;
-    aiResult = await autoReview(store, store.get(comp.id) ?? comp, { ai });
+    // T-124/T-125: verifyNative-Guard durchreichen (Selbst-Fix muss nativ wie zuvor sein).
+    aiResult = await autoReview(store, store.get(comp.id) ?? comp, { ai, verifyNative: deps.verifyNative });
     protocol.push({ agent: 'Auto-Fix', file: comp.name, result: aiResult?.pass ? `AI fixes green after ${aiResult.attempts} attempt(s)` : `AI review not green (${aiResult?.attempts ?? 0} attempt(s))`, severity: aiResult?.pass ? undefined : 'medium' });
+    // T-125: kritischen Code sichtbar machen (high/critical Security-Befunde).
+    if (aiResult?.criticalFindings?.length) protocol.push({ agent: 'Security', file: comp.name, result: `⛔ ${aiResult.criticalFindings.length} kritische(r) Security-Befund(e) offen: ${aiResult.criticalFindings.map((f) => f.rule).join(', ')}`, severity: 'error' });
   } else {
     protocol.push({ agent: 'Auto-Fix', file: comp.name, result: 'remaining security/quality findings need an AI backend (Settings → AI)', severity: 'medium' });
   }
@@ -79,5 +82,5 @@ export async function autoFixComponent(store, comp, deps = {}) {
   const keep = (store.get(comp.id)?.lastLog?.entries ?? []).filter((e) => !['Quick-Fix', 'Lib-Update', 'Auto-Fix'].includes(e.agent));
   store.update(comp.id, { lastLog: { at: now(), entries: [...keep, ...protocol] } });
 
-  return { ok: true, quickFixes, libUpdate, aiResult, protocol };
+  return { ok: true, quickFixes, libUpdate, aiResult, criticalFindings: aiResult?.criticalFindings ?? [], protocol };
 }

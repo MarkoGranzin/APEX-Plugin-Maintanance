@@ -37,7 +37,7 @@ import { runUiTests } from './src/test/run-ui.js';
 import { captureBaseline } from './src/service/baseline.js';
 import { redevelopComponent } from './src/service/redev.js';
 import { generateAiMock, writeMock, refineMock, mockInputFingerprint, MOCK_SPEC_VERSION, runMockSelfTests } from './src/test/mock.js';
-import { acceptanceFromSelfTest, writeAcceptance, readAcceptance, acceptanceFeatureFile, acceptanceToDevhub } from './src/service/acceptance.js';
+import { acceptanceFromSelfTest, writeAcceptance, readAcceptance, acceptanceFeatureFile, acceptanceToDevhub, compareAcceptance } from './src/service/acceptance.js';
 import { redevelopDeadLib, buildSliceRebuildPrompt } from './src/service/redev-slices.js';
 import { inspectAssets, parseOk } from './src/extract/assets.js';
 import { reinjectAsset } from './src/extract/reinject.js';
@@ -59,7 +59,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const DATA_DIR = process.env.AISPP_DATA_DIR || path.join(__dirname, 'data');
 // Build-Marker: muss mit APP_BUILD in public/app.html übereinstimmen. Bei Backend-Änderungen erhöhen.
 // Das Frontend vergleicht beide und warnt, wenn der laufende Dienst veraltet ist (Neustart nötig).
-const BUILD = '2026-06-28.58';
+const BUILD = '2026-06-28.59';
 const C = { reset: '\x1b[0m', bold: '\x1b[1m', dim: '\x1b[2m', green: '\x1b[32m', yellow: '\x1b[33m', red: '\x1b[31m', cyan: '\x1b[36m' };
 const c = (col, s) => `${C[col]}${s}${C.reset}`;
 
@@ -307,6 +307,20 @@ function cmdServe(portArg) {
   // Ohne Erlaubnis bleibt es bei einem lokalen Branch+Commit (pushed:false).
   const uploadFor = (push) => async (comp) => uploadFix(comp, { git: gitFor(comp.path), push: !!(push && settings.allowPush), stamp: stampNow() });
 
+  // T-124 — Native-Funktionieren-Guard für den Selbst-Fix: prüft das beobachtbare Verhalten gegen den
+  // Akzeptanz-Vertrag (runMockSelfTests + compareAcceptance). Ohne Vertrag/Mock (Guard kann nicht laufen)
+  // → skipped (blockiert NICHT, statt einen gültigen Fix fälschlich zurückzurollen).
+  const verifyNativeFor = (component) => async () => {
+    const c = store.get(component.id) || component;
+    const contract = readAcceptance(c.path);
+    if (!contract || !(contract.criteria?.length)) return { pass: true, skipped: true, reason: 'kein Akzeptanz-Vertrag' };
+    try {
+      const st = await runMockSelfTests(`http://localhost:${port}/mock/${slugify(c.name)}/index.html`, { timeoutMs: 14000 });
+      if (!st || st.ran !== true) return { pass: true, skipped: true, reason: 'Mock-Self-Test lief nicht (kein Playwright/Mock)' };
+      return compareAcceptance(contract, st);
+    } catch (e) { return { pass: true, skipped: true, reason: String(e?.message ?? e) }; }
+  };
+
   // Vollständige Pflege-Orchestrierung (T-66) — EINE Quelle für den Button UND den autonomen Lauf
   // (Scheduler/Cron), damit das Tool standalone wirklich pflegt: Mock sicherstellen → maintainComponent
   // (check/safe-updates/autofix/re-test) → bei breaking Libs: Baseline gegen den Mock + verifizierte
@@ -319,7 +333,7 @@ function cmdServe(portArg) {
     const hasPlaywright = fs.existsSync(path.join(__dirname, 'node_modules', '@playwright', 'test'));
     const specsDir = path.join(DATA_DIR, 'ui-tests', slugify(component.name));
     await buildMockFor(store.get(id)); // Auto-Mock sicherstellen (Default-UI-Test-Ziel)
-    const maintainOpts = { ai, updateDeps: { push: localGitPush(component.path), registry: prRegistry, recordRun: record }, logSink: writeLog, onTestPlan, onSbom, recordRun: record };
+    const maintainOpts = { ai, updateDeps: { push: localGitPush(component.path), registry: prRegistry, recordRun: record }, logSink: writeLog, onTestPlan, onSbom, recordRun: record, verifyNative: verifyNativeFor(store.get(id)) };
     if (opts.autoUpload) { maintainOpts.autoUpload = true; maintainOpts.upload = uploadFor(true); } // Job: bei grün auto-commit (Push nur bei allowPush)
     const r = await maintainComponent(store, store.get(id), maintainOpts);
     const breaking = (r.steps || []).filter((s) => s.step === 'migrate' && s.skipped);
@@ -468,9 +482,10 @@ function cmdServe(portArg) {
     }
 
     // Autonomes Review & Fix (nutzt konfiguriertes KI-Backend)
-    if (p.startsWith('/api/components/') && p.endsWith('/autoreview') && req.method === 'POST') return withComponent(async (c) => {
+    if (p.startsWith('/api/components/') && p.endsWith('/autoreview') && req.method === 'POST') return withComponentRunning(async (c) => {
       const ai = resolveAiBackend(settings, secretStore);
-      const r = await autoReviewFix(store, c, { ai });
+      await buildMockFor(c); // Native-Guard braucht den Mock als Mess-Ziel
+      const r = await autoReviewFix(store, c, { ai, verifyNative: verifyNativeFor(c) });
       return json(res, r, r?.error ? 400 : 200);
     });
 
@@ -650,9 +665,11 @@ function cmdServe(portArg) {
     // Alles automatisch beheben (T-61) → async
     if (p.startsWith('/api/components/') && p.endsWith('/autofix') && req.method === 'POST') return withComponentRunning(async (c) => {
       const ai = resolveAiBackend(settings, secretStore);
+      await buildMockFor(c); // Native-Guard (T-124) braucht den Mock als Mess-Ziel
       const r = await autoFixComponent(store, c, {
         ai,
         updateDeps: { push: localGitPush(c.path), registry: prRegistry, recordRun: record },
+        verifyNative: verifyNativeFor(c),
         logSink: writeLog,
       });
       return json(res, r, r?.error ? 400 : 200);

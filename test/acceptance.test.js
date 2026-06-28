@@ -90,8 +90,9 @@ describe('F-30 T-116 Akzeptanz-Vertrag aus der Mock-Charakterisierung', () => {
   it('T-120 acceptanceToScenarios: devhub-taugliche Gherkin-Szenarien (je Kriterium + Render)', () => {
     const c = acceptanceFromSelfTest(stGreen, { name: 'Widget' });
     const scen = acceptanceToScenarios(c, { name: 'Widget' });
-    expect(scen.length).toBe(c.total + 1); // + „rendert echt"
-    expect(scen[0].title).toMatch(/rendert echte Ausgabe/);
+    expect(scen.length).toBe(c.total + 2); // + „funktioniert nativ wie zuvor" (Kopf) + „rendert echt"
+    expect(scen[0].title).toMatch(/funktioniert nativ wie zuvor/); // T-124: natives Funktionieren ist Kopf-Kriterium
+    expect(scen[1].title).toMatch(/rendert echte Ausgabe/);
     const s = scen.find((x) => x.title.includes('renders 12 nodes'));
     expect(s).toBeTruthy();
     expect(s.gherkin).toMatch(/Angenommen/);

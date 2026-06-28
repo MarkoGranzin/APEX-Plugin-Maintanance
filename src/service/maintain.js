@@ -65,7 +65,7 @@ export async function maintainComponent(store, comp, deps = {}) {
   const autoFix = deps.autoFix ?? autoFixComponent;
   let fixResult = null;
   try {
-    fixResult = await autoFix(store, cur(), { ai: deps.ai, update: deps.update, updateDeps: deps.updateDeps, autoReviewFix: deps.autoReviewFix, now });
+    fixResult = await autoFix(store, cur(), { ai: deps.ai, update: deps.update, updateDeps: deps.updateDeps, autoReviewFix: deps.autoReviewFix, verifyNative: deps.verifyNative, now });
   } catch (e) {
     steps.push({ step: 'autofix', error: String(e?.message ?? e) });
   }

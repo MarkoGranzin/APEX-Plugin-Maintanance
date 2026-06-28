@@ -55,20 +55,38 @@ export async function autoReviewFix(store, comp, deps = {}) {
     ({ assets, gate } = review());
   }
 
+  // T-125: kritischer Code = verbleibende Security-Findings mit severity high/critical (klar herausgehoben).
+  const isCritical = (f) => f.severity === 'high' || f.severity === 'critical';
+  let criticalFindings = (gate.security?.findings ?? []).filter(isCritical).map((f) => ({ rule: f.rule, severity: f.severity, asset: f.asset, message: f.message }));
+
+  // T-124: Selbst-Fix-Guard — statisch grün reicht NICHT; das Plugin muss NATIV wie zuvor funktionieren.
+  // verifyNative (injiziert) prüft das beobachtbare Verhalten gegen den Akzeptanz-Vertrag.
+  let native = null;
+  let nativeBroke = false;
+  if (gate.pass && typeof deps.verifyNative === 'function') {
+    try { native = await deps.verifyNative(); } catch (e) { native = { pass: true, skipped: true, error: String(e?.message ?? e) }; }
+    // Nur ein ECHTER, gelaufener Regress blockiert (konnte der Guard nicht laufen → nicht fälschlich zurückrollen).
+    if (native && native.skipped !== true && native.pass === false) nativeBroke = true;
+  }
+  const pass = gate.pass && !nativeBroke;
+
   // Protokoll zusammenstellen
   const entries = [];
-  for (const f of gate.security?.findings ?? []) entries.push({ agent: 'Security', file: f.asset || comp.name, result: `${f.rule}: ${f.message}`, severity: f.severity });
+  for (const f of gate.security?.findings ?? []) entries.push({ agent: 'Security', file: f.asset || comp.name, result: `${isCritical(f) ? '⛔ KRITISCH — ' : ''}${f.rule}: ${f.message}`, severity: f.severity });
   for (const f of gate.quality?.findings ?? []) entries.push({ agent: 'Code-Review', file: f.asset || comp.name, result: `${f.rule}: ${f.message}`, severity: f.severity });
   entries.push(...protocol);
-  if (!gate.pass) {
+  if (!pass) {
     for (const [target, content] of backups) fs.writeFileSync(target, content); // Rollback
-    entries.push({ agent: 'Auto-Review', file: comp.name, result: `not green after ${attempts} attempt(s) — changes rolled back`, severity: 'error' });
+    if (nativeBroke) entries.push({ agent: 'Auto-Review', file: comp.name, result: `Fix brach natives Funktionieren (Regress: ${[...(native.missing || []), ...(native.broken || [])].length} Kriterium/Kriterien) → alle Änderungen zurückgerollt`, severity: 'error' });
+    else entries.push({ agent: 'Auto-Review', file: comp.name, result: `not green after ${attempts} attempt(s) — changes rolled back`, severity: 'error' });
   } else {
-    entries.push({ agent: 'Auto-Review', file: comp.name, result: `green after ${attempts} fix attempt(s)` });
+    entries.push({ agent: 'Auto-Review', file: comp.name, result: `green after ${attempts} fix attempt(s)${native && native.skipped !== true ? ' — nativ wie zuvor verifiziert' : ''}` });
   }
+  // Nach einem Rollback ist der Code wieder der ALTE → die ursprünglichen kritischen Befunde stehen weiter an.
+  if (nativeBroke) { const a0 = inspectAssets(dir); const g0 = gateFn({ assets: a0.map((x) => ({ name: x.name, code: x.code })) }); criticalFindings = (g0.security?.findings ?? []).filter(isCritical).map((f) => ({ rule: f.rule, severity: f.severity, asset: f.asset, message: f.message })); }
 
   const keepers = (store.get(comp.id).lastLog?.entries ?? []).filter((e) => !['Security', 'Code-Review', 'Web-Dev', 'Auto-Review'].includes(e.agent));
-  store.update(comp.id, { lastLog: { at: now(), entries: [...keepers, ...entries] }, status: gate.pass ? 'ok' : (comp.status ?? 'handlungsbedarf') });
-  store.addReview(comp.id, { kind: 'auto-review', pass: gate.pass, attempts });
-  return { pass: gate.pass, attempts, protocol };
+  store.update(comp.id, { lastLog: { at: now(), entries: [...keepers, ...entries] }, status: pass ? 'ok' : (comp.status ?? 'handlungsbedarf') });
+  store.addReview(comp.id, { kind: 'auto-review', pass, attempts, criticalCount: criticalFindings.length });
+  return { pass, attempts, protocol, criticalFindings, native };
 }
