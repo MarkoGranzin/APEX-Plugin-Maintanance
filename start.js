@@ -59,7 +59,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const DATA_DIR = process.env.AISPP_DATA_DIR || path.join(__dirname, 'data');
 // Build-Marker: muss mit APP_BUILD in public/app.html übereinstimmen. Bei Backend-Änderungen erhöhen.
 // Das Frontend vergleicht beide und warnt, wenn der laufende Dienst veraltet ist (Neustart nötig).
-const BUILD = '2026-06-28.61';
+const BUILD = '2026-06-28.62';
 const C = { reset: '\x1b[0m', bold: '\x1b[1m', dim: '\x1b[2m', green: '\x1b[32m', yellow: '\x1b[33m', red: '\x1b[31m', cyan: '\x1b[36m' };
 const c = (col, s) => `${C[col]}${s}${C.reset}`;
 
@@ -186,7 +186,10 @@ function cmdServe(portArg) {
       const fp = mockInputFingerprint(component.path);
       let fpFile = null;
       try { fpFile = JSON.parse(fs.readFileSync(fpPath, 'utf8')); } catch { fpFile = null; }
-      const known = exists && fp && fpFile?.fp === fp && fpFile?.mode === 'ai'; // nur ECHTE KI-Mocks gelten als bekannt; static-Fallbacks immer neu versuchen
+      let known = exists && fp && fpFile?.fp === fp && fpFile?.mode === 'ai'; // nur ECHTE KI-Mocks gelten als bekannt; static-Fallbacks immer neu versuchen
+      // B-27: dem Fingerprint NICHT blind vertrauen — der eingecheckte Mock muss den Self-Test-Harness wirklich
+      // enthalten. Ein degradierter/statischer Mock (z.B. nach Rollback ohne KI) gilt sonst fälschlich als grün.
+      if (known) { try { const html = fs.readFileSync(path.join(mockDir, 'index.html'), 'utf8'); if (!/__views|__selftested|__features/.test(html)) { known = false; try { fs.rmSync(fpPath, { force: true }); } catch { /* egal */ } } } catch { known = false; } }
       if (exists && known && !upgrade) {
         if (opts.force) writeLog(component, '[mock] bekannte Version (Fingerprint match) — KI-Untersuchung übersprungen, eingecheckter Mock wiederverwendet');
         // Self-Test-Bilanz + Modus aus der Fingerprint-Datei wiederherstellen (Badge/Anzeige stimmt auch beim Cache-Treffer).
@@ -661,14 +664,29 @@ function cmdServe(portArg) {
     // abgeleitet, inkl. Schnittstelle). Schreibt nur .maintenance/acceptance.json, kein Push.
     if (p.startsWith('/api/components/') && p.endsWith('/rebuild-requirements') && req.method === 'POST') return withComponentRunning(async (c, id) => {
       const sl = slugify(c.name); const mockUrl = `http://localhost:${port}/mock/${sl}/index.html`;
+      const derive = async () => {
+        const st = await runMockSelfTests(mockUrl, { timeoutMs: 20000 });
+        if (!st || st.ran !== true) return { st, contract: null };
+        const contract = acceptanceFromSelfTest(st, { name: c.name, at: new Date().toISOString(), interface: pluginInterface(c.path) });
+        return { st, contract: contract.error ? null : contract };
+      };
+      // 1) Günstig: aus dem vorhandenen Mock ableiten.
       setStep(id, 'Requirements: Mock sicherstellen…');
-      const mu = await buildMockFor(store.get(id)); // baut den Mock, falls er fehlt (sonst Fingerprint-Cache)
-      if (!mu) return json(res, { ok: false, error: 'Kein Mock baubar (Repo/Plugin fehlt) — Requirements nicht ableitbar.' }, 400);
+      if (!(await buildMockFor(store.get(id)))) return json(res, { ok: false, error: 'Kein Mock baubar (Repo/Plugin fehlt) — Requirements nicht ableitbar.' }, 400);
       setStep(id, 'Requirements: Mock-Self-Test…');
-      let st; try { st = await runMockSelfTests(mockUrl, { timeoutMs: 14000 }); } catch (e) { return json(res, { ok: false, error: 'Mock-Self-Test fehlgeschlagen: ' + (e?.message ?? e) }, 400); }
-      if (!st || st.ran !== true) return json(res, { ok: false, error: 'Mock-Self-Test lief nicht (Playwright/Mock fehlt) — kein Vertrag gebaut.' }, 400);
-      const contract = acceptanceFromSelfTest(st, { name: c.name, at: new Date().toISOString(), interface: pluginInterface(c.path) });
-      if (contract.error) return json(res, { ok: false, error: contract.error }, 400);
+      let { st, contract } = await derive();
+      // 2) Ergibt der vorhandene Mock kein grünes Soll → VOLLER KI-Neuaufbau des Mocks (das eigentliche „neu bauen").
+      if (!contract || contract.total === 0) {
+        setStep(id, 'Requirements: voller KI-Neuaufbau des Mocks (kann dauern)…');
+        await buildMockFor(store.get(id), { force: true });
+        setStep(id, 'Requirements: Mock-Self-Test (nach Neuaufbau)…');
+        ({ st, contract } = await derive());
+      }
+      // 3) NON-DESTRUKTIV: nur einen Vertrag MIT grünen Kriterien schreiben; sonst den vorhandenen behalten.
+      if (!contract || contract.total === 0) {
+        const kept = readAcceptance(c.path);
+        return json(res, { ok: false, selfFailed: true, keptPrevious: !!(kept && (kept.criteria || []).length), error: 'Frische Charakterisierung ergab KEIN grünes Soll — der Mock lädt das Plugin nicht sauber. Bisheriger Vertrag bleibt unverändert; ein voller KI-Neuaufbau hat es nicht grün bekommen.' }, 200);
+      }
       writeAcceptance(c.path, contract);
       try { store.update(id, { mockSelfCheck: { views: st.views ?? null, total: st.total ?? contract.total, failed: (st.problems || []).length } }); } catch { /* egal */ }
       return json(res, { ok: true, total: contract.total, views: contract.views, interfaceCount: contract.interface?.count ?? 0, capturedAt: contract.capturedAt });
