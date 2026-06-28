@@ -45,6 +45,28 @@ describe('T-114 Security-Entscheid Update vs. Ersatz', () => {
     expect(decideLibAction({ name: 'x', status: 'unbekannt' }).action).toBe('review');
   });
 
+  it('T-123: veraltet ohne bekanntes Risiko → update (medium) + security:code-only angehängt', () => {
+    const d = decideLibAction({ name: 'lz-string', version: '1.0.2', latest: '1.5.0', status: 'veraltet' });
+    expect(d.action).toBe('update');
+    expect(d.severity).toBe('medium');
+    expect(d.security).toBeTruthy();
+    expect(d.security.verdict).toBe('code-only');
+  });
+
+  it('T-123: veraltet + Security-Scan findet Risiko OHNE Fix → replace (auto, ohne expliziten cve)', () => {
+    const scan = () => ({ scanned: true, verdict: 'security-risk', securityRisk: true, severity: 'high', fixAvailable: false, reason: 'CVE-AUTO ohne Fix' });
+    const d = decideLibAction({ name: 'lz-string', version: '1.0.2', status: 'veraltet' }, { securityScan: scan });
+    expect(d.action).toBe('replace');
+    expect(d.security.securityRisk).toBe(true);
+  });
+
+  it('T-123: veraltet + Security-Scan findet Risiko MIT Fix → update (high, Sicherheit)', () => {
+    const scan = () => ({ scanned: true, verdict: 'security-risk', securityRisk: true, severity: 'high', fixAvailable: true, reason: 'CVE-AUTO mit Fix' });
+    const d = decideLibAction({ name: 'lz-string', version: '1.0.2', status: 'veraltet' }, { securityScan: scan });
+    expect(d.action).toBe('update');
+    expect(d.severity).toBe('high');
+  });
+
   it('decideForLibs: Entscheidung je Lib, cveFor injizierbar', () => {
     const libs = [{ name: 'three', status: 'aktuell' }, { name: 'oldlib', status: 'verwundbar' }];
     const out = decideForLibs(libs, { cveFor: (l) => l.name === 'oldlib' ? { vulnerable: true, fixAvailable: false } : null });

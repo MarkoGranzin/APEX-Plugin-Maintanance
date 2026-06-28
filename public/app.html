@@ -323,6 +323,12 @@ function libActionBadge(c){
   if(a.redevelop) h+=` <span class="badge" style="color:#f85149;border-color:#f8514966" title="${a.redevelop} dead librar(y/ies) without successor → slice-wise re-development (F-30)">🧬 ${a.redevelop} redevelop</span>`;
   return h;
 }
+// T-123: Sicherheits-Verdikt einer (veralteten) Lib sichtbar machen — RISIKO vs. nur-Code.
+function secMark(l){
+  const s=l&&l.security; if(!s||!s.scanned) return '';
+  if(s.securityRisk){ const col=s.severity==='critical'?'#f85149':'#ff8a3d'; return ` <span class="badge" style="color:${col};border-color:${col}66" title="Security check: RISK — ${esc(s.reason||'')}">🛡 risk</span>`; }
+  return ` <span class="badge" style="color:#3fb950;border-color:#3fb95066" title="Security check: only outdated code, no known risk — ${esc(s.reason||'')}">🛡 code</span>`;
+}
 // Mock-Status sofort in der Liste sichtbar: grün = KI-Mock + Self-Test-Bilanz, rot = auf statischen Stub gefallen.
 function mockBadge(c){
   if(!c || !c.mockUrl) return '';
@@ -449,7 +455,7 @@ function renderTable(){
       <td>${typeBadge}</td>
       <td><span class="badge ${badgeCls}">${esc(c.formatBadge)}</span></td>
       <td><span class="dot ${dot}"></span>${esc(statusLabel(c.status))}</td>
-      <td class="small muted">${(c.libs||[]).slice(0,4).map(l=>`<span class="badge" style="${l.status==='verwundbar'?'color:var(--red);border-color:#f8514966':(l.status==='nicht gepflegt'||l.status==='veraltet')?'color:var(--yellow);border-color:#d2992266':l.status==='unbekannt'?'color:var(--muted)':''}" title="${esc((libStatusLabel(l.status)||l.status||'')+(l.action&&l.action!=='ok'?' → '+l.action+(l.actionPath?' ('+l.actionPath+')':''):''))}">${esc(l.name)}@${esc(l.version)}</span>`).join(' ')||'—'}${(c.libs||[]).length>4?` <span class="muted">+${c.libs.length-4}</span>`:''}</td>
+      <td class="small muted">${(c.libs||[]).slice(0,4).map(l=>`<span class="badge" style="${l.status==='verwundbar'?'color:var(--red);border-color:#f8514966':(l.status==='nicht gepflegt'||l.status==='veraltet')?'color:var(--yellow);border-color:#d2992266':l.status==='unbekannt'?'color:var(--muted)':''}" title="${esc((libStatusLabel(l.status)||l.status||'')+(l.action&&l.action!=='ok'?' → '+l.action+(l.actionPath?' ('+l.actionPath+')':''):'')+(l.security&&l.security.scanned?' · 🛡 '+l.security.reason:''))}">${esc(l.name)}@${esc(l.version)}</span>${l.status==='veraltet'?secMark(l):''}`).join(' ')||'—'}${(c.libs||[]).length>4?` <span class="muted">+${c.libs.length-4}</span>`:''}</td>
       <td class="small muted">${fmtDate(c.lastChange&&c.lastChange.at)}</td>
       <td class="small">${esc(c.changeSummary)}</td>
       <td><div class="actions">
@@ -708,7 +714,9 @@ function libLine(l){
         ? `<div class="small" style="margin:2px 0 0 12px;color:var(--accent)">↳ replace with <b>${esc(l.replacement.to)}</b> (${esc(l.replacement.license)}${l.replacement.attribution?', attribution':', no obligations'}) — done automatically on maintenance</div>`
         : `<div class="small" style="margin:2px 0 0 12px;color:var(--accent)">↳ no permissive successor → a minimal MIT replacement is built automatically on maintenance</div>`)
     : '';
-  return `<div class="logline ${cls}"><b>${esc(l.name)}@${esc(l.version)}</b>${manual} — ${esc(libStatusLabel(l.status))}${l.vuln?` (${esc(l.vuln)})`:''}${l.reason?` — ${esc(l.reason)}`:''}${web}${inst}${licenseBadge(l)}${src}${rep}</div>`;
+  // T-123: bei veralteten Libs das dedizierte Security-Verdikt zeigen (RISIKO vs. nur Code).
+  const sec = (l.status==='veraltet' && l.security && l.security.scanned) ? secMark(l) : '';
+  return `<div class="logline ${cls}"><b>${esc(l.name)}@${esc(l.version)}</b>${manual} — ${esc(libStatusLabel(l.status))}${l.vuln?` (${esc(l.vuln)})`:''}${l.reason?` — ${esc(l.reason)}`:''}${web}${inst}${licenseBadge(l)}${sec}${src}${rep}</div>`;
 }
 // Lizenz-Badge: pflichtenarm (grün) / Attribution (gelb) / copyleft|unklar (rot) — T-95
 function licenseBadge(l){
@@ -1155,7 +1163,7 @@ async function loadLibraries(){
 }
 
 // Build-Marker: muss mit BUILD in start.js übereinstimmen. Erkennt einen veralteten Backend-Prozess.
-const APP_BUILD = '2026-06-27.57';
+const APP_BUILD = '2026-06-28.58';
 async function checkBackend(){
   const b = $('staleBanner');
   try{

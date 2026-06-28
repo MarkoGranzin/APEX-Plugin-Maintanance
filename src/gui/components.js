@@ -22,7 +22,7 @@ const FORMAT_BADGE = { export: 'APEX-SQL-Export', source: 'JS+CSS roh', mixed: '
 export function overviewViewModel(store) {
   return store.list().map((c) => {
   // T-114/T-119: je Lib die empfohlene Aktion (update/replace/redevelop) ableiten + je Komponente summieren.
-  const libs = (c.libs ?? []).map((l) => { const d = decideLibAction(l); return { ...l, action: d.action, actionPath: d.path, actionReason: d.reason }; });
+  const libs = (c.libs ?? []).map((l) => { const d = decideLibAction(l); return { ...l, action: d.action, actionPath: d.path, actionReason: d.reason, security: d.security }; });
   const libActions = libs.reduce((a, l) => { if (l.action === 'update') a.update++; else if (l.action === 'replace') a[l.actionPath === 'redevelop' ? 'redevelop' : 'replace']++; return a; }, { update: 0, replace: 0, redevelop: 0 });
   return ({
     id: c.id,
@@ -56,7 +56,9 @@ export function detailViewModel(store, id) {
   const c = store.get(id);
   if (!c) return null;
   const desc = (a, b) => String(b.at).localeCompare(String(a.at));
-  return { ...c, formatBadge: FORMAT_BADGE[c.format] ?? 'unklar', notes: [...c.notes].sort(desc), reviews: [...c.reviews].sort(desc) };
+  // T-114/T-123: je Lib Aktion + Sicherheits-Verdikt anreichern (auch im Drawer sichtbar).
+  const libs = (c.libs ?? []).map((l) => { const d = decideLibAction(l); return { ...l, action: d.action, actionPath: d.path, actionReason: d.reason, security: d.security }; });
+  return { ...c, libs, formatBadge: FORMAT_BADGE[c.format] ?? 'unklar', notes: [...c.notes].sort(desc), reviews: [...c.reviews].sort(desc) };
 }
 
 const OPENERS = {
