@@ -27,6 +27,7 @@ export function criterionKey(view, feature) { return `${norm(view).toLowerCase()
  */
 export function normalizeInterface(iface) {
   const raw = Array.isArray(iface) ? iface : (iface?.attributes || []);
+  const seen = new Set();
   const attributes = raw
     .map((a) => ({
       name: norm(a.name ?? a.prompt ?? ''),
@@ -35,7 +36,8 @@ export function normalizeInterface(iface) {
       default: String(a.default ?? a.def ?? '').trim(),   // vollständig, nicht kürzen (JSON!)
       help: norm(a.help ?? ''),
     }))
-    .filter((a) => a.name);
+    .filter((a) => a.name)
+    .filter((a) => { const k = `${a.name}|${a.type}|${a.default}|${a.allowedValues.join('|')}`; if (seen.has(k)) return false; seen.add(k); return true; }); // identische Deklarationen entdoppeln
   return { attributes, count: attributes.length };
 }
 

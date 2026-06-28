@@ -50,6 +50,14 @@ describe('T-126 Schnittstelle exakt im Akzeptanz-Vertrag/.feature', () => {
     expect(s.gherkin).toContain(JSON_DEFAULT);
   });
 
+  it('entdoppelt identische Parameter-Deklarationen', () => {
+    const dup = { attributes: [
+      { prompt: 'ConfigJSON', type: 'JAVASCRIPT', values: [], def: '{"a":1}', help: 'x' },
+      { prompt: 'ConfigJSON', type: 'JAVASCRIPT', values: [], def: '{"a":1}', help: 'x' },
+    ] };
+    expect(normalizeInterface(dup).count).toBe(1);
+  });
+
   it('ohne interface → kein Schnittstellen-Abschnitt (rückwärtskompatibel)', () => {
     const c = acceptanceFromSelfTest(stGreen, { name: 'X' });
     expect(c.interface).toBe(null);

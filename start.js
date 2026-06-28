@@ -645,8 +645,12 @@ function cmdServe(portArg) {
         try { const st = await runMockSelfTests(mockUrl, { timeoutMs: 14000 }); if (st.ran) { contract = acceptanceFromSelfTest(st, { name: c.name, at: new Date().toISOString(), interface: pluginInterface(c.path) }); if (!contract.error) writeAcceptance(c.path, contract); } } catch { /* kein Mock/Playwright */ }
       }
       if (!contract || contract.error || !(contract.criteria || []).length) return json(res, { error: 'Kein Akzeptanz-Vertrag — erst einen grünen Mock bauen (Plugin importieren/„Open mock").' }, 400);
-      // T-126: ältere Verträge ohne Schnittstelle beim Export nachrüsten (keine Neu-Charakterisierung nötig).
-      if (!contract.interface) { try { const iff = pluginInterface(c.path); if (iff.attributes?.length) { contract = { ...contract, interface: normalizeInterface(iff) }; writeAcceptance(c.path, contract); } } catch { /* best effort */ } }
+      // T-126: Schnittstelle beim Export sicherstellen — fehlt sie, aus dem Repo nachrüsten; sonst
+      // re-normalisieren (idempotent → entdoppelt auch ältere, doppelt deklarierte Verträge).
+      try {
+        if (!contract.interface) { const iff = pluginInterface(c.path); if (iff.attributes?.length) { contract = { ...contract, interface: normalizeInterface(iff) }; writeAcceptance(c.path, contract); } }
+        else { const norm = normalizeInterface(contract.interface); if (norm.count !== contract.interface.count) { contract = { ...contract, interface: norm }; writeAcceptance(c.path, contract); } }
+      } catch { /* best effort */ }
       const fn = slugify(c.name);
       if (fmt === 'feature') { res.writeHead(200, { 'Content-Type': 'text/plain; charset=utf-8', 'Content-Disposition': `attachment; filename="${fn}.acceptance.feature"` }); return res.end(acceptanceFeatureFile(contract, { name: c.name })); }
       if (fmt === 'devhub') return json(res, acceptanceToDevhub(contract, { name: c.name }));
