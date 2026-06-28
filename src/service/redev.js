@@ -221,6 +221,19 @@ export async function redevelopComponent(store, comp, deps = {}) {
     gate = compareToBaseline(cur, r.scenarios ?? []);
   }
 
+  // B-25: „adopt/rebuilt" NUR bei einer ECHTEN Änderung (real getauschte Lib). Sonst ist ein grünes Gate
+  // bedeutungslos (Plugin unverändert) — dann ehrlich als „nicht automatisch reparierbar" markieren.
+  const realChange = !!(mig.applied && mig.applied.length);
+  const markNotRepairable = (reason) => { try { store.update(comp.id, { rebuilt: false, rebuiltTo: null, verifiedAsBefore: false, notRepairable: { at: now(), reason } }); } catch { /* ignore */ } };
+
+  if (gate.pass && !realChange) {
+    // Gate grün, aber NICHTS real migriert (z.B. Lib-Version „unbekannt", kein sicherer Tausch, kein Nachfolger).
+    if (mig.rollback) await mig.rollback();
+    markNotRepairable('Automatische Pflege konnte keine betroffene Lib real aktualisieren/ersetzen (kein sicherer Versions-/Tauschpfad) — manuelle Migration nötig.');
+    store.addReview?.(comp.id, { kind: 'redev', pass: false, reason: 'no-op — nichts real migriert' });
+    return { adopted: false, notRepairable: true, at: now(), migration: mig.summary, gate, review, reason: 'kein wirksames Upgrade möglich — als „nicht reparierbar" markiert' };
+  }
+
   if (gate.pass) {
     // 3b) T-104 — optisches Abschluss-Gate: „sieht aus wie zuvor?" KI vergleicht initialen Baseline-Screenshot
     //     mit einem frischen Screenshot des migrierten Builds. Optischer Regress = NICHT übernehmen (Rollback).
@@ -235,22 +248,22 @@ export async function redevelopComponent(store, comp, deps = {}) {
     }
     if (visual.ran && visual.looksSame === false) {
       if (mig.rollback) await mig.rollback();
+      markNotRepairable('Optischer Regress nach Migration — sieht nicht „wie zuvor" aus: ' + (visual.issues || []).join('; '));
       store.addReview?.(comp.id, { kind: 'redev', pass: false, visual });
-      return { adopted: false, at: now(), migration: mig.summary, gate, review, visual, reason: 'visual regression — does not look as before: ' + (visual.issues || []).join('; ') };
+      return { adopted: false, notRepairable: true, at: now(), migration: mig.summary, gate, review, visual, reason: 'visual regression — does not look as before: ' + (visual.issues || []).join('; ') };
     }
 
     let upload = null;
     if (deps.upload) { try { upload = await deps.upload(store.get(comp.id) ?? comp); } catch (e) { upload = { error: String(e?.message ?? e) }; } }
-    // T-94/B-17: Kennzeichnung aus den TATSÄCHLICH getauschten Libs (nicht aus l.latest = Ziel).
-    const target = (mig.applied && mig.applied.length)
-      ? mig.applied.map((l) => `${l.name}@${l.to}`).join(', ')
-      : ((store.get(comp.id)?.libs ?? comp.libs ?? []).filter((l) => l.latest).map((l) => `${l.name}@${l.latest}`).join(', ') || 'latest');
-    store.update(comp.id, { rebuilt: true, rebuiltAt: now(), rebuiltTo: target, rebuiltSummary: mig.summary, verifiedAsBefore: true, reviewUrl: upload?.prUrl ?? (store.get(comp.id)?.reviewUrl ?? null), reviewBranch: upload?.branch ?? (store.get(comp.id)?.reviewBranch ?? null) });
+    // T-94/B-17/B-25: Kennzeichnung NUR aus den TATSÄCHLICH getauschten Libs.
+    const target = mig.applied.map((l) => `${l.name}@${l.to}`).join(', ');
+    store.update(comp.id, { rebuilt: true, rebuiltAt: now(), rebuiltTo: target, rebuiltSummary: mig.summary, verifiedAsBefore: true, notRepairable: null, reviewUrl: upload?.prUrl ?? (store.get(comp.id)?.reviewUrl ?? null), reviewBranch: upload?.branch ?? (store.get(comp.id)?.reviewBranch ?? null) });
     store.addReview?.(comp.id, { kind: 'redev', pass: true, migration: mig.summary, visual });
     return { adopted: true, at: now(), migration: mig.summary, rebuiltTo: target, gate, review, upload, visual };
   }
-  // Regress → Rollback (nichts wird ohne „grün wie zuvor" übernommen)
+  // Regress → Rollback (nichts wird ohne „grün wie zuvor" übernommen) → nicht (automatisch) reparierbar
   if (mig.rollback) await mig.rollback();
+  markNotRepairable('Migration verletzte die Akzeptanzkriterien (Regress) — automatisch nicht „wie zuvor" herstellbar, manuelle Migration nötig.');
   store.addReview?.(comp.id, { kind: 'redev', pass: false, regressions: gate.regressions?.length ?? 0 });
-  return { adopted: false, at: now(), migration: mig.summary, gate, review, regressions: gate.regressions };
+  return { adopted: false, notRepairable: true, at: now(), migration: mig.summary, gate, review, regressions: gate.regressions };
 }

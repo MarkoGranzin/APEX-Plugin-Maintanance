@@ -18,7 +18,7 @@ describe('F-28 T-93 redevelopComponent (Spec-gesicherte Migration)', () => {
     const id = withBaseline(store, [{ scenario: 'A', status: 'passed' }]);
     let uploaded = false; let rolledBack = false;
     const r = await redevelopComponent(store, store.get(id), {
-      migrate: async () => ({ changed: true, summary: 'migrated', backups: new Map(), rollback: () => { rolledBack = true; } }),
+      migrate: async () => ({ changed: true, applied: [{ name: 'jquery', to: '4.0.0' }], summary: 'migrated', backups: new Map(), rollback: () => { rolledBack = true; } }),
       runDetailed: async () => ({ ran: true, ok: true, scenarios: [{ scenario: 'A', status: 'passed' }] }),
       upload: async () => { uploaded = true; return { ok: true, branch: 'b' }; },
     });
@@ -39,7 +39,7 @@ describe('F-28 T-93 redevelopComponent (Spec-gesicherte Migration)', () => {
     const order = [];
     const r = await redevelopComponent(store, store.get(id), {
       ai: { kind: 'cli' },
-      migrate: async () => { order.push('migrate'); return { changed: true, summary: 'm', backups: new Map(), rollback: () => {} }; },
+      migrate: async () => { order.push('migrate'); return { changed: true, applied: [{ name: 'jquery', to: '4.0.0' }], summary: 'm', backups: new Map(), rollback: () => {} }; },
       reviewFix: async () => { order.push('review'); return { pass: true, attempts: 2 }; },
       runDetailed: async () => { order.push('ui'); return { ran: true, scenarios: [{ scenario: 'A', status: 'passed' }] }; },
       upload: async () => ({ ok: true }),
@@ -78,7 +78,7 @@ describe('F-28 T-93 redevelopComponent (Spec-gesicherte Migration)', () => {
     const contract = { criteria: [{ view: 'v', feature: 'renders' }], renderedRequired: true };
     const r = await redevelopComponent(store, store.get(id), {
       acceptanceContract: contract,
-      migrate: async () => ({ changed: true, summary: 'm', rollback() {} }),
+      migrate: async () => ({ changed: true, applied: [{ name: 'mxgraph', to: '4.2.2' }], summary: 'm', rollback() {} }),
       runMockSelfTests: async () => ({ ran: true, rendered: true, features: [{ view: 'v', feature: 'renders', ok: true }] }),
     });
     expect(r.adopted).toBe(true);
@@ -114,6 +114,38 @@ describe('F-28 T-93 redevelopComponent (Spec-gesicherte Migration)', () => {
     expect(r.adopted).toBe(false);
     expect(rolledBack).toBe(true);
     expect(r.reason).toMatch(/Akzeptanz-Gate nicht ausführbar/);
+  });
+
+  it('B-25: grünes Gate aber KEIN realer Lib-Tausch → nicht adopted, als notRepairable markiert + stale rebuilt geräumt', async () => {
+    const store = mkStore();
+    const id = store.add({ name: 'P', path: '/repo', mockUrl: 'http://x/mock' }).id;
+    store.update(id, { rebuilt: true, rebuiltTo: 'jquery@4.0.0' }); // altes (stale) Flag aus früherem Lauf
+    const r = await redevelopComponent(store, store.get(id), {
+      acceptanceContract: { criteria: [{ view: 'v', feature: 'renders' }], renderedRequired: true },
+      migrate: async () => ({ changed: true, applied: [], summary: 'nur Code, keine Lib getauscht', rollback() {} }),
+      runMockSelfTests: async () => ({ ran: true, rendered: true, features: [{ view: 'v', feature: 'renders', ok: true }] }),
+    });
+    expect(r.adopted).toBe(false);
+    expect(r.notRepairable).toBe(true);
+    const after = store.get(id);
+    expect(after.notRepairable).toBeTruthy();
+    expect(after.notRepairable.reason).toMatch(/real aktualisieren|manuelle/i);
+    expect(after.rebuilt).toBe(false);   // irreführendes Flag geräumt
+    expect(after.rebuiltTo).toBeNull();
+  });
+
+  it('B-25: realer Tausch + grünes Gate → adopted, notRepairable geräumt', async () => {
+    const store = mkStore();
+    const id = store.add({ name: 'P', path: '/repo', mockUrl: 'http://x/mock' }).id;
+    store.update(id, { notRepairable: { at: 't', reason: 'alt' } });
+    const r = await redevelopComponent(store, store.get(id), {
+      acceptanceContract: { criteria: [{ view: 'v', feature: 'renders' }], renderedRequired: true },
+      migrate: async () => ({ changed: true, applied: [{ name: 'jquery', to: '4.0.0' }], summary: 'getauscht', rollback() {} }),
+      runMockSelfTests: async () => ({ ran: true, rendered: true, features: [{ view: 'v', feature: 'renders', ok: true }] }),
+    });
+    expect(r.adopted).toBe(true);
+    expect(r.rebuiltTo).toBe('jquery@4.0.0');
+    expect(store.get(id).notRepairable).toBeNull(); // wieder reparierbar
   });
 
   it('Migration ohne Änderung → nicht uebernommen', async () => {
@@ -236,7 +268,7 @@ describe('F-28 T-93 redevelopComponent (Spec-gesicherte Migration)', () => {
   };
   const visualDeps = (visual) => ({
     ai: { kind: 'cli' },
-    migrate: async () => ({ changed: true, summary: 'm', backups: new Map(), rollback() { this._rb = true; }, _rb: false }),
+    migrate: async () => ({ changed: true, applied: [{ name: 'jquery', to: '4.0.0' }], summary: 'm', backups: new Map(), rollback() { this._rb = true; }, _rb: false }),
     runDetailed: async () => ({ ran: true, ok: true, scenarios: [{ scenario: 'A', status: 'passed' }] }),
     hasPlaywright: true,
     captureShot: async () => ({ ok: true, path: '/tmp/after.png' }),
@@ -249,7 +281,7 @@ describe('F-28 T-93 redevelopComponent (Spec-gesicherte Migration)', () => {
     const id = withShotBaseline(store);
     let rolledBack = false;
     const deps = visualDeps({ ran: true, looksSame: false, issues: ['layout broken'] });
-    deps.migrate = async () => ({ changed: true, summary: 'm', backups: new Map(), rollback: () => { rolledBack = true; } });
+    deps.migrate = async () => ({ changed: true, applied: [{ name: 'jquery', to: '4.0.0' }], summary: 'm', backups: new Map(), rollback: () => { rolledBack = true; } });
     const r = await redevelopComponent(store, store.get(id), deps);
     expect(r.adopted).toBe(false);
     expect(rolledBack).toBe(true);
@@ -277,7 +309,7 @@ describe('F-28 T-93 redevelopComponent (Spec-gesicherte Migration)', () => {
     store.update(id, { baseline: { mode: 'ui', specHash: 'h', scenarios: [{ scenario: 'A', status: 'passed' }] } });
     const r = await redevelopComponent(store, store.get(id), {
       ai: { kind: 'cli', complete: async () => 'function init(){ var x=2; /* MIGRATED */ return x; }' },
-      applyVendoredUpdates: async () => ({ results: [], backups: new Map() }), // kein Lib-Swap, Fokus: Plugin-Code
+      applyVendoredUpdates: async () => ({ results: [{ name: 'lib', from: '1', to: '2', applied: true, file: 'js/script.js' }], backups: new Map() }), // echter Tausch → adopt; Fokus: Mock-Plugin-Code wird migriert
       runDetailed: async () => ({ ran: true, ok: true, scenarios: [{ scenario: 'A', status: 'passed' }] }),
       hasPlaywright: true,
     });

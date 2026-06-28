@@ -75,7 +75,7 @@ export function createComponentStore(opts = {}) {
     update: (id, patch = {}) => {
       const c = find(id);
       if (!c) return null;
-      for (const k of ['name', 'type', 'repo', 'source', 'visibility', 'secretRef', 'path', 'critical', 'format', 'status', 'lastChange', 'lastLog', 'testPlan', 'coverage', 'codedTests', 'libs', 'libWarning', 'libsCheckedAt', 'uiTestUrl', 'reviewUrl', 'reviewBranch', 'baseline', 'rebuilt', 'rebuiltAt', 'rebuiltTo', 'rebuiltSummary', 'verifiedAsBefore', 'mockUrl', 'mockMode', 'mockNote', 'mockFingerprint', 'mockSelfCheck']) {
+      for (const k of ['name', 'type', 'repo', 'source', 'visibility', 'secretRef', 'path', 'critical', 'format', 'status', 'lastChange', 'lastLog', 'testPlan', 'coverage', 'codedTests', 'libs', 'libWarning', 'libsCheckedAt', 'uiTestUrl', 'reviewUrl', 'reviewBranch', 'baseline', 'rebuilt', 'rebuiltAt', 'rebuiltTo', 'rebuiltSummary', 'verifiedAsBefore', 'mockUrl', 'mockMode', 'mockNote', 'mockFingerprint', 'mockSelfCheck', 'notRepairable']) {
         if (k in patch) c[k] = patch[k];
       }
       persist();

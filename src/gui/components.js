@@ -39,6 +39,8 @@ export function overviewViewModel(store) {
     libWarning: c.libWarning ?? null,
     rebuilt: !!c.rebuilt,
     rebuiltTo: c.rebuiltTo ?? null,
+    notRepairable: c.notRepairable ?? null, // B-25: ehrlich markiert, wenn automatisch nicht reparierbar
+
     mockUrl: c.mockUrl ?? null,   // F-29: „Open mock"-Button direkt in der Liste
     mockMode: c.mockMode ?? null,
     mockNote: c.mockNote ?? null,        // Fallback-Grund sichtbar machen (statt still „static")

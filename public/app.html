@@ -309,6 +309,12 @@ function libWarnBadge(w){
 function rebuiltBadge(c){
   return c && c.rebuilt ? ` <span class="badge" title="Rebuilt on ${esc(c.rebuiltTo||'latest')} — verified as before" style="color:#3fb950;border-color:#3fb95066">🚀 rebuilt</span>` : '';
 }
+// B-25: ehrlich kennzeichnen, wenn die automatische Pflege NICHT reparieren konnte (kein wirksames Upgrade).
+function notRepairableBadge(c){
+  if(!c || !c.notRepairable) return '';
+  const r = typeof c.notRepairable==='object' ? (c.notRepairable.reason||'') : '';
+  return ` <span class="badge" title="${esc(r||'Automatisch nicht reparierbar — manuelle Migration nötig')}" style="color:#f85149;border-color:#f8514966">⛔ not auto-repairable</span>`;
+}
 // Empfohlene Lib-Aktionen je Komponente (T-114/T-119): update / replace (Nachfolger) / redevelop (tote Lib, slice-weise neu).
 function libActionBadge(c){
   const a=c.libActions||{}; let h='';
@@ -438,7 +444,7 @@ function renderTable(){
     const badgeCls = c.formatBadge==='APEX-SQL-Export'?'export':'';
     const typeBadge = c.type==='template_component'?'<span class="badge tc">Template Component</span>':'<span class="badge">Plugin</span>';
     tr.innerHTML = `
-      <td><span class="spin" data-cid="${c.id}"${rowBusy(c.id)?'':' hidden'}></span><b>${esc(c.name)}</b>${libWarnBadge(c.libWarning)}${libActionBadge(c)}${rebuiltBadge(c)}${mockBadge(c)}<span class="runlbl muted small" data-cid="${c.id}"${rowBusy(c.id)?'':' hidden'}> · running…</span></td>
+      <td><span class="spin" data-cid="${c.id}"${rowBusy(c.id)?'':' hidden'}></span><b>${esc(c.name)}</b>${libWarnBadge(c.libWarning)}${libActionBadge(c)}${rebuiltBadge(c)}${notRepairableBadge(c)}${mockBadge(c)}<span class="runlbl muted small" data-cid="${c.id}"${rowBusy(c.id)?'':' hidden'}> · running…</span></td>
       <td class="small muted">${esc(c.repo||'—')}</td>
       <td>${typeBadge}</td>
       <td><span class="badge ${badgeCls}">${esc(c.formatBadge)}</span></td>
@@ -1149,7 +1155,7 @@ async function loadLibraries(){
 }
 
 // Build-Marker: muss mit BUILD in start.js übereinstimmen. Erkennt einen veralteten Backend-Prozess.
-const APP_BUILD = '2026-06-27.56';
+const APP_BUILD = '2026-06-27.57';
 async function checkBackend(){
   const b = $('staleBanner');
   try{
