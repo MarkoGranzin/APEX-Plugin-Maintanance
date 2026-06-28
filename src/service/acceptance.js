@@ -97,12 +97,15 @@ export function compareAcceptance(contract, st) {
 
 const acceptancePath = (dir) => path.join(dir, '.maintenance', 'acceptance.json');
 
-/** Vertrag neben dem Mock ablegen (reist mit dem eingecheckten Stand). */
+/** Vertrag neben dem Mock ablegen (reist mit dem eingecheckten Stand). Schreibt JSON UND die
+ *  menschenlesbare .feature (inkl. Schnittstelle) — damit der Vertrag als Datei auffindbar ist. */
 export function writeAcceptance(dir, contract) {
   try {
     const p = acceptancePath(dir);
     fs.mkdirSync(path.dirname(p), { recursive: true });
     fs.writeFileSync(p, JSON.stringify(contract, null, 2));
+    // T-126/T-127: zusätzlich die lesbare .feature (Schnittstelle + native + Kriterien) ablegen.
+    try { fs.writeFileSync(path.join(path.dirname(p), 'acceptance.feature'), acceptanceFeatureFile(contract, { name: contract?.name })); } catch { /* best effort */ }
     return p;
   } catch { return null; }
 }
