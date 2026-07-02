@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { spawn } from 'node:child_process';
 import path from 'node:path';
-import { buildInstallScript, buildTestPageSql, parsePluginName, maskConn } from '../mcp-apex-deploy/lib/apex.js';
+import { buildInstallScript, buildTestPageSql, parsePluginName, maskConn, pluginLoadFiles } from '../mcp-apex-deploy/lib/apex.js';
 
 describe('F-31 T-128 apex-deploy: Install-Skript & Sicherheit', () => {
   it('Install-Skript setzt den APEX-Kontext generisch (workspace, appId, offset, Datei, commit)', () => {
@@ -22,6 +22,30 @@ describe('F-31 T-128 apex-deploy: Install-Skript & Sicherheit', () => {
   it('parsePluginName liest p_name aus dem Export', () => {
     const sql = `wwv_flow_api.create_plugin(\n p_id=>wwv_flow_api.id(123)\n,p_plugin_type=>'REGION TYPE'\n,p_name=>'DE.AISS.APEXFLOWCHART'\n,p_display_name=>'ApexFlowChart'\n);`;
     expect(parsePluginName(sql)).toBe('DE.AISS.APEXFLOWCHART');
+  });
+
+  it('pluginLoadFiles: JS in ADD_LIBRARY-Reihenfolge, CSS getrennt, #PLUGIN_FILES#-Referenzen', () => {
+    const sql = [
+      `,p_file_name=>'mxClient.min.js'`,
+      `,p_file_name=>'preScript.js'`,
+      `,p_file_name=>'style.css'`,
+      `,p_file_name=>'script.min.js'`,
+      `,p_file_name=>'LICENSE'`,
+      `,p_plsql_code=>wwv_flow_string.join(wwv_flow_t_varchar2(`,
+      `'  APEX_JAVASCRIPT.ADD_LIBRARY( P_NAME => ''preScript'', P_DIRECTORY => X );'`,
+      `,'  APEX_JAVASCRIPT.ADD_LIBRARY( P_NAME => ''mxClient.min'', P_DIRECTORY => X );'`,
+      `,'  APEX_JAVASCRIPT.ADD_LIBRARY( P_NAME => ''script.min'', P_DIRECTORY => X );'`,
+      `,'  APEX_CSS.ADD_STYLE( P_NAME => ''style'' );'))`,
+    ].join('\n');
+    const r = pluginLoadFiles(sql);
+    expect(r.jsUrls).toEqual(['#PLUGIN_FILES#preScript.js', '#PLUGIN_FILES#mxClient.min.js', '#PLUGIN_FILES#script.min.js']);
+    expect(r.cssUrls).toEqual(['#PLUGIN_FILES#style.css']);
+  });
+
+  it('pluginLoadFiles: ohne CSS-Dateien → cssUrls leer (sofern vorhanden)', () => {
+    const r = pluginLoadFiles(`,p_file_name=>'app.js'\n,p_file_name=>'LICENSE'`);
+    expect(r.jsUrls).toEqual(['#PLUGIN_FILES#app.js']);
+    expect(r.cssUrls).toEqual([]);
   });
 
   it('maskConn maskiert das Passwort — Secrets nie in Ausgaben', () => {

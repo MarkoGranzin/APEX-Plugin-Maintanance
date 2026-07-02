@@ -45,7 +45,8 @@ Der Connect-String wird in **keiner Ausgabe** je im Klartext angezeigt (Passwort
 |---|---|
 | `apex_install` | (DB-Weg) Export-SQL headless einspielen: `set_workspace` → `set_application_id` → `generate_offset` → Datei ausführen → commit. |
 | `apex_ui_login_check` | (UI-Weg) Prüft den APEX-Login mit den env-Zugangsdaten — landet er im App Builder? Nur Login-Test, Passwort nie in der Ausgabe. |
-| `apex_install_ui` | (UI-Weg) Plugin/Template-Component über die APEX-Import-UI einspielen (Login → Plug-ins → Import → Datei → Wizard). Best effort über APEX-Versionen; liefert Schritt-Log + Screenshot. |
+| `apex_install_ui` | (UI-Weg) Plugin/Template-Component über die APEX-Import-UI einspielen (Login → Plug-ins → Import → Datei → Wizard). Setzt danach **automatisch** die „File URLs to Load" (JS+CSS) des Plugins (`setFileUrls`, Default an). Liefert Schritt-Log + Screenshot. |
+| `apex_plugin_load_files` | Setzt die „File URLs to Load" (JavaScript + CSS, sofern vorhanden) eines installierten Plugins — generisch aus dem Export abgeleitet (Datei-Liste + ADD_LIBRARY-Ladereihenfolge). Damit lädt APEX die Plugin-Dateien auto. Nur leere Felder (Default) / `overwrite`; `dryRun` zeigt die URLs. |
 | `apex_create_test_page` | (UI-Weg) Erzeugt eine **Testseite** mit einer Region vom Plugin-Typ (App → Export/Import → Import einer generierten 24.x-Seiten-SQL). Ohne `attributes` nutzt die Region die **Plugin-Defaults** (z.B. ConfigJSON aus dem Vertrag). `pluginInternalName` = create_plugin p_name (z.B. `APEX.FLOW.CHART.1`); `sourceSql` = optionale Datenquelle; `dryRun:true` gibt nur das SQL zurück. Braucht die instanzspezifischen Header-Werte `APEX_WORKSPACE_ID`/`APEX_OWNER` (aus einem App-Export ablesbar). |
 | `apex_test_page` | Seite headless öffnen (optionaler APEX-Login via env), JS-Fehler sammeln, sichtbares Rendern prüfen. Ohne Playwright: ehrliche Fehlermeldung. |
 | `apex_info` | Konfiguration anzeigen (maskiert) + SQLcl-Erreichbarkeit prüfen. |

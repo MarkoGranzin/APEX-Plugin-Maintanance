@@ -23,7 +23,10 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { buildInstallScript, buildTestPageSql, parsePluginName, maskConn } from './lib/apex.js';
+import { buildInstallScript, buildTestPageSql, parsePluginName, maskConn, pluginLoadFiles } from './lib/apex.js';
+
+/** Anzeigename (p_display_name) aus einem Plugin-Export lesen — zum Auffinden in der Plug-ins-Liste. */
+const parsePluginDisplayName = (sqlText) => { const m = String(sqlText || '').match(/p_display_name=>'((?:[^']|'')*)'/i); return m ? m[1].replace(/''/g, "'").trim() : null; };
 
 const ENV = {
   sqlcl: process.env.APEX_SQLCL || 'sql',
@@ -71,6 +74,47 @@ async function uiImportFile(page, filePath, o = {}) {
   const oraErr = (body.match(/ORA-\d+[^.]{0,120}|PLS-\d+[^.]{0,120}/i) || [])[0] || null;
   const ok = !oraErr && /installed|imported|installiert|created|erstellt|plug-?in installed|checksum/i.test(body) === true;
   return { ok: !oraErr, steps, oraError: oraErr, resultTitle: await page.locator('title').first().innerText().catch(() => '') };
+}
+
+/**
+ * Setzt die „File URLs to Load" (JS + CSS) eines installierten Plugins über die APEX-UI, damit APEX die
+ * Plugin-Dateien automatisch lädt (alte 19.1-Plugins laden sonst per ADD_LIBRARY mit brüchigen URLs).
+ * Navigiert App → Shared Components → Plug-ins → <Plugin> und füllt P4410_JAVASCRIPT_FILE_URLS/_CSS_FILE_URLS.
+ * Standard: nur leere Felder füllen (manuelle Einstellungen nicht überschreiben; overwrite=true erzwingt).
+ */
+async function uiSetPluginFileUrls(page, o = {}) {
+  const clickFirst = async (locs) => { for (const l of locs) { if (await l.count()) { await l.first().click(); await page.waitForLoadState('networkidle').catch(() => {}); await page.waitForTimeout(1000); return true; } } return false; };
+  const appId = o.appId ?? ENV.appId;
+  const appTile = page.locator(`a[href*="fb_flow_id=${appId}"]`);
+  if (!(await appTile.count())) return { ok: false, error: `App ${appId} nicht gefunden.` };
+  await appTile.first().click(); await page.waitForLoadState('networkidle').catch(() => {}); await page.waitForTimeout(800);
+  await clickFirst([page.getByRole('link', { name: /shared components/i }), page.getByText(/shared components/i)]);
+  await clickFirst([page.getByRole('link', { name: /^plug-?ins$/i }), page.getByText(/^plug-?ins$/i)]);
+  // Plugin per Anzeigename öffnen (Fallback: erster Plug-in-Link).
+  const nameRe = o.displayName ? new RegExp(o.displayName.trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i') : null;
+  let opened = false;
+  if (nameRe) opened = await clickFirst([page.getByRole('link', { name: nameRe })]);
+  if (!opened) return { ok: false, error: `Plugin „${o.displayName || '?'}" in der Liste nicht gefunden.` };
+  await page.waitForTimeout(800);
+  // Felder setzen (value + Events; Felder liegen oft in eingeklapptem Abschnitt → über JS setzen).
+  const setField = async (id, urls) => {
+    if (!urls?.length) return { field: id, skipped: 'keine Dateien' };
+    return page.evaluate(({ id, val, overwrite }) => {
+      const t = document.getElementById(id); if (!t) return { field: id, error: 'Feld fehlt' };
+      if (t.value && t.value.trim() && !overwrite) return { field: id, skipped: 'bereits gesetzt' };
+      t.value = val; t.dispatchEvent(new Event('input', { bubbles: true })); t.dispatchEvent(new Event('change', { bubbles: true }));
+      try { if (window.apex && apex.item) apex.item(id).setValue(val); } catch (e) { /* egal */ }
+      return { field: id, set: true, count: val.split('\n').filter(Boolean).length };
+    }, { id, val: urls.join('\n'), overwrite: !!o.overwrite });
+  };
+  const jsRes = await setField('P4410_JAVASCRIPT_FILE_URLS', o.jsUrls);
+  const cssRes = await setField('P4410_CSS_FILE_URLS', o.cssUrls);
+  let applied = false;
+  if (jsRes.set || cssRes.set) {
+    for (const b of [page.getByRole('button', { name: /apply changes/i }), page.locator('button:has-text("Apply Changes")')]) { if (await b.count()) { await b.first().click(); applied = true; break; } }
+    await page.waitForLoadState('networkidle').catch(() => {}); await page.waitForTimeout(1500);
+  }
+  return { ok: true, js: jsRes, css: cssRes, applied };
 }
 
 // ── SQLcl headless ausführen (Skript in Temp-Datei, -S = silent) ────────────────────────────
@@ -260,6 +304,7 @@ const TOOLS = [
       appId: { type: 'number', description: 'Ziel-App (Default env APEX_APP_ID) — Plug-ins werden in eine App importiert' },
       workspace: { type: 'string' },
       headed: { type: 'boolean', description: 'true = sichtbares Browserfenster (zum Zuschauen/Tunen)' },
+      setFileUrls: { type: 'boolean', description: 'Nach dem Install automatisch die „File URLs to Load" (JS+CSS) des Plugins füllen. Default true.' },
     }, required: ['exportFile'] },
     run: async (a) => {
       if (!fs.existsSync(a.exportFile)) return { ok: false, error: `Export-Datei nicht gefunden: ${a.exportFile}` };
@@ -297,8 +342,43 @@ const TOOLS = [
         const body = (await page.locator('body').innerText().catch(() => '')).replace(/\s+/g, ' ');
         const ok = /plug-?in installed|installed|installiert|success|erfolg/i.test(body);
         const shot = path.join(os.tmpdir(), 'apex-import-result.png'); await page.screenshot({ path: shot }).catch(() => {});
+        const exportSql = fs.readFileSync(a.exportFile, 'utf8');
         const msg = (body.match(/([^.]*\b(installed|installiert)\b[^.]*)/i) || [])[1];
-        return { ok, steps, appId: Number(appId), plugin: parsePluginName(fs.readFileSync(a.exportFile, 'utf8')), message: msg?.trim(), screenshot: shot, note: ok ? undefined : 'Kein eindeutiger Erfolgstext — Screenshot/Schritt-Log prüfen.' };
+        // Automatisch die „File URLs to Load" (JS+CSS) des Plugins setzen → APEX lädt die Plugin-Dateien zuverlässig.
+        let fileUrls = null;
+        if (ok && a.setFileUrls !== false) {
+          try {
+            const { jsUrls, cssUrls } = pluginLoadFiles(exportSql);
+            fileUrls = await uiSetPluginFileUrls(page, { appId, displayName: parsePluginDisplayName(exportSql), jsUrls, cssUrls });
+            steps.push({ step: 'set-file-urls', js: fileUrls.js, css: fileUrls.css, applied: fileUrls.applied });
+          } catch (e) { steps.push({ step: 'set-file-urls', error: String(e?.message ?? e) }); }
+        }
+        return { ok, steps, appId: Number(appId), plugin: parsePluginName(exportSql), message: msg?.trim(), fileUrls, screenshot: shot, note: ok ? undefined : 'Kein eindeutiger Erfolgstext — Screenshot/Schritt-Log prüfen.' };
+      } finally { await browser.close(); }
+    },
+  },
+  {
+    name: 'apex_plugin_load_files',
+    description: 'Setzt die „File URLs to Load" (JavaScript + CSS, sofern vorhanden) eines bereits installierten Plugins über die APEX-UI — generisch aus dem Plugin-Export abgeleitet (Datei-Liste + ADD_LIBRARY-Ladereihenfolge). Damit lädt APEX die Plugin-Dateien automatisch. Standard: nur leere Felder füllen (overwrite=true erzwingt).',
+    inputSchema: { type: 'object', properties: {
+      exportFile: { type: 'string', description: 'Pfad zum Plugin-Export-SQL (liefert Dateien + Reihenfolge + Anzeigename)' },
+      appId: { type: 'number' }, workspace: { type: 'string' },
+      overwrite: { type: 'boolean', description: 'true = auch bereits gefüllte Felder überschreiben' },
+      dryRun: { type: 'boolean', description: 'true = nur die abgeleiteten URLs zurückgeben, nichts setzen' },
+    }, required: ['exportFile'] },
+    run: async (a) => {
+      if (!fs.existsSync(a.exportFile)) return { ok: false, error: `Export-Datei nicht gefunden: ${a.exportFile}` };
+      const sql = fs.readFileSync(a.exportFile, 'utf8');
+      const { jsUrls, cssUrls } = pluginLoadFiles(sql);
+      if (a.dryRun) return { ok: true, dryRun: true, jsUrls, cssUrls, displayName: parsePluginDisplayName(sql) };
+      const chromium = await loadChromium();
+      if (!chromium) return { ok: false, error: 'Playwright nicht installiert.', jsUrls, cssUrls };
+      const browser = await chromium.launch({ headless: true });
+      try {
+        const page = await browser.newPage();
+        const login = await uiLogin(page, a); if (!login.ok) return { ok: false, error: login.error };
+        const r = await uiSetPluginFileUrls(page, { appId: a.appId ?? ENV.appId, displayName: parsePluginDisplayName(sql), jsUrls, cssUrls, overwrite: a.overwrite });
+        return { ...r, jsUrls, cssUrls };
       } finally { await browser.close(); }
     },
   },

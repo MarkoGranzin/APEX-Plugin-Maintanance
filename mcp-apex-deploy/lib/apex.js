@@ -36,6 +36,31 @@ export function buildInstallScript(o = {}) {
   return lines.join('\n') + '\n';
 }
 
+/**
+ * Ermittelt generisch die „File URLs to Load" eines Plugins aus seinem Export-SQL:
+ * alle .js/.css-Plugin-Dateien, JS in der Ladereihenfolge, die der Plugin-Code selbst vorgibt
+ * (Reihenfolge der APEX_JAVASCRIPT.ADD_LIBRARY-Aufrufe), CSS analog (ADD_CSS/STYLE) bzw. Datei-Reihenfolge.
+ * @returns {{jsUrls:string[], cssUrls:string[], jsFiles:string[], cssFiles:string[]}}
+ */
+export function pluginLoadFiles(sqlText) {
+  const t = String(sqlText || '');
+  const files = [...t.matchAll(/p_file_name=>'((?:[^']|'')*)'/gi)].map((m) => m[1].replace(/''/g, "'"));
+  const js = files.filter((f) => /\.js$/i.test(f));
+  const css = files.filter((f) => /\.css$/i.test(f));
+  // p_plsql_code (gejointer String) rekonstruieren, um die ADD_LIBRARY-/ADD_CSS-Reihenfolge zu lesen.
+  const m = t.match(/p_plsql_code=>wwv_flow_string\.join\(wwv_flow_t_varchar2\(([\s\S]*?)\)\)/i);
+  const code = m ? [...m[1].matchAll(/'((?:[^']|'')*)'/g)].map((x) => x[1].replace(/''/g, "'")).join('') : '';
+  const namesFrom = (re) => [...code.matchAll(re)].map((x) => x[1]);
+  const libOrder = namesFrom(/ADD_LIBRARY\s*\(\s*P_NAME\s*=>\s*'([^']+)'/gi);
+  const cssOrder = namesFrom(/ADD_(?:CSS|STYLE|STYLESHEET)\s*\(\s*P_NAME\s*=>\s*'([^']+)'/gi);
+  const match = (list, name) => { const n = String(name).toLowerCase(); return list.find((f) => f.replace(/\.(js|css)$/i, '').toLowerCase() === n) || list.find((f) => f.toLowerCase().startsWith(n)); };
+  const order = (list, names) => { const out = []; for (const n of names) { const f = match(list, n); if (f && !out.includes(f)) out.push(f); } for (const f of list) if (!out.includes(f)) out.push(f); return out; };
+  const orderedJs = order(js, libOrder);
+  const orderedCss = order(css, cssOrder);
+  const ref = (f) => `#PLUGIN_FILES#${f}`;
+  return { jsUrls: orderedJs.map(ref), cssUrls: orderedCss.map(ref), jsFiles: orderedJs, cssFiles: orderedCss };
+}
+
 /** Internal name / p_name des Plugins aus einem Export-SQL lesen (create_plugin-Aufruf). */
 export function parsePluginName(sqlText) {
   const call = String(sqlText || '').match(/create_plugin\s*\(([\s\S]*?)\)\s*;/i);
