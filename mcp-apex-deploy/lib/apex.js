@@ -61,6 +61,66 @@ export function pluginLoadFiles(sqlText) {
   return { jsUrls: orderedJs.map(ref), cssUrls: orderedCss.map(ref), jsFiles: orderedJs, cssFiles: orderedCss };
 }
 
+/** Einen (evtl. via wwv_flow_string.join gejointen) PL/SQL-Stringwert rekonstruieren. */
+function plsqlValue(raw) {
+  if (!raw) return null;
+  const s = String(raw).trim();
+  const join = s.match(/wwv_flow_string\.join\(wwv_flow_t_varchar2\(([\s\S]*?)\)\)/i);
+  const body = join ? join[1] : s;
+  const parts = [...body.matchAll(/'((?:[^']|'')*)'/g)].map((m) => m[1].replace(/''/g, "'"));
+  return parts.length ? parts.join('') : null;
+}
+
+/**
+ * GRÜNDLICHE Plugin-Analyse fürs Einrichten einer funktionierenden Testseite (generisch, aus dem Export).
+ * Leitet ab, was die Region/Seite braucht — inkl. der Fälle „Page-Item + AJAX_ITEMS_TO_SUBMIT nötig".
+ * @returns {{internalName,displayName,apiVersion,sourceTypePrefix,standardAttributes:string[],
+ *   hasSourceSql:boolean, usesAjaxItemsToSubmit:boolean, hasAjaxCallback:boolean,
+ *   customAttributes:Array<{sequence:number,key:string,prompt:string,default:string|null,required:boolean}>,
+ *   configAttributeKey:string|null, configDefault:string|null}}
+ */
+export function analyzePlugin(sqlText) {
+  const t = String(sqlText || '');
+  // Kopf des create_plugin (bis zum ersten Attribut) — der Plugin-Name steht dort, nicht in den Attributen.
+  const headEnd = t.search(/create_plugin_attribute/i); const head = headEnd > 0 ? t.slice(0, headEnd) : t;
+  const g = (re, src = t) => (src.match(re) || [])[1] || null;
+  const internalName = g(/p_name=>'((?:[^']|'')*)'/i, head);
+  const apiVersion = Number(g(/p_api_version=>(\d+)/i) || 1);
+  const standard = (g(/p_standard_attributes=>'([^']*)'/i) || '').split(':').map((s) => s.trim()).filter(Boolean);
+  const hasAjaxFn = /p_ajax_function=>/i.test(t);
+  const usesGetAjaxId = /GET_AJAX_IDENTIFIER/i.test(t);
+
+  // Custom-Attribute (create_plugin_attribute): Sequenz, Prompt, Default, Pflicht. Werte enden am nächsten „\n,p_" bzw. „\n);".
+  const customAttributes = [];
+  for (const m of t.matchAll(/create_plugin_attribute\(([\s\S]*?)\n\s*\);/gi)) {
+    const blk = m[1];
+    const seq = Number((blk.match(/p_attribute_sequence=>(\d+)/i) || [])[1] || 0);
+    if (!seq) continue;
+    const val = (name) => { const mm = blk.match(new RegExp('p_' + name + '=>([\\s\\S]*?)(?=\\n\\s*,p_|$)', 'i')); return mm ? plsqlValue(mm[1]) : null; };
+    customAttributes.push({
+      sequence: seq,
+      key: `attribute_${String(seq).padStart(2, '0')}`,
+      prompt: (blk.match(/p_prompt=>'((?:[^']|'')*)'/i) || [])[1]?.replace(/''/g, "'") || '',
+      default: val('default_value'),
+      required: /p_is_required=>true/i.test(blk),
+    });
+  }
+  // „Config/JSON"-Attribut heuristisch (Prompt enthält JSON/Config), sonst erstes Attribut.
+  const cfg = customAttributes.find((a) => /json|config/i.test(a.prompt)) || customAttributes[0] || null;
+  return {
+    internalName, displayName: (g(/p_display_name=>'((?:[^']|'')*)'/i, head) || '').replace(/''/g, "'").trim() || null,
+    apiVersion,
+    sourceTypePrefix: apiVersion >= 2 ? 'NATIVE_PLUGIN_' : 'PLUGIN_',
+    standardAttributes: standard,
+    hasSourceSql: standard.includes('SOURCE_SQL'),
+    usesAjaxItemsToSubmit: standard.includes('AJAX_ITEMS_TO_SUBMIT'),
+    hasAjaxCallback: hasAjaxFn || usesGetAjaxId,
+    customAttributes,
+    configAttributeKey: cfg?.key || null,
+    configDefault: cfg?.default || null,
+  };
+}
+
 /** Internal name / p_name des Plugins aus einem Export-SQL lesen (create_plugin-Aufruf). */
 export function parsePluginName(sqlText) {
   const call = String(sqlText || '').match(/create_plugin\s*\(([\s\S]*?)\)\s*;/i);
@@ -107,7 +167,11 @@ export function buildTestPageSql(o = {}) {
   const version = o.version || '2024.11.30';
   const release = o.release || '24.2';
   const regionId = `${pageId}00001`; // stabile, page-abgeleitete Region-ID
+  const sourcePrefix = o.sourceTypePrefix || 'NATIVE_PLUGIN_'; // aus der Analyse: api_version 1 → PLUGIN_, sonst NATIVE_PLUGIN_
   const attrsClob = pluginAttrsClob(o.attributes);
+  // Braucht das Plugin „Items to Submit" (AJAX), MUSS ein Page-Item existieren, auf das die Region zeigt —
+  // sonst scheitert PAGE_ITEM_NAMES_TO_JQUERY im Plugin-Render mit ORA-01403 (verifiziert an Seite 2).
+  const ajaxItem = o.ajaxItemName || (o.needsAjaxItem ? `P${pageId}_AJAX` : null);
 
   const header = [
     'prompt --application/set_environment',
@@ -144,11 +208,22 @@ export function buildTestPageSql(o = {}) {
     `,p_region_template_options=>'#DEFAULT#'`,
     `,p_plug_display_sequence=>10`,
     `,p_plug_display_point=>'REGION_POSITION_01'`,
-    `,p_plug_source_type=>'NATIVE_PLUGIN_${pluginName.replace(/'/g, "''")}'`,
+    `,p_plug_source_type=>'${sourcePrefix}${pluginName.replace(/'/g, "''")}'`,
     // SQL-Datenquelle korrekt als SQL-Query-Region setzen (sonst ist P_REGION.SOURCE leer → SOURCE_SQL-Plugins scheitern).
     ...(o.sourceSql ? [`,p_query_type=>'SQL'`, `,p_plug_source=>${sqlString(o.sourceSql)}`] : []),
+    ...(ajaxItem ? [`,p_ajax_items_to_submit=>${q(ajaxItem)}`] : []),
     ...(attrsClob ? [`,p_attributes=>${attrsClob}`] : []),
     ');',
+    // Page-Item anlegen, das die Region über „Items to Submit" referenziert (Plugin-Voraussetzung).
+    ...(ajaxItem ? [
+      'wwv_flow_imp_page.create_page_item(',
+      ` p_id=>wwv_flow_imp.id(${regionId}1)`,
+      `,p_name=>${q(ajaxItem)}`,
+      `,p_item_sequence=>10`,
+      `,p_item_plug_id=>wwv_flow_imp.id(${regionId})`,
+      `,p_display_as=>'NATIVE_HIDDEN'`,
+      ');',
+    ] : []),
     'end;',
     '/',
   ];

@@ -23,7 +23,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { buildInstallScript, buildTestPageSql, parsePluginName, maskConn, pluginLoadFiles } from './lib/apex.js';
+import { buildInstallScript, buildTestPageSql, parsePluginName, maskConn, pluginLoadFiles, analyzePlugin } from './lib/apex.js';
 
 /** Anzeigename (p_display_name) aus einem Plugin-Export lesen — zum Auffinden in der Plug-ins-Liste. */
 const parsePluginDisplayName = (sqlText) => { const m = String(sqlText || '').match(/p_display_name=>'((?:[^']|'')*)'/i); return m ? m[1].replace(/''/g, "'").trim() : null; };
@@ -195,22 +195,42 @@ const TOOLS = [
   },
   {
     name: 'apex_create_test_page',
-    description: 'Erzeugt eine generische Testseite in der Ziel-App über die APEX-IMPORT-UI (Browser, headless): EINE Region vom Plugin-Typ auf einer neuen Seite. Ohne gesetzte Attribute nutzt die Region die Plugin-DEFAULTS (z.B. ConfigJSON-Default aus dem Akzeptanz-Vertrag). Kein SQLcl. dryRun=true gibt nur das generierte SQL zurück.',
+    description: 'Erzeugt eine funktionierende Testseite in der Ziel-App über die APEX-IMPORT-UI (Browser, headless): EINE Region vom Plugin-Typ. Mit exportFile wird das Plugin GRÜNDLICH ANALYSIERT (analyzePlugin) und die Seite automatisch korrekt eingerichtet: Source-Type (api_version), ConfigJSON-Default ins richtige Attribut, und — falls das Plugin „Items to Submit" nutzt — ein Page-Item + Verdrahtung (sonst ORA-01403). Kein SQLcl. dryRun=true gibt nur das SQL zurück.',
     inputSchema: { type: 'object', properties: {
-      pluginInternalName: { type: 'string', description: 'Interner Plugin-Name (create_plugin p_name, z.B. APEX.FLOW.CHART.1)' },
+      exportFile: { type: 'string', description: 'Plugin-Export-SQL → wird analysiert; leitet Name/Source-Type/ConfigJSON-Default/AJAX-Item automatisch ab (empfohlen).' },
+      pluginInternalName: { type: 'string', description: 'Alternativ zu exportFile: interner Plugin-Name (dann ohne Auto-Analyse).' },
       pageId: { type: 'number', description: 'Seiten-ID (Default 9999)' },
       pageName: { type: 'string' },
       appId: { type: 'number' }, workspace: { type: 'string' },
-      sourceSql: { type: 'string', description: 'Optionale SQL-Datenquelle der Region (liefert die Plugin-Daten). Ohne → Region ohne Quelle.' },
-      attributes: { type: 'object', description: 'Optional { attrName: wert } — überschreibt Plugin-Defaults (24.x wwv_flow_t_plugin_attributes). Ohne → Defaults.' },
+      sourceSql: { type: 'string', description: 'Optionale SQL-Datenquelle der Region (Plugin-Daten).' },
+      attributes: { type: 'object', description: 'Optional { attribute_NN: wert } — überschreibt die aus der Analyse abgeleiteten Defaults.' },
       dryRun: { type: 'boolean' },
-    }, required: ['pluginInternalName'] },
+    } },
     run: async (a) => {
       const appId = a.appId ?? ENV.appId;
       if (!appId) return { ok: false, error: 'appId fehlt (Parameter oder env APEX_APP_ID).' };
       const pageId = a.pageId ?? 9999;
-      const sql = buildTestPageSql({ ...a, appId, pageId, workspaceId: ENV.workspaceId, owner: ENV.owner, release: ENV.release });
-      if (a.dryRun) return { ok: true, dryRun: true, sql };
+      // Gründliche Plugin-Analyse (sofern Export gegeben) → Seite automatisch korrekt einrichten.
+      let derived = {};
+      if (a.exportFile) {
+        if (!fs.existsSync(a.exportFile)) return { ok: false, error: `Export-Datei nicht gefunden: ${a.exportFile}` };
+        const an = analyzePlugin(fs.readFileSync(a.exportFile, 'utf8'));
+        if (!an.internalName) return { ok: false, error: 'Plugin-Name im Export nicht gefunden.' };
+        derived = {
+          pluginInternalName: an.internalName,
+          sourceTypePrefix: an.sourceTypePrefix,
+          needsAjaxItem: an.usesAjaxItemsToSubmit,
+          // ConfigJSON-Default von Steuerzeichen (Tabs/Zeilenumbrüche in Strings) säubern → sonst scheitert JSON.parse im Plugin.
+          attributes: (an.configAttributeKey && an.configDefault) ? { [an.configAttributeKey]: an.configDefault.replace(/[\x00-\x1f]+/g, ' ') } : undefined,
+          _analysis: { internalName: an.internalName, apiVersion: an.apiVersion, sourceTypePrefix: an.sourceTypePrefix, standardAttributes: an.standardAttributes, usesAjaxItemsToSubmit: an.usesAjaxItemsToSubmit, hasAjaxCallback: an.hasAjaxCallback, configAttributeKey: an.configAttributeKey },
+        };
+      }
+      const opts = { ...derived, ...a, appId, pageId, workspaceId: ENV.workspaceId, owner: ENV.owner, release: ENV.release,
+        // explizit übergebene attributes überschreiben die abgeleiteten
+        attributes: a.attributes || derived.attributes };
+      if (!opts.pluginInternalName) return { ok: false, error: 'pluginInternalName oder exportFile nötig.' };
+      const sql = buildTestPageSql(opts);
+      if (a.dryRun) return { ok: true, dryRun: true, analysis: derived._analysis, sql };
       const chromium = await loadChromium();
       if (!chromium) return { ok: false, error: 'Playwright nicht installiert.', sql };
       const tmp = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'apexpage-')), `page_${pageId}.sql`);
@@ -220,7 +240,7 @@ const TOOLS = [
         const page = await browser.newPage();
         const login = await uiLogin(page, a); if (!login.ok) return { ok: false, error: login.error };
         const imp = await uiImportFile(page, tmp, { appId });
-        return { ...imp, pageId, appId: Number(appId), runtimeHint: `${ENV.baseUrl.replace(/\/$/, '')}/f?p=${appId}:${pageId}`, note: imp.oraError ? 'Import-Fehler — SQL/Instanz prüfen' : 'Seite eingespielt (bei „Replace"-Bestätigung wurde die bestehende Seite ersetzt).' };
+        return { ...imp, pageId, appId: Number(appId), analysis: derived._analysis, ajaxItem: opts.needsAjaxItem ? `P${pageId}_AJAX` : null, runtimeHint: `${ENV.baseUrl.replace(/\/$/, '')}/f?p=${appId}:${pageId}`, note: imp.oraError ? 'Import-Fehler — SQL/Instanz prüfen' : 'Seite eingespielt (bei „Replace"-Bestätigung wurde die bestehende Seite ersetzt).' };
       } finally { try { fs.rmSync(path.dirname(tmp), { recursive: true, force: true }); } catch { /* egal */ } await browser.close(); }
     },
   },

@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { spawn } from 'node:child_process';
 import path from 'node:path';
-import { buildInstallScript, buildTestPageSql, parsePluginName, maskConn, pluginLoadFiles } from '../mcp-apex-deploy/lib/apex.js';
+import { buildInstallScript, buildTestPageSql, parsePluginName, maskConn, pluginLoadFiles, analyzePlugin } from '../mcp-apex-deploy/lib/apex.js';
 
 describe('F-31 T-128 apex-deploy: Install-Skript & Sicherheit', () => {
   it('Install-Skript setzt den APEX-Kontext generisch (workspace, appId, offset, Datei, commit)', () => {
@@ -92,6 +92,50 @@ describe('F-31 T-129 apex-deploy: generische Testseite (APEX 24.x-Format)', () =
   it('sourceSql wird als Region-Quelle gesetzt', () => {
     const sql = buildTestPageSql({ appId: 1, pluginInternalName: 'X', sourceSql: 'select 1 id, 0 pid from dual' });
     expect(sql).toMatch(/p_plug_source=>'select 1 id/);
+  });
+
+  it('analyzePlugin: leitet Source-Type, ConfigJSON-Attribut, AJAX-Bedarf generisch ab', () => {
+    const exp = [
+      `wwv_flow_api.create_plugin(`,
+      ` p_id=>1`,
+      `,p_plugin_type=>'REGION TYPE'`,
+      `,p_name=>'MY.PLUGIN.1'`,
+      `,p_display_name=>'My Plugin'`,
+      `,p_api_version=>1`,
+      `,p_render_function=>'F_RENDER'`,
+      `,p_ajax_function=>'F_AJAX'`,
+      `,p_standard_attributes=>'SOURCE_SQL:AJAX_ITEMS_TO_SUBMIT'`,
+      `);`,
+      `wwv_flow_api.create_plugin_attribute(`,
+      ` p_id=>2`,
+      `,p_attribute_scope=>'COMPONENT'`,
+      `,p_attribute_sequence=>1`,
+      `,p_prompt=>'ConfigJSON'`,
+      `,p_default_value=>'{"a":1}'`,
+      `);`,
+    ].join('\n');
+    const a = analyzePlugin(exp);
+    expect(a.internalName).toBe('MY.PLUGIN.1');
+    expect(a.displayName).toBe('My Plugin');
+    expect(a.sourceTypePrefix).toBe('PLUGIN_'); // api_version 1
+    expect(a.hasSourceSql).toBe(true);
+    expect(a.usesAjaxItemsToSubmit).toBe(true);
+    expect(a.hasAjaxCallback).toBe(true);
+    expect(a.configAttributeKey).toBe('attribute_01');
+    expect(a.configDefault).toBe('{"a":1}');
+  });
+
+  it('analyzePlugin: api_version 2 → NATIVE_PLUGIN_; ohne AJAX_ITEMS_TO_SUBMIT → false', () => {
+    const a = analyzePlugin(`p_name=>'X.Y'\n,p_api_version=>2\n,p_standard_attributes=>'SOURCE_SQL'`);
+    expect(a.sourceTypePrefix).toBe('NATIVE_PLUGIN_');
+    expect(a.usesAjaxItemsToSubmit).toBe(false);
+  });
+
+  it('buildTestPageSql: needsAjaxItem → Page-Item + p_ajax_items_to_submit', () => {
+    const sql = buildTestPageSql({ appId: 1, pageId: 500, pluginInternalName: 'X', sourceTypePrefix: 'PLUGIN_', needsAjaxItem: true });
+    expect(sql).toContain(`p_plug_source_type=>'PLUGIN_X'`);
+    expect(sql).toMatch(/p_ajax_items_to_submit=>'P500_AJAX'/);
+    expect(sql).toMatch(/create_page_item\(/);
   });
 
   it('ohne pluginInternalName/appId → klarer Fehler', () => {
