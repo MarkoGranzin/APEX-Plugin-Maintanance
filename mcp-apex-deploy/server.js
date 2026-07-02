@@ -214,32 +214,37 @@ const TOOLS = [
       if (!chromium) return { ok: false, error: 'Playwright nicht installiert.' };
       const steps = [];
       const browser = await chromium.launch({ headless: !a.headed });
+      const clickFirst = async (page, locators) => { for (const l of locators) { if (await l.count()) { await l.first().click(); await page.waitForLoadState('networkidle').catch(() => {}); await page.waitForTimeout(1000); return true; } } return false; };
       try {
         const page = await browser.newPage();
-        const login = await uiLogin(page, a); steps.push({ step: 'login', ...login });
+        const login = await uiLogin(page, a); steps.push({ step: 'login', ok: login.ok, url: login.url });
         if (!login.ok) return { ok: false, steps, error: login.error };
-        // Plug-in-Import-Wizard: interner App-Builder (4500). Import-Seite ist versionsübergreifend f?p=4500:4000.
-        const base = ENV.baseUrl.replace(/\/$/, '');
-        await page.goto(`${base}/f?p=4500:4000:${''}::NO:::`, { waitUntil: 'domcontentloaded', timeout: 30000 }).catch(() => {});
-        steps.push({ step: 'open-import', url: page.url() });
-        // Datei-Upload (das <input type=file> des Wizards)
+        // App-internen Plug-in-Import ansteuern (verifizierter Pfad, moderne Friendly-URLs, Session bleibt durch Klicks erhalten):
+        // App-Kachel (fb_flow_id=appId) → Shared Components → Plug-ins → Import.
+        const appTile = page.locator(`a[href*="fb_flow_id=${appId}"]`);
+        if (!(await appTile.count())) { const shot = path.join(os.tmpdir(), 'apex-noapp.png'); await page.screenshot({ path: shot }).catch(() => {}); return { ok: false, steps, error: `App ${appId} nicht in der Apps-Liste gefunden (Workspace/App-ID prüfen).`, screenshot: shot }; }
+        await appTile.first().click(); await page.waitForLoadState('networkidle').catch(() => {}); await page.waitForTimeout(1000); steps.push({ step: 'open-app', appId: Number(appId) });
+        await clickFirst(page, [page.getByRole('link', { name: /shared components/i }), page.getByText(/shared components/i)]); steps.push({ step: 'shared-components' });
+        await clickFirst(page, [page.getByRole('link', { name: /^plug-?ins$/i }), page.getByText(/^plug-?ins$/i)]); steps.push({ step: 'plug-ins' });
+        await clickFirst(page, [page.getByRole('link', { name: /^import$/i }), page.getByRole('button', { name: /^import$/i }), page.getByText(/^import$/i)]); steps.push({ step: 'import', url: page.url() });
         const file = page.locator('input[type="file"]');
-        if (!(await file.count())) { const shot = path.join(os.tmpdir(), 'apex-import-noupload.png'); await page.screenshot({ path: shot }).catch(() => {}); return { ok: false, steps, error: 'Datei-Upload-Feld nicht gefunden — APEX-Import-Wizard-Layout weicht ab; bitte Schritt-Log/Screenshot prüfen.', screenshot: shot }; }
-        await file.first().setInputFiles(path.resolve(a.exportFile));
-        steps.push({ step: 'file-selected', file: path.resolve(a.exportFile) });
-        // „Next"/„Weiter" durch den Wizard klicken, bis ein „Install"/„Installieren" erscheint (max. 6 Schritte).
+        try { await file.first().waitFor({ state: 'attached', timeout: 15000 }); }
+        catch { const shot = path.join(os.tmpdir(), 'apex-import-noupload.png'); await page.screenshot({ path: shot }).catch(() => {}); return { ok: false, steps, error: 'Plug-in-Import-Upload-Feld nicht gefunden — Navigation weicht ab (Screenshot/Schritt-Log prüfen).', screenshot: shot }; }
+        await file.first().setInputFiles(path.resolve(a.exportFile)); steps.push({ step: 'file-selected', file: path.basename(a.exportFile) });
+        // Wizard: die PRIMÄRE Aktion (a-Button--hot = Next → Next → Install Plug-in) durchklicken.
         for (let i = 0; i < 6; i++) {
-          const install = page.getByRole('button', { name: /install|installieren/i });
-          if (await install.count()) { await install.first().click(); steps.push({ step: 'install-clicked', at: i }); break; }
-          const next = page.getByRole('button', { name: /next|weiter/i });
-          if (await next.count()) { await next.first().click(); await page.waitForLoadState('domcontentloaded').catch(() => {}); steps.push({ step: 'next', at: i }); }
-          else { steps.push({ step: 'no-next', at: i }); break; }
+          const hot = page.locator('button.a-Button--hot, a.a-Button--hot').filter({ hasText: /\S/ });
+          try { await hot.first().waitFor({ state: 'visible', timeout: 20000 }); } catch { steps.push({ step: 'no-primary', at: i }); break; }
+          const label = (await hot.first().innerText().catch(() => '')).trim();
+          steps.push({ step: 'click', label, at: i });
+          await hot.first().click(); await page.waitForLoadState('networkidle').catch(() => {}); await page.waitForTimeout(2000);
+          if (/install|finish|fertig|abschließen/i.test(label)) break;
         }
-        await page.waitForLoadState('networkidle', { timeout: 30000 }).catch(() => {});
-        const body = (await page.locator('body').innerText().catch(() => '')).slice(0, 400);
-        const ok = /installed|imported|installiert|importiert|success|erfolg/i.test(body);
+        const body = (await page.locator('body').innerText().catch(() => '')).replace(/\s+/g, ' ');
+        const ok = /plug-?in installed|installed|installiert|success|erfolg/i.test(body);
         const shot = path.join(os.tmpdir(), 'apex-import-result.png'); await page.screenshot({ path: shot }).catch(() => {});
-        return { ok, steps, appId: Number(appId), screenshot: shot, resultText: body, note: ok ? undefined : 'Kein eindeutiger Erfolgstext — Screenshot/Schritt-Log prüfen (Wizard evtl. versionsabweichend).' };
+        const msg = (body.match(/([^.]*\b(installed|installiert)\b[^.]*)/i) || [])[1];
+        return { ok, steps, appId: Number(appId), plugin: parsePluginName(fs.readFileSync(a.exportFile, 'utf8')), message: msg?.trim(), screenshot: shot, note: ok ? undefined : 'Kein eindeutiger Erfolgstext — Screenshot/Schritt-Log prüfen.' };
       } finally { await browser.close(); }
     },
   },
