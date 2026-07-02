@@ -120,7 +120,8 @@ export function buildTestPageSql(o = {}) {
     `,p_plug_display_sequence=>10`,
     `,p_plug_display_point=>'REGION_POSITION_01'`,
     `,p_plug_source_type=>'NATIVE_PLUGIN_${pluginName.replace(/'/g, "''")}'`,
-    ...(o.sourceSql ? [`,p_plug_source=>${sqlString(o.sourceSql)}`] : []),
+    // SQL-Datenquelle korrekt als SQL-Query-Region setzen (sonst ist P_REGION.SOURCE leer → SOURCE_SQL-Plugins scheitern).
+    ...(o.sourceSql ? [`,p_query_type=>'SQL'`, `,p_plug_source=>${sqlString(o.sourceSql)}`] : []),
     ...(attrsClob ? [`,p_attributes=>${attrsClob}`] : []),
     ');',
     'end;',
