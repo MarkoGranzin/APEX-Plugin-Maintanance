@@ -31,52 +31,48 @@ describe('F-31 T-128 apex-deploy: Install-Skript & Sicherheit', () => {
   });
 });
 
-describe('F-31 T-129 apex-deploy: generische Testseite', () => {
+describe('F-31 T-129 apex-deploy: generische Testseite (APEX 24.x-Format)', () => {
   const CFG = '{"refresh":0,"style":[{"name":"default"}]}';
 
-  it('Gerüst-Modus: Region vom Plugin-Typ + Attribute aus der Schnittstelle', () => {
-    const sql = buildTestPageSql({ appId: 100, pageId: 9999, pluginName: 'DE.AISS.APEXFLOWCHART', attributes: [CFG] });
-    expect(sql).toMatch(/create_page\(/);
-    expect(sql).toMatch(/create_page_plug\(/);
-    expect(sql).toContain(`p_plug_source_type=>'PLUGIN_DE.AISS.APEXFLOWCHART'`);
-    expect(sql).toContain(`p_plugin_name=>'DE.AISS.APEXFLOWCHART'`);
-    expect(sql).toContain('p_attribute_01=>');
+  it('vollständige, importierbare Seite: Header + create_page + Plugin-Region + Footer', () => {
+    const sql = buildTestPageSql({ appId: 200000, pageId: 9999, pluginInternalName: 'APEX.FLOW.CHART.1', workspaceId: '123', owner: 'WKSP_MEETUP' });
+    expect(sql).toMatch(/wwv_flow_imp\.import_begin/);
+    expect(sql).toContain('p_default_application_id=>200000');
+    expect(sql).toContain('p_default_workspace_id=>123');
+    expect(sql).toContain(`p_default_owner=>'WKSP_MEETUP'`);
+    expect(sql).toMatch(/wwv_flow_imp_page\.create_page\(/);
+    expect(sql).toMatch(/wwv_flow_imp_page\.create_page_plug\(/);
+    expect(sql).toContain(`p_plug_source_type=>'NATIVE_PLUGIN_APEX.FLOW.CHART.1'`);
+    expect(sql).toContain('p_id=>9999');
+    expect(sql).toMatch(/wwv_flow_imp\.import_end/);
+  });
+
+  it('ohne Attribute → keine p_attributes (Region nutzt Plugin-Defaults)', () => {
+    const sql = buildTestPageSql({ appId: 1, pluginInternalName: 'X' });
+    expect(sql).not.toContain('p_attributes=>');
+  });
+
+  it('mit Attributen → 24.x wwv_flow_t_plugin_attributes-Clob (benannt)', () => {
+    const sql = buildTestPageSql({ appId: 1, pluginInternalName: 'X', attributes: { '1': CFG } });
+    expect(sql).toMatch(/p_attributes=>wwv_flow_t_plugin_attributes\(wwv_flow_t_varchar2\(/);
+    expect(sql).toContain("'1'");
     expect(sql).toContain('refresh');
   });
 
-  it('API-Package parametrisierbar (Default wwv_flow_imp_page, alternativ wwv_flow_api)', () => {
-    expect(buildTestPageSql({ appId: 1, pluginName: 'X' })).toMatch(/wwv_flow_imp_page\.create_page\(/);
-    expect(buildTestPageSql({ appId: 1, pluginName: 'X', apiPackage: 'wwv_flow_api' })).toMatch(/wwv_flow_api\.create_page\(/);
-  });
-
-  it('lange Attribute (JSON > 800 Zeichen) werden als wwv_flow_string.join geschrieben', () => {
+  it('langer Attributwert (>800) → wwv_flow_string.join', () => {
     const big = '{"a":"' + 'x'.repeat(1200) + '"}';
-    const sql = buildTestPageSql({ appId: 1, pluginName: 'X', attributes: [big] });
+    const sql = buildTestPageSql({ appId: 1, pluginInternalName: 'X', attributes: { '1': big } });
     expect(sql).toMatch(/wwv_flow_string\.join\(wwv_flow_t_varchar2\(/);
   });
 
-  it('Vorlagen-Modus: Seiten-ID, Plugin-Typ und Attribute werden im echten Export ersetzt', () => {
-    const template = [
-      'begin',
-      'wwv_flow_imp_page.create_page(',
-      ' p_id=>wwv_flow_imp.id(12)',
-      ",p_name=>'Alte Seite'",
-      ');',
-      'wwv_flow_imp_page.create_page_plug(',
-      ' p_id=>wwv_flow_imp.id(345)',
-      ",p_plug_name=>'Alt'",
-      ",p_plug_source_type=>'PLUGIN_ALT.PLUGIN'",
-      ",p_plugin_name=>'ALT.PLUGIN'",
-      ",p_attribute_01=>'altwert'",
-      ');',
-      'end;',
-    ].join('\n');
-    const sql = buildTestPageSql({ appId: 100, pageId: 777, pluginName: 'NEU.PLUGIN', attributes: ['neuwert'], template });
-    expect(sql).toContain('wwv_flow_imp.id(777)');
-    expect(sql).toContain(`p_plugin_name=>'NEU.PLUGIN'`);
-    expect(sql).toContain(`p_plug_source_type=>'PLUGIN_NEU.PLUGIN'`);
-    expect(sql).toContain(`p_attribute_01=>'neuwert'`);
-    expect(sql).not.toContain('altwert');
+  it('sourceSql wird als Region-Quelle gesetzt', () => {
+    const sql = buildTestPageSql({ appId: 1, pluginInternalName: 'X', sourceSql: 'select 1 id, 0 pid from dual' });
+    expect(sql).toMatch(/p_plug_source=>'select 1 id/);
+  });
+
+  it('ohne pluginInternalName/appId → klarer Fehler', () => {
+    expect(() => buildTestPageSql({ appId: 1 })).toThrow(/pluginInternalName/);
+    expect(() => buildTestPageSql({ pluginInternalName: 'X' })).toThrow(/appId/);
   });
 });
 

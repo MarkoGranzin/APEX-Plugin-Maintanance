@@ -54,76 +54,76 @@ function sqlString(s) {
   return `wwv_flow_string.join(wwv_flow_t_varchar2(\n${parts.join(',\n')}))`;
 }
 
+/** Plugin-Attribute im 24.1-Format: wwv_flow_t_plugin_attributes(wwv_flow_t_varchar2('name','wert',...)).to_clob
+ *  attributes: { '<attr-name>': '<wert>' } — Attributnamen sind die internen Plugin-Attribut-Schlüssel. */
+function pluginAttrsClob(attributes) {
+  const pairs = Object.entries(attributes || {}).filter(([, v]) => v != null && v !== '');
+  if (!pairs.length) return null;
+  const body = pairs.map(([k, v]) => `  ${q(k)}, ${sqlString(v)}`).join(',\n');
+  return `wwv_flow_t_plugin_attributes(wwv_flow_t_varchar2(\n${body})).to_clob`;
+}
+
 /**
- * Generisches Testseiten-SQL: EINE Region vom Plugin-Typ, Attribute (01..25) aus der
- * Schnittstelle/dem Akzeptanz-Vertrag gefüttert.
+ * Generisches Testseiten-Import-SQL (APEX 24.x-Format, wwv_flow_imp*): eine vollständige,
+ * über den Import-Wizard einspielbare Seite mit EINER Region vom Plugin-Typ. Ohne gesetzte
+ * Attribute nutzt die Region automatisch die Plugin-Defaults (z.B. ConfigJSON-Default aus dem
+ * Akzeptanz-Vertrag). Header-Werte (workspaceId/owner/release/version) sind instanzspezifisch.
  *
- * Zwei Modi:
- *  - template: ein ECHTER Seiten-Export der Ziel-Instanz als Vorlage (empfohlen, robust) —
- *    Seiten-ID/-Name werden ersetzt, die Plugin-Region samt Attributen wird injiziert/ersetzt.
- *  - skeleton: minimales Page-Import-SQL aus eingebautem Gerüst (best effort; API-Package und
- *    Versionszeile sind versionsabhängig → auf der Ziel-Instanz verifizieren).
- *
- * @param {{appId:number|string, pageId?:number|string, pageName?:string, pluginName:string,
- *          attributes?:string[], apiPackage?:string, versionLine?:string, template?:string}} o
+ * @param {{appId:number|string, pageId?:number|string, pageName?:string, pluginInternalName:string,
+ *          sourceSql?:string, attributes?:object, workspaceId?:string, owner?:string,
+ *          release?:string, version?:string}} o
  */
 export function buildTestPageSql(o = {}) {
-  if (!o.pluginName) throw new Error('pluginName fehlt');
+  const pluginName = o.pluginInternalName || o.pluginName;
+  if (!pluginName) throw new Error('pluginInternalName fehlt');
+  if (!o.appId) throw new Error('appId fehlt');
   const pageId = Number(o.pageId ?? 9999);
-  const pageName = o.pageName || `Plugin Test: ${o.pluginName}`;
-  const attrs = (o.attributes || []).slice(0, 25);
-  const attrLines = attrs
-    .map((v, i) => (v == null || v === '' ? null : `,p_attribute_${String(i + 1).padStart(2, '0')}=>${sqlString(v)}`))
-    .filter(Boolean)
-    .join('\n');
+  const pageName = o.pageName || `Plugin Test: ${pluginName}`;
+  const version = o.version || '2024.11.30';
+  const release = o.release || '24.2';
+  const regionId = `${pageId}00001`; // stabile, page-abgeleitete Region-ID
+  const attrsClob = pluginAttrsClob(o.attributes);
 
-  if (o.template) {
-    // Vorlagen-Modus: Seiten-ID/-Name tauschen + Plugin-Typ und Attribute der ERSTEN Plugin-Region ersetzen.
-    let t = String(o.template);
-    t = t.replace(/(p_id\s*=>\s*wwv_flow_imp\.id\()\d+(\))/i, `$1${pageId}$2`);
-    t = t.replace(/(create_page\s*\([\s\S]*?p_name\s*=>\s*)'((?:[^']|'')*)'/i, `$1${q(pageName)}`);
-    t = t.replace(/(p_plugin_name\s*=>\s*)'((?:[^']|'')*)'/i, `$1${q(o.pluginName)}`)
-         .replace(/(p_(?:plug_)?source_type\s*=>\s*)'PLUGIN_[^']*'/i, `$1'PLUGIN_${o.pluginName.replace(/'/g, "''").toUpperCase()}'`);
-    if (attrLines) {
-      // vorhandene p_attribute_NN der Region entfernen, neue einsetzen (vor dem schließenden ");" des create_page_plug)
-      t = t.replace(/,\s*p_attribute_\d{2}\s*=>\s*(?:'(?:[^']|'')*'|wwv_flow_string\.join\([\s\S]*?\)\))/gi, '');
-      t = t.replace(/(create_page_plug\s*\([\s\S]*?)(\)\s*;)/i, `$1\n${attrLines}\n$2`);
-    }
-    return t;
-  }
-
-  // Gerüst-Modus (best effort): minimale Seite + Plugin-Region. API-Package/Version parametrisierbar.
-  const api = o.apiPackage || 'wwv_flow_imp_page';
-  const core = (o.apiPackage || '').includes('api') ? 'wwv_flow_api' : 'wwv_flow_imp';
-  const versionLine = o.versionLine || "p_version_yyyy_mm_dd=>'2024.11.30'";
-  return [
+  const header = [
+    'prompt --application/set_environment',
+    'set define off verify off feedback off',
+    'whenever sqlerror exit sql.sqlcode rollback',
+    'begin',
+    'wwv_flow_imp.import_begin (',
+    ` p_version_yyyy_mm_dd=>'${version}'`,
+    `,p_release=>'${release}'`,
+    ...(o.workspaceId ? [`,p_default_workspace_id=>${o.workspaceId}`] : []),
+    `,p_default_application_id=>${Number(o.appId)}`,
+    ',p_default_id_offset=>0',
+    ...(o.owner ? [`,p_default_owner=>'${String(o.owner).replace(/'/g, "''")}'`] : []),
+    ');',
+    'end;',
+    '/',
+  ];
+  const page = [
     `prompt --application/pages/page_${String(pageId).padStart(5, '0')}`,
     'begin',
-    `${core}.component_begin (`,
-    ` ${versionLine}`,
-    `,p_default_application_id=>${Number(o.appId)}`,
-    `,p_default_id_offset=>0`,
-    `);`,
-    `${api}.create_page(`,
+    'wwv_flow_imp_page.create_page(',
     ` p_id=>${pageId}`,
     `,p_name=>${q(pageName)}`,
-    `,p_alias=>${q('PLUGIN-TEST-' + pageId)}`,
     `,p_step_title=>${q(pageName)}`,
     `,p_autocomplete_on_off=>'OFF'`,
     `,p_page_template_options=>'#DEFAULT#'`,
     `,p_protection_level=>'C'`,
-    `);`,
-    `${api}.create_page_plug(`,
-    ` p_id=>${core}.id(${pageId}0001)`,
-    `,p_plug_name=>${q('Test: ' + o.pluginName)}`,
+    ');',
+    'wwv_flow_imp_page.create_page_plug(',
+    ` p_id=>wwv_flow_imp.id(${regionId})`,
+    `,p_plug_name=>${q('Test: ' + pluginName)}`,
     `,p_region_template_options=>'#DEFAULT#'`,
     `,p_plug_display_sequence=>10`,
-    `,p_plug_source_type=>${q('PLUGIN_' + o.pluginName.toUpperCase())}`,
-    `,p_plugin_name=>${q(o.pluginName)}`,
-    attrLines,
-    `);`,
-    `${core}.component_end;`,
+    `,p_plug_display_point=>'REGION_POSITION_01'`,
+    `,p_plug_source_type=>'NATIVE_PLUGIN_${pluginName.replace(/'/g, "''")}'`,
+    ...(o.sourceSql ? [`,p_plug_source=>${sqlString(o.sourceSql)}`] : []),
+    ...(attrsClob ? [`,p_attributes=>${attrsClob}`] : []),
+    ');',
     'end;',
     '/',
-  ].filter((l) => l !== '').join('\n') + '\n';
+  ];
+  const footer = ['begin', 'wwv_flow_imp.import_end(p_auto_install_sup_obj => false);', 'commit;', 'end;', '/'];
+  return [...header, ...page, ...footer].join('\n') + '\n';
 }

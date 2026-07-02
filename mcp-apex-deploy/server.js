@@ -31,7 +31,47 @@ const ENV = {
   workspace: process.env.APEX_WORKSPACE || '',
   appId: process.env.APEX_APP_ID || '',
   baseUrl: process.env.APEX_BASE_URL || '',
+  // Instanzspezifische Header-Werte für generierte Seiten-Importe (24.x). Aus einem echten App-Export ablesbar.
+  workspaceId: process.env.APEX_WORKSPACE_ID || '',
+  owner: process.env.APEX_OWNER || '',
+  release: process.env.APEX_RELEASE || '24.2',
 };
+
+// Gemeinsamer app-interner Import über die APEX-UI (Export/Import → Import → Upload → primäre Aktion durchklicken).
+// Funktioniert für Plug-in- UND Seiten-Importe; erkennt Erfolg bzw. Replace-Bestätigung. Session bleibt via Klicks erhalten.
+async function uiImportFile(page, filePath, o = {}) {
+  const clickFirst = async (locs) => { for (const l of locs) { if (await l.count()) { await l.first().click(); await page.waitForLoadState('networkidle').catch(() => {}); await page.waitForTimeout(1000); return true; } } return false; };
+  const appId = o.appId ?? ENV.appId;
+  const appTile = page.locator(`a[href*="fb_flow_id=${appId}"]`);
+  if (!(await appTile.count())) return { ok: false, error: `App ${appId} nicht gefunden.` };
+  await appTile.first().click(); await page.waitForLoadState('networkidle').catch(() => {}); await page.waitForTimeout(1000);
+  if (o.viaPlugins) { // Plug-in-Import: Shared Components → Plug-ins → Import
+    await clickFirst([page.getByRole('link', { name: /shared components/i }), page.getByText(/shared components/i)]);
+    await clickFirst([page.getByRole('link', { name: /^plug-?ins$/i }), page.getByText(/^plug-?ins$/i)]);
+    await clickFirst([page.getByRole('link', { name: /^import$/i }), page.getByRole('button', { name: /^import$/i }), page.getByText(/^import$/i)]);
+  } else { // Seiten-/Komponenten-Import: Export / Import → Import
+    await clickFirst([page.getByRole('link', { name: /export ?\/ ?import/i }), page.getByText(/export ?\/ ?import/i)]);
+    await clickFirst([page.getByRole('link', { name: /^import$/i }), page.getByRole('button', { name: /^import$/i }), page.getByText(/^import$/i)]);
+  }
+  const file = page.locator('input[type="file"]');
+  try { await file.first().waitFor({ state: 'attached', timeout: 15000 }); }
+  catch { return { ok: false, error: 'Upload-Feld nicht gefunden (Navigation weicht ab).' }; }
+  await file.first().setInputFiles(filePath);
+  const steps = [];
+  for (let i = 0; i < 8; i++) {
+    const hot = page.locator('button.a-Button--hot, a.a-Button--hot').filter({ hasText: /\S/ });
+    try { await hot.first().waitFor({ state: 'visible', timeout: 20000 }); } catch { break; }
+    const label = (await hot.first().innerText().catch(() => '')).trim();
+    steps.push(label);
+    await hot.first().click(); await page.waitForLoadState('networkidle').catch(() => {}); await page.waitForTimeout(2000);
+    const title = await page.locator('title').first().innerText().catch(() => '');
+    if (/edit page|page designer|pages -|plug-?ins$/i.test(title)) break; // im Ziel gelandet
+  }
+  const body = (await page.locator('body').innerText().catch(() => '')).replace(/\s+/g, ' ');
+  const oraErr = (body.match(/ORA-\d+[^.]{0,120}|PLS-\d+[^.]{0,120}/i) || [])[0] || null;
+  const ok = !oraErr && /installed|imported|installiert|created|erstellt|plug-?in installed|checksum/i.test(body) === true;
+  return { ok: !oraErr, steps, oraError: oraErr, resultTitle: await page.locator('title').first().innerText().catch(() => '') };
+}
 
 // ── SQLcl headless ausführen (Skript in Temp-Datei, -S = silent) ────────────────────────────
 function runSqlcl(script, opts = {}) {
@@ -111,26 +151,33 @@ const TOOLS = [
   },
   {
     name: 'apex_create_test_page',
-    description: 'Erzeugt eine generische Testseite in der Ziel-App: EINE Region vom Plugin-Typ, Attribute (z.B. ConfigJSON) aus der Schnittstelle gefüttert. Empfohlen mit templateFile (echter Seiten-Export der Instanz als Vorlage); ohne Vorlage best-effort-Gerüst (auf der Instanz verifizieren).',
+    description: 'Erzeugt eine generische Testseite in der Ziel-App über die APEX-IMPORT-UI (Browser, headless): EINE Region vom Plugin-Typ auf einer neuen Seite. Ohne gesetzte Attribute nutzt die Region die Plugin-DEFAULTS (z.B. ConfigJSON-Default aus dem Akzeptanz-Vertrag). Kein SQLcl. dryRun=true gibt nur das generierte SQL zurück.',
     inputSchema: { type: 'object', properties: {
-      pluginName: { type: 'string', description: 'Interner Plugin-Name (p_name, z.B. DE.AISS.APEXFLOWCHART)' },
-      attributes: { type: 'array', items: { type: 'string' }, description: 'Attributwerte in Reihenfolge (attribute_01..25), z.B. [ConfigJSON-Default]' },
+      pluginInternalName: { type: 'string', description: 'Interner Plugin-Name (create_plugin p_name, z.B. APEX.FLOW.CHART.1)' },
       pageId: { type: 'number', description: 'Seiten-ID (Default 9999)' },
+      pageName: { type: 'string' },
       appId: { type: 'number' }, workspace: { type: 'string' },
-      templateFile: { type: 'string', description: 'Optional: echter Seiten-Export als Vorlage (robusteste Variante)' },
-      apiPackage: { type: 'string', description: 'Gerüst-Modus: wwv_flow_imp_page (Default) oder wwv_flow_api (ältere Instanzen)' },
-      dryRun: { type: 'boolean', description: 'true = nur SQL zurückgeben, nichts einspielen' },
-    }, required: ['pluginName'] },
+      sourceSql: { type: 'string', description: 'Optionale SQL-Datenquelle der Region (liefert die Plugin-Daten). Ohne → Region ohne Quelle.' },
+      attributes: { type: 'object', description: 'Optional { attrName: wert } — überschreibt Plugin-Defaults (24.x wwv_flow_t_plugin_attributes). Ohne → Defaults.' },
+      dryRun: { type: 'boolean' },
+    }, required: ['pluginInternalName'] },
     run: async (a) => {
-      const workspace = a.workspace || ENV.workspace; const appId = a.appId ?? ENV.appId;
-      const template = a.templateFile ? fs.readFileSync(a.templateFile, 'utf8') : undefined;
-      const sql = buildTestPageSql({ ...a, appId, template });
+      const appId = a.appId ?? ENV.appId;
+      if (!appId) return { ok: false, error: 'appId fehlt (Parameter oder env APEX_APP_ID).' };
+      const pageId = a.pageId ?? 9999;
+      const sql = buildTestPageSql({ ...a, appId, pageId, workspaceId: ENV.workspaceId, owner: ENV.owner, release: ENV.release });
       if (a.dryRun) return { ok: true, dryRun: true, sql };
-      if (!workspace || !appId) return { ok: false, error: 'workspace/appId fehlen.', sql };
-      const script = buildInstallScript({ exportFile: '__INLINE__', workspace, appId }).replace('@"__INLINE__"', sql);
-      const r = await runSqlcl(script);
-      const url = ENV.baseUrl ? `${ENV.baseUrl.replace(/\/$/, '')}/f?p=${appId}:${a.pageId ?? 9999}` : null;
-      return { ...r, pageId: a.pageId ?? 9999, url, note: template ? 'Vorlagen-Modus' : 'Gerüst-Modus (best effort — auf der Instanz verifizieren)' };
+      const chromium = await loadChromium();
+      if (!chromium) return { ok: false, error: 'Playwright nicht installiert.', sql };
+      const tmp = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'apexpage-')), `page_${pageId}.sql`);
+      fs.writeFileSync(tmp, sql);
+      const browser = await chromium.launch({ headless: true });
+      try {
+        const page = await browser.newPage();
+        const login = await uiLogin(page, a); if (!login.ok) return { ok: false, error: login.error };
+        const imp = await uiImportFile(page, tmp, { appId });
+        return { ...imp, pageId, appId: Number(appId), runtimeHint: `${ENV.baseUrl.replace(/\/$/, '')}/f?p=${appId}:${pageId}`, note: imp.oraError ? 'Import-Fehler — SQL/Instanz prüfen' : 'Seite eingespielt (bei „Replace"-Bestätigung wurde die bestehende Seite ersetzt).' };
+      } finally { try { fs.rmSync(path.dirname(tmp), { recursive: true, force: true }); } catch { /* egal */ } await browser.close(); }
     },
   },
   {
