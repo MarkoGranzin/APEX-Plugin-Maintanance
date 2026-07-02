@@ -1,0 +1,8 @@
+{
+  "name": "apex-deploy-mcp",
+  "version": "1.0.0",
+  "description": "MCP server: install Oracle APEX plugins/template components headlessly via SQLcl (apex_application_install), create a generic test page fed with the plugin interface, and smoke-test it headless. Dependency-free, copy anywhere.",
+  "type": "module",
+  "bin": { "apex-deploy-mcp": "server.js" },
+  "engines": { "node": ">=20" }
+}
