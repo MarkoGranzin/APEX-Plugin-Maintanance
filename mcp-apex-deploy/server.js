@@ -211,12 +211,19 @@ const TOOLS = [
           await page.keyboard.press('Enter');
           await page.waitForLoadState('domcontentloaded');
         }
-        await page.waitForTimeout(2500); // Plugin-Init/async-Render abwarten
+        await page.waitForTimeout(a.settleMs ?? 3500); // Plugin-Init/async-Render (mxGraph u.ä.) abwarten
+        const body = (await page.locator('body').innerText().catch(() => '')).replace(/\s+/g, ' ');
+        // APEX-Server-Fehlerseite ehrlich erkennen (ORA-/is_internal_error) — NICHT als grün durchwinken.
+        const apexError = /Error processing request|apex_error_code|ORA-\d{4,5}/i.test(body)
+          ? (body.match(/ORA-\d{4,5}: [^A-Z]{0,80}|apex_error_code: [\w.]+/i) || ['APEX-Fehlerseite'])[0] : null;
         const sel = a.selector || 'body';
         const visibleText = (await page.locator(sel).first().innerText().catch(() => '')).trim();
-        const hasCanvasOrSvg = await page.locator('canvas, svg, .t-Region').count();
-        const ok = errors.length === 0 && (visibleText.length > 0 || hasCanvasOrSvg > 0);
-        return { ok, url, jsErrors: errors.slice(0, 20), rendered: visibleText.length > 0 || hasCanvasOrSvg > 0, regions: hasCanvasOrSvg };
+        const hasGraphics = await page.locator('canvas, svg, .mxgraph, [class*="mx"]').count();
+        const stillLogin = /sign-in|\/login/i.test(page.url());
+        const ok = !apexError && !stillLogin && errors.length === 0 && (visibleText.length > 0 || hasGraphics > 0);
+        return { ok, url: page.url().replace(/session=\d+/, 'session=…'), apexError, needsLogin: stillLogin || undefined,
+                 jsErrors: errors.slice(0, 20), rendered: !apexError && (hasGraphics > 0), graphics: hasGraphics,
+                 note: apexError ? `APEX-Fehlerseite: ${apexError} — Plugin-Render schlug fehl (Region-/Laufzeit-Setup prüfen).` : (stillLogin ? 'Laufzeit verlangt App-Login (Seite nicht öffentlich?).' : undefined) };
       } finally { await browser.close(); }
     },
   },

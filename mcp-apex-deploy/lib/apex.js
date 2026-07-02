@@ -109,6 +109,8 @@ export function buildTestPageSql(o = {}) {
     `,p_step_title=>${q(pageName)}`,
     `,p_autocomplete_on_off=>'OFF'`,
     `,p_page_template_options=>'#DEFAULT#'`,
+    // Testseite standardmäßig ÖFFENTLICH → ohne App-End-User-Login smoke-testbar (public:false zum Abschalten).
+    ...(o.public === false ? [] : [`,p_page_is_public_y_n=>'Y'`]),
     `,p_protection_level=>'C'`,
     ');',
     'wwv_flow_imp_page.create_page_plug(',
