@@ -22,13 +22,13 @@ Projekt kopieren.
       "command": "node",
       "args": ["<pfad>/mcp-apex-deploy/server.js"],
       "env": {
-        "APEX_SQLCL": "C:/oracle/sqlcl/bin/sql.exe",
-        "APEX_CONN": "schema/passwort@host:1521/service",
+        "APEX_SQLCL": "C:/oracle/sqlcl/bin/sql.exe",   // nur für den DB-Weg (apex_install)
+        "APEX_CONN": "${APEX_CONN}",                     // nur DB-Weg; Secret aus Umgebungsvariable
         "APEX_WORKSPACE": "MEIN_WORKSPACE",
         "APEX_APP_ID": "100",
         "APEX_BASE_URL": "https://host/ords",
-        "APEX_LOGIN_USER": "tester",
-        "APEX_LOGIN_PASS": "…"
+        "APEX_LOGIN_USER": "workspace_user",             // UI-Weg: APEX-Login
+        "APEX_LOGIN_PASS": "${APEX_LOGIN_PASS}"          // UI-Weg: Passwort aus Umgebungsvariable (nie im Repo)
       }
     }
   }
@@ -36,10 +36,16 @@ Projekt kopieren.
 ```
 Der Connect-String wird in **keiner Ausgabe** je im Klartext angezeigt (Passwort maskiert).
 
+## Zwei Wege — DB-headless ODER APEX-UI
+- **DB-Weg** (`apex_install`): SQLcl + `apex_application_install`. Token-frei, braucht aber SQLcl + DB-Connect-String.
+- **UI-Weg** (`apex_install_ui`): meldet sich per Browser (Playwright) an APEX an und nutzt den **Import-Wizard** — **kein SQLcl, kein DB-Connect**, nur der **APEX-Login** (`APEX_WORKSPACE` + `APEX_LOGIN_USER` + `APEX_LOGIN_PASS`). Ideal für Autonomous DB.
+
 ## Tools
 | Tool | Zweck |
 |---|---|
-| `apex_install` | Export-SQL headless einspielen: `set_workspace` → `set_application_id` → `generate_offset` → Datei ausführen → commit. Generisch für jedes Plugin/jede Template-Component. |
+| `apex_install` | (DB-Weg) Export-SQL headless einspielen: `set_workspace` → `set_application_id` → `generate_offset` → Datei ausführen → commit. |
+| `apex_ui_login_check` | (UI-Weg) Prüft den APEX-Login mit den env-Zugangsdaten — landet er im App Builder? Nur Login-Test, Passwort nie in der Ausgabe. |
+| `apex_install_ui` | (UI-Weg) Plugin/Template-Component über die APEX-Import-UI einspielen (Login → Plug-ins → Import → Datei → Wizard). Best effort über APEX-Versionen; liefert Schritt-Log + Screenshot. |
 | `apex_create_test_page` | Testseite mit einer Region vom Plugin-Typ anlegen; `attributes[0..24]` = attribute_01..25 (z.B. ConfigJSON-Default aus dem Akzeptanz-Vertrag). **Empfohlen:** `templateFile` = ein echter Seiten-Export der Ziel-Instanz als Vorlage (robust über APEX-Versionen). Ohne Vorlage: Gerüst-Modus (best effort, `apiPackage` konfigurierbar). `dryRun:true` zeigt nur das SQL. |
 | `apex_test_page` | Seite headless öffnen (optionaler APEX-Login via env), JS-Fehler sammeln, sichtbares Rendern prüfen. Ohne Playwright: ehrliche Fehlermeldung. |
 | `apex_info` | Konfiguration anzeigen (maskiert) + SQLcl-Erreichbarkeit prüfen. |

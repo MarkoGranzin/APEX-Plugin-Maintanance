@@ -53,6 +53,43 @@ function runSqlcl(script, opts = {}) {
   });
 }
 
+// ── Browser (Playwright) laden + generischer APEX-Workspace-Login ──────────────────────────────
+async function loadChromium() {
+  try { const m = await import(pathToFileURL(path.join(process.cwd(), 'node_modules', 'playwright', 'index.mjs')).href); return m.chromium; }
+  catch { try { return (await import('playwright')).chromium; } catch { return null; } }
+}
+/**
+ * Meldet sich an der modernen APEX-Workspace-Sign-In-Seite an (Workspace + Database Username + Passwort).
+ * Zugangsdaten aus env — das Passwort erreicht diesen Prozess nur lokal, nie den Aufrufer.
+ */
+async function uiLogin(page, o = {}) {
+  const workspace = o.workspace || ENV.workspace;
+  const user = process.env.APEX_LOGIN_USER || '';
+  const pass = process.env.APEX_LOGIN_PASS || '';
+  if (!ENV.baseUrl) return { ok: false, error: 'APEX_BASE_URL nicht gesetzt.' };
+  if (!workspace || !user || !pass) return { ok: false, error: 'Login unvollständig — APEX_WORKSPACE, APEX_LOGIN_USER, APEX_LOGIN_PASS setzen.' };
+  await page.goto(`${ENV.baseUrl.replace(/\/$/, '')}/r/apex/app-builder/home`, { waitUntil: 'domcontentloaded', timeout: 30000 });
+  // Robuste, versionsunabhängige Feldsuche über Platzhalter/Rollen; danach Fallback auf klassische Item-IDs.
+  const fill = async (labels, ids, value) => {
+    for (const l of labels) { const loc = page.getByPlaceholder(l, { exact: false }); if (await loc.count()) { await loc.first().fill(value); return true; } }
+    for (const id of ids) { const loc = page.locator(id); if (await loc.count()) { await loc.first().fill(value); return true; } }
+    return false;
+  };
+  const isLogin = await page.getByPlaceholder('Workspace', { exact: false }).count();
+  if (isLogin) {
+    await fill(['Workspace'], ['#P9999_COMPANY', '#P101_COMPANY'], workspace);
+    await fill(['Database Username', 'Username'], ['#P9999_USERNAME', '#P101_USERNAME'], user);
+    await fill(['Password'], ['#P9999_PASSWORD', '#P101_PASSWORD'], pass);
+    const btn = page.getByRole('button', { name: /sign in|anmelden/i });
+    if (await btn.count()) await btn.first().click(); else await page.keyboard.press('Enter');
+    await page.waitForLoadState('networkidle', { timeout: 30000 }).catch(() => {});
+  }
+  const url = page.url();
+  const stillLogin = /sign-in|login/i.test(url) || (await page.getByPlaceholder('Password', { exact: false }).count()) > 0;
+  return stillLogin ? { ok: false, error: 'Login nicht erfolgreich — Workspace/Username/Passwort prüfen (evtl. Workspace=AP200000, Username=Meetup).', url }
+                    : { ok: true, url, workspace, user };
+}
+
 // ── Tools ────────────────────────────────────────────────────────────────────────────────────
 const TOOLS = [
   {
@@ -146,7 +183,64 @@ const TOOLS = [
         let o = ''; c.stdout.on('data', (d) => { o += d; }); c.stderr.on('data', (d) => { o += d; });
         c.on('error', () => res(null)); c.on('close', () => res(o.trim().split('\n')[0] || 'ok'));
       });
-      return { ok: true, sqlcl: ENV.sqlcl, sqlclVersion: which || 'NICHT gefunden — APEX_SQLCL setzen', conn: maskConn(ENV.conn), workspace: ENV.workspace || '(not set)', appId: ENV.appId || '(not set)', baseUrl: ENV.baseUrl || '(not set)' };
+      return { ok: true, sqlcl: ENV.sqlcl, sqlclVersion: which || 'NICHT gefunden — APEX_SQLCL setzen', conn: maskConn(ENV.conn), workspace: ENV.workspace || '(not set)', appId: ENV.appId || '(not set)', baseUrl: ENV.baseUrl || '(not set)', uiLogin: process.env.APEX_LOGIN_USER ? `${process.env.APEX_LOGIN_USER}@${ENV.workspace} (Passwort ${process.env.APEX_LOGIN_PASS ? 'gesetzt' : 'FEHLT'})` : '(APEX_LOGIN_USER nicht gesetzt)' };
+    },
+  },
+  {
+    name: 'apex_ui_login_check',
+    description: 'Prüft den APEX-Workspace-Login (Browser, headless) mit den env-Zugangsdaten (APEX_WORKSPACE/APEX_LOGIN_USER/APEX_LOGIN_PASS) — landet er im App Builder? Kein Import, nur Verbindungs-/Login-Test. Passwort nie in der Ausgabe.',
+    inputSchema: { type: 'object', properties: { workspace: { type: 'string' } } },
+    run: async (a) => {
+      const chromium = await loadChromium();
+      if (!chromium) return { ok: false, error: 'Playwright nicht installiert.' };
+      const browser = await chromium.launch({ headless: true });
+      try { const page = await browser.newPage(); const r = await uiLogin(page, a); return r; }
+      finally { await browser.close(); }
+    },
+  },
+  {
+    name: 'apex_install_ui',
+    description: 'Spielt ein Plugin/eine Template-Component über die APEX-IMPORT-UI ein (Browser, headless) — KEIN SQLcl, KEIN DB-Connect, nur der APEX-Login (env). Loggt ein → Shared Components → Plug-ins → Import → Datei hochladen → Wizard bis „Install". Deterministisch = ein Aufruf, token-minimal. Best effort über APEX-Versionen; liefert Schritt-Log + Screenshot-Pfad.',
+    inputSchema: { type: 'object', properties: {
+      exportFile: { type: 'string', description: 'Pfad zum Plugin-Export-SQL' },
+      appId: { type: 'number', description: 'Ziel-App (Default env APEX_APP_ID) — Plug-ins werden in eine App importiert' },
+      workspace: { type: 'string' },
+      headed: { type: 'boolean', description: 'true = sichtbares Browserfenster (zum Zuschauen/Tunen)' },
+    }, required: ['exportFile'] },
+    run: async (a) => {
+      if (!fs.existsSync(a.exportFile)) return { ok: false, error: `Export-Datei nicht gefunden: ${a.exportFile}` };
+      const appId = a.appId ?? ENV.appId;
+      const chromium = await loadChromium();
+      if (!chromium) return { ok: false, error: 'Playwright nicht installiert.' };
+      const steps = [];
+      const browser = await chromium.launch({ headless: !a.headed });
+      try {
+        const page = await browser.newPage();
+        const login = await uiLogin(page, a); steps.push({ step: 'login', ...login });
+        if (!login.ok) return { ok: false, steps, error: login.error };
+        // Plug-in-Import-Wizard: interner App-Builder (4500). Import-Seite ist versionsübergreifend f?p=4500:4000.
+        const base = ENV.baseUrl.replace(/\/$/, '');
+        await page.goto(`${base}/f?p=4500:4000:${''}::NO:::`, { waitUntil: 'domcontentloaded', timeout: 30000 }).catch(() => {});
+        steps.push({ step: 'open-import', url: page.url() });
+        // Datei-Upload (das <input type=file> des Wizards)
+        const file = page.locator('input[type="file"]');
+        if (!(await file.count())) { const shot = path.join(os.tmpdir(), 'apex-import-noupload.png'); await page.screenshot({ path: shot }).catch(() => {}); return { ok: false, steps, error: 'Datei-Upload-Feld nicht gefunden — APEX-Import-Wizard-Layout weicht ab; bitte Schritt-Log/Screenshot prüfen.', screenshot: shot }; }
+        await file.first().setInputFiles(path.resolve(a.exportFile));
+        steps.push({ step: 'file-selected', file: path.resolve(a.exportFile) });
+        // „Next"/„Weiter" durch den Wizard klicken, bis ein „Install"/„Installieren" erscheint (max. 6 Schritte).
+        for (let i = 0; i < 6; i++) {
+          const install = page.getByRole('button', { name: /install|installieren/i });
+          if (await install.count()) { await install.first().click(); steps.push({ step: 'install-clicked', at: i }); break; }
+          const next = page.getByRole('button', { name: /next|weiter/i });
+          if (await next.count()) { await next.first().click(); await page.waitForLoadState('domcontentloaded').catch(() => {}); steps.push({ step: 'next', at: i }); }
+          else { steps.push({ step: 'no-next', at: i }); break; }
+        }
+        await page.waitForLoadState('networkidle', { timeout: 30000 }).catch(() => {});
+        const body = (await page.locator('body').innerText().catch(() => '')).slice(0, 400);
+        const ok = /installed|imported|installiert|importiert|success|erfolg/i.test(body);
+        const shot = path.join(os.tmpdir(), 'apex-import-result.png'); await page.screenshot({ path: shot }).catch(() => {});
+        return { ok, steps, appId: Number(appId), screenshot: shot, resultText: body, note: ok ? undefined : 'Kein eindeutiger Erfolgstext — Screenshot/Schritt-Log prüfen (Wizard evtl. versionsabweichend).' };
+      } finally { await browser.close(); }
     },
   },
 ];
