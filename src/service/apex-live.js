@@ -86,7 +86,13 @@ export async function deployAndTest(o = {}, deps = {}) {
       appId, pageId, pageName: o.pageName || `Live-Test: ${an.internalName}`,
       pluginInternalName: an.internalName, sourceTypePrefix: an.sourceTypePrefix,
       needsAjaxItem: an.usesAjaxItemsToSubmit,
-      attributes: (an.configAttributeKey && an.configDefault) ? { [an.configAttributeKey]: String(an.configDefault).replace(/[\x00-\x1f]+/g, ' ') } : undefined,
+      // Alle Custom-Attribute mit Default setzen (generisch) → Region wie beim Hinzufügen im Builder vorbelegt.
+      // Steuerzeichen aus dem Default werden zu Leerzeichen (JSON-sicher); Format: direkte p_attribute_NN-Params.
+      attributes: Object.fromEntries(
+        (an.customAttributes || [])
+          .filter((a) => a.default != null && a.default !== '')
+          .map((a) => [a.key, String(a.default).replace(/[\x00-\x1f]+/g, ' ')]),
+      ),
       sourceSql: o.sourceSql,
       workspaceId: t.workspaceId, owner: t.owner, release: t.release,
     });

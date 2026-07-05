@@ -139,20 +139,34 @@ function sqlString(s) {
   return `wwv_flow_string.join(wwv_flow_t_varchar2(\n${parts.join(',\n')}))`;
 }
 
-/** Plugin-Attribute im 24.1-Format: wwv_flow_t_plugin_attributes(wwv_flow_t_varchar2('name','wert',...)).to_clob
- *  attributes: { '<attr-name>': '<wert>' } — Attributnamen sind die internen Plugin-Attribut-Schlüssel. */
-function pluginAttrsClob(attributes) {
-  const pairs = Object.entries(attributes || {}).filter(([, v]) => v != null && v !== '');
-  if (!pairs.length) return null;
-  const body = pairs.map(([k, v]) => `  ${q(k)}, ${sqlString(v)}`).join(',\n');
-  return `wwv_flow_t_plugin_attributes(wwv_flow_t_varchar2(\n${body})).to_clob`;
+/** Wert für ein einzelnes Plugin-Attribut. Kurze Werte (JSON-Configs etc.) als EIN Literal —
+ *  separator-unabhängig sicher; lange Werte (>3900) als wwv_flow_string.join (byte-exakt reassembliert). */
+function attrValue(v) {
+  const s = String(v ?? '');
+  return s.length <= 3900 ? q(s) : sqlString(s);
+}
+
+/** Plugin-Region-Attribute im create_page_plug-Format (wwv_flow_api/wwv_flow_imp_page): direkte
+ *  Parameter p_attribute_01, p_attribute_02, … — NICHT als p_attributes-Clob (den kennt create_page_plug
+ *  nicht → würde ignoriert; verifiziert am Sample-Export material-kanban-board).
+ *  attributes: { 'attribute_NN'|'p_attribute_NN': '<wert>' }. Liefert Array von ',p_attribute_NN=>…'-Zeilen. */
+function pluginAttrLines(attributes) {
+  return Object.entries(attributes || {})
+    .filter(([, v]) => v != null && v !== '')
+    .map(([k, v]) => {
+      const key = /^\d+$/.test(k) ? `p_attribute_${String(k).padStart(2, '0')}`
+        : /^attribute_\d+$/i.test(k) ? `p_${k}`
+        : /^p_attribute_\d+$/i.test(k) ? k : `p_${k}`;
+      return `,${key.toLowerCase()}=>${attrValue(v)}`;
+    });
 }
 
 /**
- * Generisches Testseiten-Import-SQL (APEX 24.x-Format, wwv_flow_imp*): eine vollständige,
- * über den Import-Wizard einspielbare Seite mit EINER Region vom Plugin-Typ. Ohne gesetzte
- * Attribute nutzt die Region automatisch die Plugin-Defaults (z.B. ConfigJSON-Default aus dem
- * Akzeptanz-Vertrag). Header-Werte (workspaceId/owner/release/version) sind instanzspezifisch.
+ * Generisches Testseiten-Import-SQL (APEX 24.x, öffentliche wwv_flow_api.* wie echte Exports):
+ * eine vollständige Seite mit EINER Region vom Plugin-Typ. Ohne gesetzte Attribute nutzt die Region
+ * die Plugin-Defaults. HINWEIS (B-28): p_attribute_NN persistiert NICHT über den App-Builder-
+ * Page-Import-Wizard — für gesetzte Config braucht es einen anderen Weg (Import-SQL als Skript
+ * ausführen / Page Designer). Header-Werte (workspaceId/owner/release/version) sind instanzspezifisch.
  *
  * @param {{appId:number|string, pageId?:number|string, pageName?:string, pluginInternalName:string,
  *          sourceSql?:string, attributes?:object, workspaceId?:string, owner?:string,
@@ -168,7 +182,7 @@ export function buildTestPageSql(o = {}) {
   const release = o.release || '24.2';
   const regionId = `${pageId}00001`; // stabile, page-abgeleitete Region-ID
   const sourcePrefix = o.sourceTypePrefix || 'NATIVE_PLUGIN_'; // aus der Analyse: api_version 1 → PLUGIN_, sonst NATIVE_PLUGIN_
-  const attrsClob = pluginAttrsClob(o.attributes);
+  const attrLines = pluginAttrLines(o.attributes);
   // Braucht das Plugin „Items to Submit" (AJAX), MUSS ein Page-Item existieren, auf das die Region zeigt —
   // sonst scheitert PAGE_ITEM_NAMES_TO_JQUERY im Plugin-Render mit ORA-01403 (verifiziert an Seite 2).
   const ajaxItem = o.ajaxItemName || (o.needsAjaxItem ? `P${pageId}_AJAX` : null);
@@ -178,7 +192,7 @@ export function buildTestPageSql(o = {}) {
     'set define off verify off feedback off',
     'whenever sqlerror exit sql.sqlcode rollback',
     'begin',
-    'wwv_flow_imp.import_begin (',
+    'wwv_flow_api.import_begin (',
     ` p_version_yyyy_mm_dd=>'${version}'`,
     `,p_release=>'${release}'`,
     ...(o.workspaceId ? [`,p_default_workspace_id=>${o.workspaceId}`] : []),
@@ -192,7 +206,7 @@ export function buildTestPageSql(o = {}) {
   const page = [
     `prompt --application/pages/page_${String(pageId).padStart(5, '0')}`,
     'begin',
-    'wwv_flow_imp_page.create_page(',
+    'wwv_flow_api.create_page(',
     ` p_id=>${pageId}`,
     `,p_name=>${q(pageName)}`,
     `,p_step_title=>${q(pageName)}`,
@@ -202,8 +216,8 @@ export function buildTestPageSql(o = {}) {
     ...(o.public === false ? [] : [`,p_page_is_public_y_n=>'Y'`]),
     `,p_protection_level=>'C'`,
     ');',
-    'wwv_flow_imp_page.create_page_plug(',
-    ` p_id=>wwv_flow_imp.id(${regionId})`,
+    'wwv_flow_api.create_page_plug(',
+    ` p_id=>wwv_flow_api.id(${regionId})`,
     `,p_plug_name=>${q('Test: ' + pluginName)}`,
     `,p_region_template_options=>'#DEFAULT#'`,
     `,p_plug_display_sequence=>10`,
@@ -212,21 +226,21 @@ export function buildTestPageSql(o = {}) {
     // SQL-Datenquelle korrekt als SQL-Query-Region setzen (sonst ist P_REGION.SOURCE leer → SOURCE_SQL-Plugins scheitern).
     ...(o.sourceSql ? [`,p_query_type=>'SQL'`, `,p_plug_source=>${sqlString(o.sourceSql)}`] : []),
     ...(ajaxItem ? [`,p_ajax_items_to_submit=>${q(ajaxItem)}`] : []),
-    ...(attrsClob ? [`,p_attributes=>${attrsClob}`] : []),
+    ...attrLines,
     ');',
     // Page-Item anlegen, das die Region über „Items to Submit" referenziert (Plugin-Voraussetzung).
     ...(ajaxItem ? [
-      'wwv_flow_imp_page.create_page_item(',
-      ` p_id=>wwv_flow_imp.id(${regionId}1)`,
+      'wwv_flow_api.create_page_item(',
+      ` p_id=>wwv_flow_api.id(${regionId}1)`,
       `,p_name=>${q(ajaxItem)}`,
       `,p_item_sequence=>10`,
-      `,p_item_plug_id=>wwv_flow_imp.id(${regionId})`,
+      `,p_item_plug_id=>wwv_flow_api.id(${regionId})`,
       `,p_display_as=>'NATIVE_HIDDEN'`,
       ');',
     ] : []),
     'end;',
     '/',
   ];
-  const footer = ['begin', 'wwv_flow_imp.import_end(p_auto_install_sup_obj => false);', 'commit;', 'end;', '/'];
+  const footer = ['begin', 'wwv_flow_api.import_end(p_auto_install_sup_obj => false);', 'commit;', 'end;', '/'];
   return [...header, ...page, ...footer].join('\n') + '\n';
 }

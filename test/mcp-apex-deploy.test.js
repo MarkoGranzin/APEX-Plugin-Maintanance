@@ -61,15 +61,16 @@ describe('F-31 T-129 apex-deploy: generische Testseite (APEX 24.x-Format)', () =
 
   it('vollständige, importierbare Seite: Header + create_page + Plugin-Region + Footer', () => {
     const sql = buildTestPageSql({ appId: 200000, pageId: 9999, pluginInternalName: 'APEX.FLOW.CHART.1', workspaceId: '123', owner: 'WKSP_MEETUP' });
-    expect(sql).toMatch(/wwv_flow_imp\.import_begin/);
+    // Öffentliche wwv_flow_api.*-Aufrufe (versions-stabil, wie echte APEX-Exports) statt interner wwv_flow_imp*.
+    expect(sql).toMatch(/wwv_flow_api\.import_begin/);
     expect(sql).toContain('p_default_application_id=>200000');
     expect(sql).toContain('p_default_workspace_id=>123');
     expect(sql).toContain(`p_default_owner=>'WKSP_MEETUP'`);
-    expect(sql).toMatch(/wwv_flow_imp_page\.create_page\(/);
-    expect(sql).toMatch(/wwv_flow_imp_page\.create_page_plug\(/);
+    expect(sql).toMatch(/wwv_flow_api\.create_page\(/);
+    expect(sql).toMatch(/wwv_flow_api\.create_page_plug\(/);
     expect(sql).toContain(`p_plug_source_type=>'NATIVE_PLUGIN_APEX.FLOW.CHART.1'`);
     expect(sql).toContain('p_id=>9999');
-    expect(sql).toMatch(/wwv_flow_imp\.import_end/);
+    expect(sql).toMatch(/wwv_flow_api\.import_end/);
   });
 
   it('ohne Attribute → keine p_attributes (Region nutzt Plugin-Defaults)', () => {
@@ -77,17 +78,22 @@ describe('F-31 T-129 apex-deploy: generische Testseite (APEX 24.x-Format)', () =
     expect(sql).not.toContain('p_attributes=>');
   });
 
-  it('mit Attributen → 24.x wwv_flow_t_plugin_attributes-Clob (benannt)', () => {
+  it('mit Attributen → direkte p_attribute_NN-Parameter (create_page_plug-Format, kein Clob)', () => {
     const sql = buildTestPageSql({ appId: 1, pluginInternalName: 'X', attributes: { '1': CFG } });
-    expect(sql).toMatch(/p_attributes=>wwv_flow_t_plugin_attributes\(wwv_flow_t_varchar2\(/);
-    expect(sql).toContain("'1'");
+    // Korrektes Format: p_attribute_01 direkt an create_page_plug — NICHT p_attributes-Clob (den ignoriert die API).
+    expect(sql).toMatch(/,p_attribute_01=>/);
+    expect(sql).not.toContain('p_attributes=>');
+    expect(sql).not.toContain('to_clob');
     expect(sql).toContain('refresh');
+    // kurzer Wert → EIN Literal (separator-unabhängig gültiges JSON)
+    const lit = (sql.match(/,p_attribute_01=>'((?:[^']|'')*)'/) || [])[1]?.replace(/''/g, "'");
+    expect(() => JSON.parse(lit)).not.toThrow();
   });
 
-  it('langer Attributwert (>800) → wwv_flow_string.join', () => {
-    const big = '{"a":"' + 'x'.repeat(1200) + '"}';
+  it('langer Attributwert (>3900) → wwv_flow_string.join (byte-exakt)', () => {
+    const big = '{"a":"' + 'x'.repeat(4200) + '"}';
     const sql = buildTestPageSql({ appId: 1, pluginInternalName: 'X', attributes: { '1': big } });
-    expect(sql).toMatch(/wwv_flow_string\.join\(wwv_flow_t_varchar2\(/);
+    expect(sql).toMatch(/,p_attribute_01=>wwv_flow_string\.join\(wwv_flow_t_varchar2\(/);
   });
 
   it('sourceSql wird als Region-Quelle gesetzt', () => {
