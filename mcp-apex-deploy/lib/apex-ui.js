@@ -142,6 +142,28 @@ async function pdSetProp(page, label, value) {
 }
 
 /**
+ * Löscht eine Seite über den Page Designer (Utilities → „Delete Page" → „Permanently Delete Page").
+ * Für das Aufräumen alter/verwaister Testseiten. @param {{appId:number|string, pageId:number|string}} o
+ */
+export async function uiDeletePage(page, o = {}) {
+  const appTile = page.locator(`a[href*="fb_flow_id=${o.appId}"]`);
+  if (await appTile.count()) { await appTile.first().click(); await page.waitForLoadState('networkidle').catch(() => {}); await page.waitForTimeout(1200); }
+  const link = page.getByRole('link', { name: new RegExp(`\\b${o.pageId}\\b`) });
+  if (!(await link.count())) return { ok: true, deleted: false, note: 'Seite existiert nicht.' };
+  await link.first().click(); await page.waitForLoadState('networkidle').catch(() => {}); await page.waitForTimeout(3000);
+  if (!new RegExp(`${o.appId}:${o.pageId}\\b`).test(await page.title().catch(() => ''))) return { ok: false, error: 'Page Designer nicht geöffnet.' };
+  await page.locator('#pdUtilities, button[aria-label*="Utilities" i], button[title*="Utilities" i]').first().click().catch(() => {});
+  await page.waitForTimeout(1000);
+  await page.getByText(/^Delete Page$/i).first().click().catch(async () => { await page.getByRole('menuitem', { name: /Delete Page/i }).first().click().catch(() => {}); });
+  await page.waitForTimeout(1800);
+  let clicked = false;
+  for (const b of [page.getByRole('button', { name: /Permanently Delete Page/i }), page.getByRole('button', { name: /^Delete$/i }), page.locator('button.a-Button--hot:has-text("Delete")')]) { if (await b.count()) { await b.first().click(); clicked = true; break; } }
+  await page.waitForLoadState('networkidle').catch(() => {}); await page.waitForTimeout(2500);
+  const gone = !new RegExp(`${o.appId}:${o.pageId}\\b`).test(await page.title().catch(() => ''));
+  return { ok: clicked && gone, deleted: gone };
+}
+
+/**
  * Baut eine Testseite komplett im PAGE DESIGNER (statt des in dieser Instanz WAF-blockierten Wizard-Imports,
  * B-30): Create-Page-Wizard (Blank) → Plugin-Region per jQuery-UI-Maus-Drag aus der Regions-Gallery →
  * Region-Name + SQL-Quelle + Custom-Attribute (ConfigJSON etc.) → Seite öffentlich → Save-Button. Existiert
