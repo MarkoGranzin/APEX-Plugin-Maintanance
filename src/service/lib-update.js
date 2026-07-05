@@ -15,6 +15,40 @@ import path from 'node:path';
 import { detectVendoredLibraries } from '../sbom/vendored.js';
 import { npmPackageName } from '../sbom/registry.js';
 import { cmpSemver as cmp } from '../util/version.js';
+import { listFiles } from '../inventory/inventory.js';
+
+/** Version-Token, das im Dateinamen steckt (gleiche Konvention wie die SBOM-Erkennung in vendored.js). */
+function versionInBase(base) {
+  const m = String(base).match(/[-.@](\d+\.\d+(?:\.\d+)?)(?:[.-]min)?\.(?:js|css)$/);
+  return m ? m[1] : null;
+}
+
+/**
+ * Ersetzt literale Referenzen auf den ALTEN Dateinamen (Basename) durch den neuen in allen Text-Dateien
+ * des Repos (HTML/JS/CSS/SQL/JSON …). Sichert jede geänderte Datei in `backups` (Rollback). Überspringt
+ * bereits gesicherte Pfade (z.B. die frisch umbenannte Lib-Datei mit null-Marker → nicht überschreiben).
+ * @returns {number} Anzahl geänderter Dateien
+ */
+function rewriteReferences(dir, oldBase, newBase, backups, deps = {}) {
+  if (!oldBase || oldBase === newBase) return 0;
+  const list = deps.listFiles ?? listFiles;
+  let files = [];
+  try { files = list(dir); } catch { return 0; }
+  const textRe = /\.(js|css|html?|sql|json|xml|md|txt)$/i;
+  let changed = 0;
+  for (const rel of files) {
+    if (!textRe.test(rel)) continue;
+    const abs = path.join(dir, rel);
+    if (backups.has(abs)) continue; // schützt den null-Marker der neuen Lib-Datei
+    let content;
+    try { content = fs.readFileSync(abs, 'utf8'); } catch { continue; }
+    if (!content.includes(oldBase)) continue;
+    backups.set(abs, content);
+    fs.writeFileSync(abs, content.split(oldBase).join(newBase));
+    changed++;
+  }
+  return changed;
+}
 
 
 /**
@@ -72,8 +106,24 @@ export async function applyVendoredUpdates(dir, libs, deps = {}) {
       const content = await fetchFile(npmPackageName(lib.name), lib.latest);
       if (!content || typeof content !== 'string') throw new Error('leerer Download');
       if (fs.existsSync(abs)) backups.set(abs, fs.readFileSync(abs, 'utf8'));
-      fs.writeFileSync(abs, content);
-      results.push({ name: lib.name, from: lib.version, to: lib.latest, applied: true, breaking: cls === 'breaking', file: rel });
+      // Steht die ALTE Version im Dateinamen (z.B. lz-string-1.0.2.js), muss die Datei auf die neue Version
+      // umbenannt werden — sonst liest die SBOM-Erkennung die Version weiter aus dem Namen und der Status
+      // bleibt „veraltet", obwohl der Inhalt aktuell ist. Referenzen werden repo-weit mitgezogen.
+      const base = path.basename(rel);
+      const embedded = versionInBase(base);
+      let outRel = rel, outAbs = abs, renamedTo = null, refsUpdated = 0;
+      if (embedded && embedded === lib.version) {
+        const i = base.lastIndexOf(embedded);
+        const newBase = base.slice(0, i) + lib.latest + base.slice(i + embedded.length);
+        if (newBase !== base) { renamedTo = newBase; outRel = rel.slice(0, rel.length - base.length) + newBase; outAbs = path.join(dir, outRel); }
+      }
+      fs.writeFileSync(outAbs, content);
+      if (renamedTo && outAbs !== abs) {
+        fs.rmSync(abs, { force: true });
+        backups.set(outAbs, null); // Rollback: die neu angelegte Datei wieder entfernen
+        refsUpdated = rewriteReferences(dir, base, renamedTo, backups, deps);
+      }
+      results.push({ name: lib.name, from: lib.version, to: lib.latest, applied: true, breaking: cls === 'breaking', file: outRel, ...(renamedTo ? { renamedFrom: base, renamedTo, refsUpdated } : {}) });
     } catch (e) {
       results.push({ name: lib.name, from: lib.version, to: lib.latest, applied: false, reason: 'download/write failed: ' + (e?.message ?? e) });
     }
@@ -81,9 +131,9 @@ export async function applyVendoredUpdates(dir, libs, deps = {}) {
   return { results, backups };
 }
 
-/** Setzt eingespielte Updates zurück (bei Regression). */
+/** Setzt eingespielte Updates zurück (bei Regression). null-Inhalt = die (neu angelegte) Datei löschen. */
 export function rollbackUpdates(backups) {
   for (const [abs, content] of backups || []) {
-    try { fs.writeFileSync(abs, content); } catch { /* ignore */ }
+    try { if (content === null) fs.rmSync(abs, { force: true }); else fs.writeFileSync(abs, content); } catch { /* ignore */ }
   }
 }

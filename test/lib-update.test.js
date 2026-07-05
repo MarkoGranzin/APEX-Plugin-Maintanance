@@ -51,4 +51,23 @@ describe('T-79 applyVendoredUpdates', () => {
     expect(r.results[0]).toMatchObject({ applied: true, breaking: true });
     expect(fs.readFileSync(path.join(dir, 'lib', 'jquery.min.js'), 'utf8')).toMatch(/v4\.0\.0/);
   });
+
+  it('Version im Dateinamen → Datei wird umbenannt + Referenzen mitgezogen (sonst „Dauer-veraltet")', async () => {
+    // Lib mit Version im Namen + eine HTML, die sie literal referenziert.
+    fs.writeFileSync(path.join(dir, 'lib', 'lz-string-1.0.2.js'), 'var LZString=1;');
+    fs.writeFileSync(path.join(dir, 'index.html'), '<script src="lib/lz-string-1.0.2.js"></script>');
+    const fetchFile = async () => 'var LZString=2;/*neu*/';
+    const r = await applyVendoredUpdates(dir, [{ name: 'lz-string', version: '1.0.2', outdated: true, latest: '1.5.0' }], { fetchFile });
+    expect(r.results[0]).toMatchObject({ applied: true, renamedTo: 'lz-string-1.5.0.js', refsUpdated: 1 });
+    // alte Datei weg, neue da mit neuem Inhalt
+    expect(fs.existsSync(path.join(dir, 'lib', 'lz-string-1.0.2.js'))).toBe(false);
+    expect(fs.readFileSync(path.join(dir, 'lib', 'lz-string-1.5.0.js'), 'utf8')).toMatch(/neu/);
+    // Referenz umgezogen
+    expect(fs.readFileSync(path.join(dir, 'index.html'), 'utf8')).toContain('lz-string-1.5.0.js');
+    // Rollback: alte Datei zurück, neue weg, Referenz zurück
+    rollbackUpdates(r.backups);
+    expect(fs.existsSync(path.join(dir, 'lib', 'lz-string-1.5.0.js'))).toBe(false);
+    expect(fs.readFileSync(path.join(dir, 'lib', 'lz-string-1.0.2.js'), 'utf8')).toBe('var LZString=1;');
+    expect(fs.readFileSync(path.join(dir, 'index.html'), 'utf8')).toContain('lz-string-1.0.2.js');
+  });
 });
