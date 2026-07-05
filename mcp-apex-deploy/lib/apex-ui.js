@@ -313,14 +313,20 @@ export async function smokeCheckPage(page, errors = [], o = {}) {
   const sel = o.selector || 'body';
   const visibleText = (await page.locator(sel).first().innerText().catch(() => '')).trim();
   const hasGraphics = await page.locator('canvas, svg, .mxgraph, [class*="mx"]').count();
+  // Nicht jedes Plugin rendert SVG/Canvas (z.B. Bargraphs = Divs) → generisch prüfen, ob eine REGION echten
+  // Inhalt hat: Region-Body mit sichtbarem Text oder mehreren Kind-Elementen. Verhindert False-Negative.
+  const regionContent = await page.locator('.t-Region-body, [class*="Region-body"], .a-Region-body').evaluateAll(
+    (els) => els.some((e) => (e.innerText || '').trim().length > 2 || e.querySelectorAll('div,span,canvas,svg,table,ul,li,i,img').length > 3),
+  ).catch(() => false);
   const stillLogin = /sign-in|\/login/i.test(page.url());
   // Titel-Abgleich: zeigt die Seite noch das falsche Plugin, ist der Import NICHT durchgelaufen.
   const wrongPage = o.expectMarker && pageTitle && !pageTitle.toLowerCase().includes(String(o.expectMarker).toLowerCase()) ? pageTitle : null;
-  const ok = !apexError && !is404 && !stillLogin && !wrongPage && errors.length === 0 && (visibleText.length > 0 || hasGraphics > 0);
+  const hasRender = hasGraphics > 0 || regionContent;
+  const ok = !apexError && !is404 && !stillLogin && !wrongPage && errors.length === 0 && (visibleText.length > 0 || hasRender);
   return {
     ok, url: page.url().replace(/session=\d+/, 'session=…'), apexError, is404: is404 || undefined, needsLogin: stillLogin || undefined,
     wrongPage: wrongPage || undefined, pageTitle,
-    jsErrors: errors.slice(0, 20), rendered: !apexError && !is404 && !wrongPage && (hasGraphics > 0), graphics: hasGraphics,
+    jsErrors: errors.slice(0, 20), rendered: !apexError && !is404 && !wrongPage && hasRender, graphics: hasGraphics, regionContent: regionContent || undefined,
     note: apexError ? `APEX-Fehlerseite: ${apexError} — Plugin-Render schlug fehl (Region-/Laufzeit-Setup prüfen).`
       : is404 ? 'Seite nicht gefunden (404) — Seiten-ID/Alias prüfen.'
         : wrongPage ? `Falsche Seite gerendert („${wrongPage}") — Seiten-Import lief nicht durch (kein Grün auf Fremd-Inhalt).`
