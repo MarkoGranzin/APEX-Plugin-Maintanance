@@ -213,7 +213,12 @@ export async function uiCreateTestPage(page, o = {}) {
     await page.locator('button:has-text("Regions"),[role=tab]:has-text("Regions")').first().click().catch(() => {}); await page.waitForTimeout(1000);
     const src = page.locator('.a-Gallery-region').filter({ hasText: rxi(o.pluginDisplayName) }).first();
     if (!(await src.count())) return { ok: false, error: `Plugin „${o.pluginDisplayName}" nicht in der Regions-Gallery (installiert?).` };
+    // Gallery-Item in den sichtbaren Bereich scrollen — bei vielen installierten Plugins liegt es sonst
+    // UNTER dem Viewport (Maus-Drag würde off-screen starten und die Body-Fläche verfehlen).
+    await src.scrollIntoViewIfNeeded().catch(() => {});
+    await page.waitForTimeout(400);
     const sb = await src.boundingBox();
+    if (!sb) return { ok: false, error: `Gallery-Item „${o.pluginDisplayName}" nicht sichtbar (Scroll fehlgeschlagen).` };
     // Drop in die untere Body-Fläche der Layout-Ansicht (bewiesene Position). jQuery-UI-Draggable → echte
     // Maus-Events: down → Threshold-Bewegung → in Schritten zum Ziel → up. Ziel bewusst OBERHALB der Gallery
     // (die Gallery liegt unten ~y795; ein Ziel darunter verfehlt die Layout-Fläche und legt KEINE Region an).

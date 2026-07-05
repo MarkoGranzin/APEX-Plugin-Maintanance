@@ -61,14 +61,14 @@ export function pluginLoadFiles(sqlText) {
   return { jsUrls: orderedJs.map(ref), cssUrls: orderedCss.map(ref), jsFiles: orderedJs, cssFiles: orderedCss };
 }
 
-/** Einen (evtl. via wwv_flow_string.join gejointen) PL/SQL-Stringwert rekonstruieren. */
+/** Einen (evtl. via wwv_flow_string.join gejointen) PL/SQL-Stringwert rekonstruieren.
+ *  WICHTIG: NICHT am ersten „))" stoppen — das kommt im SQL/PL-SQL selbst vor (z.B. VALUE(6, 12))).
+ *  `raw` ist bereits am nächsten Parameter begrenzt (val()-Lookahead); daher einfach ALLE quoted Teile
+ *  einsammeln und mit Zeilenumbruch verbinden (wwv_flow_string.join reassembliert Zeile für Zeile). */
 function plsqlValue(raw) {
   if (!raw) return null;
-  const s = String(raw).trim();
-  const join = s.match(/wwv_flow_string\.join\(wwv_flow_t_varchar2\(([\s\S]*?)\)\)/i);
-  const body = join ? join[1] : s;
-  const parts = [...body.matchAll(/'((?:[^']|'')*)'/g)].map((m) => m[1].replace(/''/g, "'"));
-  return parts.length ? parts.join('') : null;
+  const parts = [...String(raw).matchAll(/'((?:[^']|'')*)'/g)].map((m) => m[1].replace(/''/g, "'"));
+  return parts.length ? parts.join('\n') : null;
 }
 
 /**
@@ -114,13 +114,15 @@ export function analyzePlugin(sqlText) {
   let defaultSourceSql = null;
   if (/p_name=>'SOURCE_SQL'/i.test(t)) {
     const tail = t.slice(t.search(/p_name=>'SOURCE_SQL'/i));
-    const joinM = tail.match(/p_default_value=>wwv_flow_string\.join\(wwv_flow_t_varchar2\(([\s\S]*?)\)\)/i);
-    const litM = tail.match(/p_default_value=>'((?:[^']|'')*)'/i);
-    if (joinM) {
-      const parts = [...joinM[1].matchAll(/'((?:[^']|'')*)'/g)].map((x) => x[1].replace(/''/g, "'"));
+    const dv = tail.search(/p_default_value=>/i);
+    if (dv >= 0) {
+      // Block vom p_default_value bis zum NÄCHSTEN Parameter (\n,p_) bzw. Ende der Aufruf-Klammer (\n);) —
+      // NICHT am ersten „))" begrenzen (das steht im SQL selbst, z.B. VALUE(6, 12))). Dann alle quoted Teile.
+      const after = tail.slice(dv + 'p_default_value=>'.length);
+      const end = after.search(/\n\s*,\s*p_[a-z]|\n\s*\)\s*;/i);
+      const block = end >= 0 ? after.slice(0, end) : after;
+      const parts = [...block.matchAll(/'((?:[^']|'')*)'/g)].map((x) => x[1].replace(/''/g, "'"));
       defaultSourceSql = parts.length ? parts.join('\n').trim() : null;
-    } else if (litM) {
-      defaultSourceSql = litM[1].replace(/''/g, "'").trim();
     }
   }
 
