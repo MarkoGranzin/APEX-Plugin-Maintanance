@@ -62,7 +62,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const DATA_DIR = process.env.AISPP_DATA_DIR || path.join(__dirname, 'data');
 // Build-Marker: muss mit APP_BUILD in public/app.html übereinstimmen. Bei Backend-Änderungen erhöhen.
 // Das Frontend vergleicht beide und warnt, wenn der laufende Dienst veraltet ist (Neustart nötig).
-const BUILD = '2026-07-05.72';
+const BUILD = '2026-07-05.73';
 const C = { reset: '\x1b[0m', bold: '\x1b[1m', dim: '\x1b[2m', green: '\x1b[32m', yellow: '\x1b[33m', red: '\x1b[31m', cyan: '\x1b[36m' };
 const c = (col, s) => `${C[col]}${s}${C.reset}`;
 
@@ -375,6 +375,28 @@ function cmdServe(portArg) {
       try { runComponentOnce(store, store.get(id), { scan: scanRepo, logSink: writeLog, onTestPlan, onSbom }); } catch { /* egal */ }
       try { const enr = await checkLibrariesOnline(store.get(id).libs || []); store.update(id, { libs: enr, libWarning: libWarningFrom(enr) }); } catch { /* offline → später */ }
     }
+    // Teil der Pflege (F-31): das GEPFLEGTE Plugin real in die echte APEX-App einspielen und die Seite
+    // prüfen — „alles macht die Maintenance". Nur wenn ein APEX-Ziel konfiguriert ist (sonst übersprungen).
+    // Generisch: eigene Seite je Plugin aus dem Register; die Seite wird im Page Designer aufgebaut (B-30).
+    try {
+      const t = settings.apexTarget || {}; let pass; try { pass = secretStore.get('apex-pass'); } catch { /* kein Passwort */ }
+      const exportFile = component.path ? findPluginExport(component.path) : null;
+      if (t.baseUrl && t.workspace && t.loginUser && pass && t.appId && exportFile && opts.apexLive !== false) {
+        let pageId = store.get(id).apexPageId;
+        if (!pageId) {
+          const used = new Set(store.list().map((x) => x.apexPageId).filter(Boolean));
+          let n = Number(t.nextPageId) || 9001; while (used.has(n)) n += 1; pageId = n;
+          store.update(id, { apexPageId: pageId });
+          settings.apexTarget = { ...t, nextPageId: pageId + 1 }; try { saveSettings(); } catch { /* egal */ }
+        }
+        setStep(id, `APEX: einspielen & prüfen (Seite ${pageId})…`);
+        const al = await deployAndTest({ exportFile, pageId, target: { baseUrl: t.baseUrl, workspace: t.workspace, user: t.loginUser, pass, appId: Number(t.appId), alias: t.alias, workspaceId: t.workspaceId, owner: t.owner, release: t.release } });
+        try { store.addReview(id, { kind: 'apex-live', pass: al.ok, rendered: !!al.render?.rendered, apexError: al.render?.apexError || null, url: al.render?.url || null, plugin: al.plugin, pageId }); } catch { /* egal */ }
+        r.apexLive = { ok: al.ok, rendered: !!al.render?.rendered, url: al.render?.url || null, pageId, plugin: al.plugin };
+        (r.steps = r.steps || []).push({ step: 'apex-live', ok: al.ok, rendered: !!al.render?.rendered, url: al.render?.url || null });
+        writeLog(component, `[apex-live] Seite ${pageId}: ${al.ok ? 'gerendert ✓' : 'nicht bestätigt'} (${al.render?.url || ''})`);
+      }
+    } catch (e) { writeLog(component, `[apex-live] übersprungen: ${e?.message ?? e}`); }
     return r;
     } finally { RUNNING.delete(id); }
   };

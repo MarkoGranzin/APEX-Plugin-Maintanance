@@ -810,9 +810,11 @@ async function runMaintain(){
       else if(m.skipped) mig=`<div class="finding medium">↪ Migration skipped — ${esc(m.reason||'')}</div>`;
       else mig=`<div class="finding"><b>⛔ Migration not adopted (rolled back)</b> — ${esc(m.reason||(m.gate&&m.gate.summary)||'not green as before')}</div>`+((m.regressions||[]).map(x=>`<div class="finding medium">↩ ${esc(x.scenario)}: ${esc(x.was||'passed')} → ${esc(x.now||'failed')}</div>`).join(''));
     }
-    $('reviewOut').innerHTML = `<div class="note"><b>🧰 Maintenance done:</b> ${esc(r.before)} → ${esc(r.after)}${r.rebuilt?' · 🚀 rebuilt':''}</div>` + mig
-      + (r.steps||[]).map(s=>`<div class="finding low"><b>${esc(s.step)}</b> ${esc(s.summary||s.status||s.reason||(s.error?('Error: '+s.error):JSON.stringify(s)))}</div>`).join('');
-    toast(r.migration&&r.migration.adopted?'Migrated to latest (verified)':'Full maintenance done');
+    let apx='';
+    if(r.apexLive){ const a=r.apexLive; apx=`<div class="${a.ok?'note':'finding'}"><b>${a.ok?'✅':'⛔'} In APEX geprüft (Seite ${esc(a.pageId)}):</b> ${a.rendered?'gerendert':'nicht bestätigt'}${a.url?` — <a href="${esc(a.url)}" target="_blank" rel="noopener" style="color:var(--accent)">Seite öffnen ↗</a>`:''}</div>`; }
+    $('reviewOut').innerHTML = `<div class="note"><b>🧰 Maintenance done:</b> ${esc(r.before)} → ${esc(r.after)}${r.rebuilt?' · 🚀 rebuilt':''}</div>` + mig + apx
+      + (r.steps||[]).map(s=>`<div class="finding low"><b>${esc(s.step)}</b> ${esc(s.step==='apex-live'?((s.ok?'✓ gerendert':'nicht bestätigt')+(s.url?' — '+s.url:'')):(s.summary||s.status||s.reason||(s.error?('Error: '+s.error):JSON.stringify(s))))}</div>`).join('');
+    toast(r.apexLive?(r.apexLive.ok?`✅ Gepflegt + in APEX gerendert (Seite ${r.apexLive.pageId})`:'Gepflegt, APEX-Render nicht bestätigt'):(r.migration&&r.migration.adopted?'Migrated to latest (verified)':'Full maintenance done'));
   }catch(e){ $('reviewOut').innerHTML=`<div class="finding">${esc(e.message)}</div>`; toast('Error: '+e.message); }
   finally{ setBusy(id,false); }
 }
@@ -1230,7 +1232,7 @@ async function loadLibraries(){
 }
 
 // Build-Marker: muss mit BUILD in start.js übereinstimmen. Erkennt einen veralteten Backend-Prozess.
-const APP_BUILD = '2026-07-05.72';
+const APP_BUILD = '2026-07-05.73';
 async function checkBackend(){
   const b = $('staleBanner');
   try{
