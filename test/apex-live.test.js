@@ -15,52 +15,56 @@ function fakeDeps(over = {}) {
     uiLogin: async () => ({ ok: true, url: 'app-builder/apps' }),
     uiImportFile: async (_p, file) => ({ ok: true, steps: ['Next', 'Install'], oraError: null, _file: file }),
     uiSetPluginFileUrls: async () => ({ ok: true, js: { set: true, count: 2 }, css: { skipped: 'keine Dateien' }, applied: true }),
-    uiSetPluginAttributes: async (_p, arg) => ({ ok: true, results: (arg.attributes || []).map((a) => ({ label: a.label, set: true })), _arg: arg }),
+    uiCreateTestPage: async (_p, arg) => ({ ok: true, mode: 'create', region: { name: 'ok', sql: 'ok' }, attributes: (arg.attributes || []).map((a) => ({ prompt: a.prompt, r: 'ok' })), auth: 'ok', _arg: arg }),
     smokeCheckPage: async () => ({ ok: true, rendered: true, graphics: 3, apexError: null, jsErrors: [] }),
     ...over,
   };
 }
 
 describe('T-135 apex-live: Einspielen + Testseite + Render-Verify (orchestriert)', () => {
-  it('voller Ablauf grün → install + fileUrls + testPage + render, ok=true', async () => {
+  it('voller Ablauf grün → install + fileUrls + testPage (Page Designer) + render, ok=true', async () => {
     const captured = [];
-    const deps = fakeDeps({ uiImportFile: async (_p, file, o) => { captured.push({ file, o }); return { ok: true, oraError: null }; } });
-    const r = await deployAndTest({ exportFile: 'plugin.sql', target, sourceSql: 'select 1 from dual' }, deps);
+    let pageArg;
+    const deps = fakeDeps({
+      uiImportFile: async (_p, file, o) => { captured.push({ file, o }); return { ok: true, oraError: null }; },
+      uiCreateTestPage: async (_p, arg) => { pageArg = arg; return { ok: true, mode: 'create', region: { name: 'ok' } }; },
+    });
+    const r = await deployAndTest({ exportFile: 'plugin.sql', target, pageId: 9001, sourceSql: 'select 1 from dual' }, deps);
     expect(r.ok).toBe(true);
     expect(r.plugin).toBe('MY.PLUGIN.1');
     expect(r.analysis.sourceTypePrefix).toBe('PLUGIN_'); // api_version 1
-    expect(r.analysis.usesAjaxItemsToSubmit).toBe(true);
     expect(r.install.ok).toBe(true);
     expect(r.fileUrls.js.set).toBe(true);
     expect(r.render.rendered).toBe(true);
-    // Plugin-Import via Plug-ins, Seiten-Import ohne viaPlugins
+    expect(r.testPage.ok).toBe(true);
+    // Plugin-Install via Plug-ins-Wizard; die Testseite entsteht NICHT per Import, sondern im Page Designer.
     expect(captured[0].o.viaPlugins).toBe(true);
-    expect(captured[1].o.viaPlugins).toBeFalsy();
-    // ConfigJSON wird im Page Designer gesetzt (Wizard persistiert p_attribute_NN nicht — B-28)
-    expect(r.pluginConfig.ok).toBe(true);
+    expect(captured.length).toBe(1); // KEIN Seiten-Import mehr (B-30)
+    expect(pageArg.pageId).toBe(9001);
+    expect(pageArg.regionName).toBe('Test: MY.PLUGIN.1');
   });
 
   it('ohne eigene SQL → nutzt die plugin-eigene SOURCE_SQL-Beispielquery als Datenquelle', async () => {
-    let sqlArg;
+    let seen;
     const deps = fakeDeps({
       readFile: () => `wwv_flow_api.create_plugin(\n p_name=>'BAR.1'\n,p_api_version=>1\n,p_standard_attributes=>'SOURCE_SQL:AJAX_ITEMS_TO_SUBMIT'\n);\nwwv_flow_api.create_plugin_std_attribute(\n p_name=>'SOURCE_SQL'\n,p_default_value=>wwv_flow_string.join(wwv_flow_t_varchar2(\n'SELECT 1 AS TITLE, 99 AS VALUE FROM DUAL'))\n);`,
-      buildTestPageSql: (o) => { sqlArg = o.sourceSql; return 'PAGE SQL'; },
+      uiCreateTestPage: async (_p, arg) => { seen = arg; return { ok: true, mode: 'create' }; },
     });
     const r = await deployAndTest({ exportFile: 'plugin.sql', target /* KEIN sourceSql */ }, deps);
     expect(r.ok).toBe(true);
-    expect(sqlArg).toMatch(/SELECT 1 AS TITLE, 99 AS VALUE FROM DUAL/);
+    expect(seen.sourceSql).toMatch(/SELECT 1 AS TITLE, 99 AS VALUE FROM DUAL/);
   });
 
-  it('setzt Plugin-Attribute (ConfigJSON) generisch im Page Designer, Steuerzeichen bereinigt', async () => {
+  it('setzt Plugin-Attribute (ConfigJSON) generisch beim Einrichten, Steuerzeichen bereinigt', async () => {
     let seen = null;
     const deps = fakeDeps({
       readFile: () => `wwv_flow_api.create_plugin(\n p_name=>'MY.PLUGIN.1'\n,p_display_name=>'My Plugin'\n,p_api_version=>1\n,p_standard_attributes=>'SOURCE_SQL'\n);\ncreate_plugin_attribute(\n p_attribute_sequence=>1\n,p_prompt=>'ConfigJSON'\n,p_default_value=>'{"a":\nfoo}'\n);`,
-      uiSetPluginAttributes: async (_p, arg) => { seen = arg; return { ok: true, results: arg.attributes.map((a) => ({ label: a.label, set: true })) }; },
+      uiCreateTestPage: async (_p, arg) => { seen = arg; return { ok: true, mode: 'create' }; },
     });
     const r = await deployAndTest({ exportFile: 'plugin.sql', target }, deps);
     expect(r.ok).toBe(true);
     expect(seen.regionName).toBe('Test: MY.PLUGIN.1');
-    expect(seen.attributes[0].label).toBe('ConfigJSON');
+    expect(seen.attributes[0].prompt).toBe('ConfigJSON');
     expect(seen.attributes[0].value).not.toMatch(/[\x00-\x1f]/); // Steuerzeichen → Space
   });
 

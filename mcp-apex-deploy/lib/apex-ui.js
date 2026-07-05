@@ -125,6 +125,113 @@ export async function uiSetPluginFileUrls(page, o = {}) {
   return { ok: true, js: jsRes, css: cssRes, applied };
 }
 
+const rxEsc = (s) => String(s).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+const rxi = (s) => new RegExp(rxEsc(s), 'i');
+
+/** Property im Page-Designer-Property-Editor per Label setzen (Text→apex.item, Select→Options-Text→Value). */
+async function pdSetProp(page, label, value) {
+  return page.evaluate(({ label, value }) => {
+    const pr = [...document.querySelectorAll('.a-Property')].find((e) => (e.querySelector('.a-Property-label')?.innerText || '').trim() === label);
+    if (!pr) return 'no-prop';
+    const inp = pr.querySelector('input,textarea,select'); if (!inp || !inp.id) return 'no-input';
+    let v = value;
+    if (inp.tagName === 'SELECT') { const opt = [...inp.options].find((o) => o.text.trim().toLowerCase() === String(value).toLowerCase() || o.text.trim().toLowerCase().includes(String(value).toLowerCase())); if (!opt) return 'no-option'; v = opt.value; }
+    try { if (window.apex && apex.item(inp.id) && apex.item(inp.id).node) { apex.item(inp.id).setValue(v); inp.dispatchEvent(new Event('change', { bubbles: true })); return 'ok'; } } catch (e) { return 'err:' + e.message; }
+    return 'noitem';
+  }, { label, value });
+}
+
+/**
+ * Baut eine Testseite komplett im PAGE DESIGNER (statt des in dieser Instanz WAF-blockierten Wizard-Imports,
+ * B-30): Create-Page-Wizard (Blank) → Plugin-Region per jQuery-UI-Maus-Drag aus der Regions-Gallery →
+ * Region-Name + SQL-Quelle + Custom-Attribute (ConfigJSON etc.) → Seite öffentlich → Save-Button. Existiert
+ * die Seite schon (gleiches Plugin), wird sie WIEDERVERWENDET (Region aktualisiert statt neu angelegt).
+ * @param {{appId:number|string, pageId:number|string, pageName:string, pluginDisplayName:string,
+ *          regionName:string, sourceSql?:string, attributes?:Array<{prompt:string,value:string}>}} o
+ */
+export async function uiCreateTestPage(page, o = {}) {
+  // Großes, festes Viewport → Layout/Gallery-Positionen sind vorhersehbar (der Region-Drag arbeitet mit
+  // echten Maus-Koordinaten; ein kleines/Default-Viewport verfehlt die Body-Fläche).
+  await page.setViewportSize({ width: 1500, height: 950 }).catch(() => {});
+  const settle = async (ms = 1500) => { await page.waitForLoadState('networkidle').catch(() => {}); await page.waitForTimeout(ms); };
+  const wizFrame = () => page.frames().find((f) => f !== page.mainFrame());
+  const appTile = page.locator(`a[href*="fb_flow_id=${o.appId}"]`);
+  if (!(await appTile.count())) return { ok: false, error: `App ${o.appId} nicht gefunden.` };
+  await appTile.first().click(); await settle();
+
+  // Existiert die Seite schon? → wiederverwenden (Page Designer öffnen), sonst Create-Page-Wizard.
+  const existing = page.getByRole('link', { name: new RegExp(`\\b${o.pageId}\\b`) });
+  let mode = 'reuse';
+  if (await existing.count()) {
+    await existing.first().click(); await settle(2500);
+  } else {
+    mode = 'create';
+    await page.getByRole('button', { name: /create page/i }).first().click(); await page.waitForTimeout(3500);
+    let fr = wizFrame();
+    if (!fr) return { ok: false, error: 'Create-Page-Wizard nicht geöffnet.' };
+    await fr.getByText(/^Blank Page$/i).first().click().catch(() => {});
+    await fr.getByRole('button', { name: /^Next/i }).first().click().catch(() => {}); await page.waitForTimeout(2500);
+    fr = wizFrame() || fr;
+    await fr.evaluate(({ pg, nm }) => {
+      const byLbl = (re) => [...document.querySelectorAll('input')].find((i) => { const l = document.querySelector(`label[for='${i.id}']`); return l && re.test(l.innerText); });
+      const n = byLbl(/page number/i); if (n) { n.value = pg; try { apex.item(n.id).setValue(pg); } catch (e) { /* egal */ } }
+      const m = byLbl(/^name$/i); if (m) { m.value = nm; try { apex.item(m.id).setValue(nm); } catch (e) { /* egal */ } }
+    }, { pg: String(o.pageId), nm: o.pageName });
+    await page.waitForTimeout(500);
+    for (let i = 0; i < 4; i++) { const cr = fr.getByRole('button', { name: /^Create Page$|^Create$/i }); const nx = fr.getByRole('button', { name: /^Next/i }); if (await cr.count()) { await cr.first().click(); break; } else if (await nx.count()) { await nx.first().click(); } else break; await page.waitForTimeout(2000); fr = wizFrame() || fr; }
+    await settle(2500);
+  }
+  if (!new RegExp(`${o.appId}:${o.pageId}`).test(await page.title().catch(() => ''))) return { ok: false, error: 'Page Designer nicht geöffnet.' };
+
+  // Plugin-Region: existiert sie schon → im Baum selektieren, sonst per Drag aus der Regions-Gallery anlegen.
+  const regionNode = page.getByText(new RegExp(`^${rxEsc(o.regionName)}$`)).first();
+  if (await regionNode.count()) {
+    await regionNode.click(); await page.waitForTimeout(1000);
+  } else {
+    await page.locator('button:has-text("Regions"),[role=tab]:has-text("Regions")').first().click().catch(() => {}); await page.waitForTimeout(1000);
+    const src = page.locator('.a-Gallery-region').filter({ hasText: rxi(o.pluginDisplayName) }).first();
+    if (!(await src.count())) return { ok: false, error: `Plugin „${o.pluginDisplayName}" nicht in der Regions-Gallery (installiert?).` };
+    const sb = await src.boundingBox();
+    // Drop in die untere Body-Fläche der Layout-Ansicht (bewiesene Position). jQuery-UI-Draggable → echte
+    // Maus-Events: down → Threshold-Bewegung → in Schritten zum Ziel → up. Ziel bewusst OBERHALB der Gallery
+    // (die Gallery liegt unten ~y795; ein Ziel darunter verfehlt die Layout-Fläche und legt KEINE Region an).
+    const vp = page.viewportSize() || { width: 1500, height: 950 };
+    const tx = Math.round(vp.width * 0.57); // Layout-Panel-Mitte
+    const ty = Math.min(sb.y - 80, Math.round(vp.height * 0.72)); // Body-Fläche, klar über der Gallery
+    await page.mouse.move(sb.x + sb.width / 2, sb.y + sb.height / 2); await page.mouse.down();
+    await page.mouse.move(sb.x + sb.width / 2 + 8, sb.y + sb.height / 2 + 8); await page.waitForTimeout(200);
+    for (let i = 1; i <= 12; i++) { await page.mouse.move(sb.x + (tx - sb.x) * i / 12, sb.y + (ty - sb.y) * i / 12); await page.waitForTimeout(60); }
+    await page.mouse.move(tx, ty); await page.waitForTimeout(400); await page.mouse.up();
+    await page.waitForTimeout(2500);
+    // Verifizieren, dass eine Plugin-Region entstand (sonst hat der Drop die Layout-Fläche verfehlt).
+    if (!(await page.getByText(new RegExp(`^${rxEsc(o.regionName)}$`)).count()) && !(await page.locator('.a-Property').filter({ hasText: /SQL Query/ }).count())) {
+      return { ok: false, error: 'Plugin-Region-Drag verfehlte die Body-Fläche (keine Region angelegt).' };
+    }
+  }
+
+  // Region konfigurieren. Zuerst Name → dann die Region über ihren neuen Namen im Baum RE-SELEKTIEREN,
+  // damit der Property-Editor sicher auf die Region zeigt (SQL Query/Custom-Attribute sind sonst nach dem
+  // Drag zeitweise nicht im DOM → „no-prop").
+  const rName = await pdSetProp(page, 'Name', o.regionName);
+  await page.getByText(new RegExp(`^${rxEsc(o.regionName)}$`)).first().click().catch(() => {});
+  await page.waitForTimeout(900);
+  const rSql = o.sourceSql ? await pdSetProp(page, 'SQL Query', o.sourceSql) : 'skip';
+  const attrs = [];
+  for (const a of (o.attributes || [])) { if (a && a.prompt && a.value != null && a.value !== '') attrs.push({ prompt: a.prompt, r: await pdSetProp(page, a.prompt, a.value) }); }
+
+  // Seite öffentlich machen (Page-Root selektieren → „Authentication" = Page Is Public).
+  await page.locator('.a-TreeView-label').filter({ hasText: rxi(`Page ${o.pageId}`) }).first().click().catch(() => {}); await page.waitForTimeout(700);
+  const auth = await pdSetProp(page, 'Authentication', 'Page Is Public');
+
+  // Speichern über den Save-Button (Strg+S feuert headless nicht zuverlässig).
+  await page.waitForTimeout(400);
+  await page.locator('#pdSave, button:has-text("Save")').first().click().catch(() => {});
+  await settle(2500);
+  const body = (await page.locator('body').innerText().catch(() => '')).replace(/\s+/g, ' ');
+  const saveError = (body.match(/ORA-\d+[^.]{0,100}|could not be saved|processing failed/i) || [])[0] || null;
+  return { ok: rName === 'ok' && (rSql === 'ok' || rSql === 'skip') && !saveError, mode, region: { name: rName, sql: rSql }, attributes: attrs, auth, saveError };
+}
+
 /**
  * Setzt Plugin-Region-Attribute (z.B. ConfigJSON) über den PAGE DESIGNER — der zuverlässige Weg,
  * weil der Seiten-Import-Wizard p_attribute_NN nicht persistiert (B-28). Öffnet die Seite im Page

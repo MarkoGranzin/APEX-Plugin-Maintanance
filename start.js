@@ -62,7 +62,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const DATA_DIR = process.env.AISPP_DATA_DIR || path.join(__dirname, 'data');
 // Build-Marker: muss mit APP_BUILD in public/app.html übereinstimmen. Bei Backend-Änderungen erhöhen.
 // Das Frontend vergleicht beide und warnt, wenn der laufende Dienst veraltet ist (Neustart nötig).
-const BUILD = '2026-07-05.71';
+const BUILD = '2026-07-05.72';
 const C = { reset: '\x1b[0m', bold: '\x1b[1m', dim: '\x1b[2m', green: '\x1b[32m', yellow: '\x1b[33m', red: '\x1b[31m', cyan: '\x1b[36m' };
 const c = (col, s) => `${C[col]}${s}${C.reset}`;
 
@@ -704,9 +704,20 @@ function cmdServe(portArg) {
       const exportFile = findPluginExport(c.path);
       if (!exportFile) return json(res, { ok: false, error: 'Keine Plugin-Export-SQL im Repo gefunden (Repo zuordnen?).' }, 200);
       const body = await readBody(req).catch(() => ({}));
-      setStep(c.id, 'APEX: einspielen & testen…');
-      const r = await deployAndTest({ exportFile, sourceSql: body?.sourceSql, target: { baseUrl: t.baseUrl, workspace: t.workspace, user: t.loginUser, pass, appId: Number(t.appId), alias: t.alias, workspaceId: t.workspaceId, owner: t.owner, release: t.release } });
-      try { store.addReview(c.id, { kind: 'apex-live', pass: r.ok, rendered: !!r.render?.rendered, apexError: r.render?.apexError || null, url: r.render?.url || null, plugin: r.plugin }); } catch { /* egal */ }
+      // Pro-Plugin-Seiten-Register: jedes Plugin bekommt eine EIGENE Testseite, die für dasselbe Plugin
+      // wiederverwendet wird (kein Überschreiben fremder Plugins). Neue Seiten fortlaufend ab 9001.
+      let pageId = c.apexPageId;
+      if (!pageId) {
+        const used = new Set(store.list().map((x) => x.apexPageId).filter(Boolean));
+        let next = Number(t.nextPageId) || 9001;
+        while (used.has(next)) next += 1;
+        pageId = next;
+        try { store.update(c.id, { apexPageId: pageId }); } catch { /* egal */ }
+        try { settings.apexTarget = { ...(settings.apexTarget || {}), nextPageId: pageId + 1 }; saveSettings(); } catch { /* egal */ }
+      }
+      setStep(c.id, `APEX: einrichten & testen (Seite ${pageId})…`);
+      const r = await deployAndTest({ exportFile, pageId, sourceSql: body?.sourceSql, target: { baseUrl: t.baseUrl, workspace: t.workspace, user: t.loginUser, pass, appId: Number(t.appId), alias: t.alias, workspaceId: t.workspaceId, owner: t.owner, release: t.release } });
+      try { store.addReview(c.id, { kind: 'apex-live', pass: r.ok, rendered: !!r.render?.rendered, apexError: r.render?.apexError || null, url: r.render?.url || null, plugin: r.plugin, pageId }); } catch { /* egal */ }
       // Passwort/Verbindung nie ins Ergebnis spiegeln (deployAndTest gibt es ohnehin nicht zurück).
       return json(res, r, 200);
     });

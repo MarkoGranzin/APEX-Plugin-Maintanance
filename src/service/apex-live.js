@@ -17,7 +17,7 @@ import os from 'node:os';
 import path from 'node:path';
 
 import { analyzePlugin, buildTestPageSql, pluginLoadFiles, parsePluginName } from '../../mcp-apex-deploy/lib/apex.js';
-import { loadChromium, uiLogin, uiImportFile, uiSetPluginFileUrls, uiSetPluginAttributes, smokeCheckPage } from '../../mcp-apex-deploy/lib/apex-ui.js';
+import { loadChromium, uiLogin, uiImportFile, uiSetPluginFileUrls, uiCreateTestPage, smokeCheckPage } from '../../mcp-apex-deploy/lib/apex-ui.js';
 
 const parseDisplayName = (sql) => { const m = String(sql || '').match(/p_display_name=>'((?:[^']|'')*)'/i); return m ? m[1].replace(/''/g, "'").trim() : null; };
 
@@ -42,7 +42,7 @@ export function findPluginExport(dir, opts = {}) {
  */
 export async function deployAndTest(o = {}, deps = {}) {
   const d = {
-    loadChromium, uiLogin, uiImportFile, uiSetPluginFileUrls, uiSetPluginAttributes, smokeCheckPage,
+    loadChromium, uiLogin, uiImportFile, uiSetPluginFileUrls, uiCreateTestPage, smokeCheckPage,
     analyzePlugin, buildTestPageSql, pluginLoadFiles,
     readFile: (f) => fs.readFileSync(f, 'utf8'),
     exists: (f) => fs.existsSync(f),
@@ -81,41 +81,24 @@ export async function deployAndTest(o = {}, deps = {}) {
       result.fileUrls = await d.uiSetPluginFileUrls(page, { appId, displayName: an.displayName || parseDisplayName(exportSql), jsUrls, cssUrls });
     }
 
-    // 3) Analyse-getriebene Testseite bauen + einspielen.
-    const sql = d.buildTestPageSql({
-      appId, pageId, pageName: o.pageName || `Live-Test: ${an.internalName}`,
-      pluginInternalName: an.internalName, sourceTypePrefix: an.sourceTypePrefix,
-      needsAjaxItem: an.usesAjaxItemsToSubmit,
-      // Alle Custom-Attribute mit Default setzen (generisch) → Region wie beim Hinzufügen im Builder vorbelegt.
-      // Steuerzeichen aus dem Default werden zu Leerzeichen (JSON-sicher); Format: direkte p_attribute_NN-Params.
-      attributes: Object.fromEntries(
-        (an.customAttributes || [])
-          .filter((a) => a.default != null && a.default !== '')
-          .map((a) => [a.key, String(a.default).replace(/[\x00-\x1f]+/g, ' ')]),
-      ),
-      // Eigene Datenquelle vom Aufrufer, sonst die plugin-eigene Beispiel-Query (SOURCE_SQL-Default) →
-      // SOURCE_SQL-Plugins rendern auch ohne manuelle SQL echte Daten statt „no data found".
-      sourceSql: o.sourceSql || (an.hasSourceSql ? an.defaultSourceSql : undefined) || undefined,
-      workspaceId: t.workspaceId, owner: t.owner, release: t.release,
-    });
-    const tmp = d.writeTmp(`page_${pageId}.sql`, sql);
-    result.testPage = await d.uiImportFile(page, tmp, { appId });
-
-    // 3b) Plugin-Attribute (ConfigJSON etc.) im Page Designer setzen — der Import-Wizard persistiert
-    //     p_attribute_NN nicht (B-28). Generisch je Custom-Attribut anhand seines Prompts.
+    // 3) Testseite im PAGE DESIGNER bauen — ersetzt den in dieser Instanz WAF-blockierten Wizard-Import (B-30):
+    //    Create-Page (Blank) → Plugin-Region per Drag → Region-Name + SQL-Quelle + Custom-Attribute (ConfigJSON)
+    //    → Seite öffentlich → Save. Existiert die Seite schon (gleiches Plugin), wird sie wiederverwendet.
+    //    Auf FRISCHER, eingeloggter Seite → sauberer Navigationsstart, unabhängig vom Zustand nach Install.
+    const sourceSql = o.sourceSql || (an.hasSourceSql ? an.defaultSourceSql : undefined) || undefined;
     const pdAttrs = (an.customAttributes || [])
       .filter((a) => a.default != null && a.default !== '' && a.prompt)
-      .map((a) => ({ label: a.prompt, value: String(a.default).replace(/[\x00-\x1f]+/g, ' ') }));
-    if (pdAttrs.length && d.uiSetPluginAttributes) {
-      // Frische, frisch eingeloggte Seite → sauberer Navigationsstart (App-Kachel vorhanden),
-      // unabhängig davon, wo die Import-Schritte `page` zurücklassen.
-      const pdPage = await browser.newPage();
-      const pdLogin = await d.uiLogin(pdPage, cfg);
-      result.pluginConfig = pdLogin.ok
-        ? await d.uiSetPluginAttributes(pdPage, { appId, pageId, regionName: `Test: ${an.internalName}`, attributes: pdAttrs })
-        : { ok: false, error: 'Login für Page-Designer-Schritt fehlgeschlagen.' };
-      await pdPage.close().catch(() => {});
-    }
+      .map((a) => ({ prompt: a.prompt, value: String(a.default).replace(/[\x00-\x1f]+/g, ' ') }));
+    const pdPage = await browser.newPage();
+    const pdLogin = await d.uiLogin(pdPage, cfg);
+    result.testPage = pdLogin.ok
+      ? await d.uiCreateTestPage(pdPage, {
+        appId, pageId, pageName: o.pageName || `Live-Test: ${an.internalName}`,
+        pluginDisplayName: an.displayName || parseDisplayName(exportSql) || an.internalName,
+        regionName: `Test: ${an.internalName}`, sourceSql, attributes: pdAttrs,
+      })
+      : { ok: false, error: 'Login für Page-Designer-Schritt fehlgeschlagen.' };
+    await pdPage.close().catch(() => {});
 
     // 4) Render-Smoke-Test über die Friendly-URL (öffentliche Testseite).
     const base = t.baseUrl.replace(/\/$/, '');
