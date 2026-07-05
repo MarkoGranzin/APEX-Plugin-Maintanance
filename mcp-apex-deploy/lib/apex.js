@@ -107,6 +107,23 @@ export function analyzePlugin(sqlText) {
   }
   // „Config/JSON"-Attribut heuristisch (Prompt enthält JSON/Config), sonst erstes Attribut.
   const cfg = customAttributes.find((a) => /json|config/i.test(a.prompt)) || customAttributes[0] || null;
+
+  // Beispiel-/Default-Query der SOURCE_SQL-Standard-Attribute (create_plugin_std_attribute p_name='SOURCE_SQL').
+  // Dient als Fallback-Datenquelle für die Testseite, wenn der Aufrufer keine eigene SQL übergibt — so rendert
+  // ein SOURCE_SQL-Plugin auch über den GUI-Button mit echten Daten (statt „no data found").
+  let defaultSourceSql = null;
+  if (/p_name=>'SOURCE_SQL'/i.test(t)) {
+    const tail = t.slice(t.search(/p_name=>'SOURCE_SQL'/i));
+    const joinM = tail.match(/p_default_value=>wwv_flow_string\.join\(wwv_flow_t_varchar2\(([\s\S]*?)\)\)/i);
+    const litM = tail.match(/p_default_value=>'((?:[^']|'')*)'/i);
+    if (joinM) {
+      const parts = [...joinM[1].matchAll(/'((?:[^']|'')*)'/g)].map((x) => x[1].replace(/''/g, "'"));
+      defaultSourceSql = parts.length ? parts.join('\n').trim() : null;
+    } else if (litM) {
+      defaultSourceSql = litM[1].replace(/''/g, "'").trim();
+    }
+  }
+
   return {
     internalName, displayName: (g(/p_display_name=>'((?:[^']|'')*)'/i, head) || '').replace(/''/g, "'").trim() || null,
     apiVersion,
@@ -118,6 +135,7 @@ export function analyzePlugin(sqlText) {
     customAttributes,
     configAttributeKey: cfg?.key || null,
     configDefault: cfg?.default || null,
+    defaultSourceSql,
   };
 }
 

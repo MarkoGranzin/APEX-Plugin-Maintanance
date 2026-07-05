@@ -40,6 +40,17 @@ describe('T-135 apex-live: Einspielen + Testseite + Render-Verify (orchestriert)
     expect(r.pluginConfig.ok).toBe(true);
   });
 
+  it('ohne eigene SQL → nutzt die plugin-eigene SOURCE_SQL-Beispielquery als Datenquelle', async () => {
+    let sqlArg;
+    const deps = fakeDeps({
+      readFile: () => `wwv_flow_api.create_plugin(\n p_name=>'BAR.1'\n,p_api_version=>1\n,p_standard_attributes=>'SOURCE_SQL:AJAX_ITEMS_TO_SUBMIT'\n);\nwwv_flow_api.create_plugin_std_attribute(\n p_name=>'SOURCE_SQL'\n,p_default_value=>wwv_flow_string.join(wwv_flow_t_varchar2(\n'SELECT 1 AS TITLE, 99 AS VALUE FROM DUAL'))\n);`,
+      buildTestPageSql: (o) => { sqlArg = o.sourceSql; return 'PAGE SQL'; },
+    });
+    const r = await deployAndTest({ exportFile: 'plugin.sql', target /* KEIN sourceSql */ }, deps);
+    expect(r.ok).toBe(true);
+    expect(sqlArg).toMatch(/SELECT 1 AS TITLE, 99 AS VALUE FROM DUAL/);
+  });
+
   it('setzt Plugin-Attribute (ConfigJSON) generisch im Page Designer, Steuerzeichen bereinigt', async () => {
     let seen = null;
     const deps = fakeDeps({

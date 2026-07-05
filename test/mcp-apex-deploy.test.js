@@ -132,6 +132,31 @@ describe('F-31 T-129 apex-deploy: generische Testseite (APEX 24.x-Format)', () =
     expect(a.configDefault).toBe('{"a":1}');
   });
 
+  it('analyzePlugin: extrahiert die SOURCE_SQL-Beispielquery als defaultSourceSql (Fallback-Datenquelle)', () => {
+    const exp = [
+      `wwv_flow_api.create_plugin(`,
+      ` p_name=>'BAR.CHART'`,
+      `,p_api_version=>1`,
+      `,p_standard_attributes=>'SOURCE_SQL:AJAX_ITEMS_TO_SUBMIT'`,
+      `);`,
+      `wwv_flow_api.create_plugin_std_attribute(`,
+      ` p_name=>'SOURCE_SQL'`,
+      `,p_default_value=>wwv_flow_string.join(wwv_flow_t_varchar2(`,
+      `'SELECT',`,
+      `'    ''A'' AS TITLE,',`,
+      `'    42 AS VALUE',`,
+      `'FROM DUAL'))`,
+      `,p_sql_min_column_count=>1`,
+      `);`,
+    ].join('\n');
+    const a = analyzePlugin(exp);
+    expect(a.hasSourceSql).toBe(true);
+    expect(a.defaultSourceSql).toMatch(/SELECT/);
+    expect(a.defaultSourceSql).toContain("'A' AS TITLE"); // '' → ' korrekt entpackt
+    expect(a.defaultSourceSql).toContain('42 AS VALUE');
+    expect(a.defaultSourceSql).toContain('FROM DUAL');
+  });
+
   it('analyzePlugin: api_version 2 → NATIVE_PLUGIN_; ohne AJAX_ITEMS_TO_SUBMIT → false', () => {
     const a = analyzePlugin(`p_name=>'X.Y'\n,p_api_version=>2\n,p_standard_attributes=>'SOURCE_SQL'`);
     expect(a.sourceTypePrefix).toBe('NATIVE_PLUGIN_');

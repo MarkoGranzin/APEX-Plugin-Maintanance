@@ -93,7 +93,9 @@ export async function deployAndTest(o = {}, deps = {}) {
           .filter((a) => a.default != null && a.default !== '')
           .map((a) => [a.key, String(a.default).replace(/[\x00-\x1f]+/g, ' ')]),
       ),
-      sourceSql: o.sourceSql,
+      // Eigene Datenquelle vom Aufrufer, sonst die plugin-eigene Beispiel-Query (SOURCE_SQL-Default) →
+      // SOURCE_SQL-Plugins rendern auch ohne manuelle SQL echte Daten statt „no data found".
+      sourceSql: o.sourceSql || (an.hasSourceSql ? an.defaultSourceSql : undefined) || undefined,
       workspaceId: t.workspaceId, owner: t.owner, release: t.release,
     });
     const tmp = d.writeTmp(`page_${pageId}.sql`, sql);
