@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { spawn } from 'node:child_process';
 import path from 'node:path';
 import { buildInstallScript, buildTestPageSql, parsePluginName, maskConn, pluginLoadFiles, analyzePlugin } from '../mcp-apex-deploy/lib/apex.js';
+import * as apexUi from '../mcp-apex-deploy/lib/apex-ui.js';
 
 describe('F-31 T-128 apex-deploy: Install-Skript & Sicherheit', () => {
   it('Install-Skript setzt den APEX-Kontext generisch (workspace, appId, offset, Datei, commit)', () => {
@@ -136,6 +137,17 @@ describe('F-31 T-129 apex-deploy: generische Testseite (APEX 24.x-Format)', () =
     expect(sql).toContain(`p_plug_source_type=>'PLUGIN_X'`);
     expect(sql).toMatch(/p_ajax_items_to_submit=>'P500_AJAX'/);
     expect(sql).toMatch(/create_page_item\(/);
+  });
+
+  it('apex-ui.js: wiederverwendbare UI-Automation ist importierbar (für Plugin Maintenance)', () => {
+    for (const fn of ['loadChromium', 'uiLogin', 'uiImportFile', 'uiSetPluginFileUrls', 'smokeCheckPage']) {
+      expect(typeof apexUi[fn]).toBe('function');
+    }
+  });
+
+  it('uiLogin: unvollständige Config → klarer Fehler (ohne Browser)', async () => {
+    expect((await apexUi.uiLogin(null, { baseUrl: '' })).error).toMatch(/baseUrl/);
+    expect((await apexUi.uiLogin(null, { baseUrl: 'x', workspace: 'w' })).error).toMatch(/user|pass/i);
   });
 
   it('ohne pluginInternalName/appId → klarer Fehler', () => {

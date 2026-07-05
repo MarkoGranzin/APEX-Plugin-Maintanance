@@ -22,11 +22,13 @@ import { spawn } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { pathToFileURL } from 'node:url';
 import { buildInstallScript, buildTestPageSql, parsePluginName, maskConn, pluginLoadFiles, analyzePlugin } from './lib/apex.js';
+import { loadChromium, uiLogin, uiImportFile, uiSetPluginFileUrls, smokeCheckPage } from './lib/apex-ui.js';
 
 /** Anzeigename (p_display_name) aus einem Plugin-Export lesen — zum Auffinden in der Plug-ins-Liste. */
 const parsePluginDisplayName = (sqlText) => { const m = String(sqlText || '').match(/p_display_name=>'((?:[^']|'')*)'/i); return m ? m[1].replace(/''/g, "'").trim() : null; };
+/** Verbindungs-Config aus ENV + optionalem Workspace-Override (Passwort aus env, nie in Ausgaben). */
+const uiCfg = (a = {}) => ({ baseUrl: ENV.baseUrl, workspace: a.workspace || ENV.workspace, user: process.env.APEX_LOGIN_USER, pass: process.env.APEX_LOGIN_PASS });
 
 const ENV = {
   sqlcl: process.env.APEX_SQLCL || 'sql',
@@ -40,82 +42,8 @@ const ENV = {
   release: process.env.APEX_RELEASE || '24.2',
 };
 
-// Gemeinsamer app-interner Import über die APEX-UI (Export/Import → Import → Upload → primäre Aktion durchklicken).
-// Funktioniert für Plug-in- UND Seiten-Importe; erkennt Erfolg bzw. Replace-Bestätigung. Session bleibt via Klicks erhalten.
-async function uiImportFile(page, filePath, o = {}) {
-  const clickFirst = async (locs) => { for (const l of locs) { if (await l.count()) { await l.first().click(); await page.waitForLoadState('networkidle').catch(() => {}); await page.waitForTimeout(1000); return true; } } return false; };
-  const appId = o.appId ?? ENV.appId;
-  const appTile = page.locator(`a[href*="fb_flow_id=${appId}"]`);
-  if (!(await appTile.count())) return { ok: false, error: `App ${appId} nicht gefunden.` };
-  await appTile.first().click(); await page.waitForLoadState('networkidle').catch(() => {}); await page.waitForTimeout(1000);
-  if (o.viaPlugins) { // Plug-in-Import: Shared Components → Plug-ins → Import
-    await clickFirst([page.getByRole('link', { name: /shared components/i }), page.getByText(/shared components/i)]);
-    await clickFirst([page.getByRole('link', { name: /^plug-?ins$/i }), page.getByText(/^plug-?ins$/i)]);
-    await clickFirst([page.getByRole('link', { name: /^import$/i }), page.getByRole('button', { name: /^import$/i }), page.getByText(/^import$/i)]);
-  } else { // Seiten-/Komponenten-Import: Export / Import → Import
-    await clickFirst([page.getByRole('link', { name: /export ?\/ ?import/i }), page.getByText(/export ?\/ ?import/i)]);
-    await clickFirst([page.getByRole('link', { name: /^import$/i }), page.getByRole('button', { name: /^import$/i }), page.getByText(/^import$/i)]);
-  }
-  const file = page.locator('input[type="file"]');
-  try { await file.first().waitFor({ state: 'attached', timeout: 15000 }); }
-  catch { return { ok: false, error: 'Upload-Feld nicht gefunden (Navigation weicht ab).' }; }
-  await file.first().setInputFiles(filePath);
-  const steps = [];
-  for (let i = 0; i < 8; i++) {
-    const hot = page.locator('button.a-Button--hot, a.a-Button--hot').filter({ hasText: /\S/ });
-    try { await hot.first().waitFor({ state: 'visible', timeout: 20000 }); } catch { break; }
-    const label = (await hot.first().innerText().catch(() => '')).trim();
-    steps.push(label);
-    await hot.first().click(); await page.waitForLoadState('networkidle').catch(() => {}); await page.waitForTimeout(2000);
-    const title = await page.locator('title').first().innerText().catch(() => '');
-    if (/edit page|page designer|pages -|plug-?ins$/i.test(title)) break; // im Ziel gelandet
-  }
-  const body = (await page.locator('body').innerText().catch(() => '')).replace(/\s+/g, ' ');
-  const oraErr = (body.match(/ORA-\d+[^.]{0,120}|PLS-\d+[^.]{0,120}/i) || [])[0] || null;
-  const ok = !oraErr && /installed|imported|installiert|created|erstellt|plug-?in installed|checksum/i.test(body) === true;
-  return { ok: !oraErr, steps, oraError: oraErr, resultTitle: await page.locator('title').first().innerText().catch(() => '') };
-}
-
-/**
- * Setzt die „File URLs to Load" (JS + CSS) eines installierten Plugins über die APEX-UI, damit APEX die
- * Plugin-Dateien automatisch lädt (alte 19.1-Plugins laden sonst per ADD_LIBRARY mit brüchigen URLs).
- * Navigiert App → Shared Components → Plug-ins → <Plugin> und füllt P4410_JAVASCRIPT_FILE_URLS/_CSS_FILE_URLS.
- * Standard: nur leere Felder füllen (manuelle Einstellungen nicht überschreiben; overwrite=true erzwingt).
- */
-async function uiSetPluginFileUrls(page, o = {}) {
-  const clickFirst = async (locs) => { for (const l of locs) { if (await l.count()) { await l.first().click(); await page.waitForLoadState('networkidle').catch(() => {}); await page.waitForTimeout(1000); return true; } } return false; };
-  const appId = o.appId ?? ENV.appId;
-  const appTile = page.locator(`a[href*="fb_flow_id=${appId}"]`);
-  if (!(await appTile.count())) return { ok: false, error: `App ${appId} nicht gefunden.` };
-  await appTile.first().click(); await page.waitForLoadState('networkidle').catch(() => {}); await page.waitForTimeout(800);
-  await clickFirst([page.getByRole('link', { name: /shared components/i }), page.getByText(/shared components/i)]);
-  await clickFirst([page.getByRole('link', { name: /^plug-?ins$/i }), page.getByText(/^plug-?ins$/i)]);
-  // Plugin per Anzeigename öffnen (Fallback: erster Plug-in-Link).
-  const nameRe = o.displayName ? new RegExp(o.displayName.trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i') : null;
-  let opened = false;
-  if (nameRe) opened = await clickFirst([page.getByRole('link', { name: nameRe })]);
-  if (!opened) return { ok: false, error: `Plugin „${o.displayName || '?'}" in der Liste nicht gefunden.` };
-  await page.waitForTimeout(800);
-  // Felder setzen (value + Events; Felder liegen oft in eingeklapptem Abschnitt → über JS setzen).
-  const setField = async (id, urls) => {
-    if (!urls?.length) return { field: id, skipped: 'keine Dateien' };
-    return page.evaluate(({ id, val, overwrite }) => {
-      const t = document.getElementById(id); if (!t) return { field: id, error: 'Feld fehlt' };
-      if (t.value && t.value.trim() && !overwrite) return { field: id, skipped: 'bereits gesetzt' };
-      t.value = val; t.dispatchEvent(new Event('input', { bubbles: true })); t.dispatchEvent(new Event('change', { bubbles: true }));
-      try { if (window.apex && apex.item) apex.item(id).setValue(val); } catch (e) { /* egal */ }
-      return { field: id, set: true, count: val.split('\n').filter(Boolean).length };
-    }, { id, val: urls.join('\n'), overwrite: !!o.overwrite });
-  };
-  const jsRes = await setField('P4410_JAVASCRIPT_FILE_URLS', o.jsUrls);
-  const cssRes = await setField('P4410_CSS_FILE_URLS', o.cssUrls);
-  let applied = false;
-  if (jsRes.set || cssRes.set) {
-    for (const b of [page.getByRole('button', { name: /apply changes/i }), page.locator('button:has-text("Apply Changes")')]) { if (await b.count()) { await b.first().click(); applied = true; break; } }
-    await page.waitForLoadState('networkidle').catch(() => {}); await page.waitForTimeout(1500);
-  }
-  return { ok: true, js: jsRes, css: cssRes, applied };
-}
+// Die APEX-UI-Automation (uiImportFile, uiSetPluginFileUrls, uiLogin, loadChromium, smokeCheckPage)
+// liegt jetzt in ./lib/apex-ui.js (wiederverwendbar durch Plugin Maintenance) und wird oben importiert.
 
 // ── SQLcl headless ausführen (Skript in Temp-Datei, -S = silent) ────────────────────────────
 function runSqlcl(script, opts = {}) {
@@ -135,43 +63,6 @@ function runSqlcl(script, opts = {}) {
       resolve({ ok: code === 0 && !/ORA-\d+|SP2-\d+|PLS-\d+/i.test(scrubbed), exitCode: code, output: scrubbed.slice(-6000) });
     });
   });
-}
-
-// ── Browser (Playwright) laden + generischer APEX-Workspace-Login ──────────────────────────────
-async function loadChromium() {
-  try { const m = await import(pathToFileURL(path.join(process.cwd(), 'node_modules', 'playwright', 'index.mjs')).href); return m.chromium; }
-  catch { try { return (await import('playwright')).chromium; } catch { return null; } }
-}
-/**
- * Meldet sich an der modernen APEX-Workspace-Sign-In-Seite an (Workspace + Database Username + Passwort).
- * Zugangsdaten aus env — das Passwort erreicht diesen Prozess nur lokal, nie den Aufrufer.
- */
-async function uiLogin(page, o = {}) {
-  const workspace = o.workspace || ENV.workspace;
-  const user = process.env.APEX_LOGIN_USER || '';
-  const pass = process.env.APEX_LOGIN_PASS || '';
-  if (!ENV.baseUrl) return { ok: false, error: 'APEX_BASE_URL nicht gesetzt.' };
-  if (!workspace || !user || !pass) return { ok: false, error: 'Login unvollständig — APEX_WORKSPACE, APEX_LOGIN_USER, APEX_LOGIN_PASS setzen.' };
-  await page.goto(`${ENV.baseUrl.replace(/\/$/, '')}/r/apex/app-builder/home`, { waitUntil: 'domcontentloaded', timeout: 30000 });
-  // Robuste, versionsunabhängige Feldsuche über Platzhalter/Rollen; danach Fallback auf klassische Item-IDs.
-  const fill = async (labels, ids, value) => {
-    for (const l of labels) { const loc = page.getByPlaceholder(l, { exact: false }); if (await loc.count()) { await loc.first().fill(value); return true; } }
-    for (const id of ids) { const loc = page.locator(id); if (await loc.count()) { await loc.first().fill(value); return true; } }
-    return false;
-  };
-  const isLogin = await page.getByPlaceholder('Workspace', { exact: false }).count();
-  if (isLogin) {
-    await fill(['Workspace'], ['#P9999_COMPANY', '#P101_COMPANY'], workspace);
-    await fill(['Database Username', 'Username'], ['#P9999_USERNAME', '#P101_USERNAME'], user);
-    await fill(['Password'], ['#P9999_PASSWORD', '#P101_PASSWORD'], pass);
-    const btn = page.getByRole('button', { name: /sign in|anmelden/i });
-    if (await btn.count()) await btn.first().click(); else await page.keyboard.press('Enter');
-    await page.waitForLoadState('networkidle', { timeout: 30000 }).catch(() => {});
-  }
-  const url = page.url();
-  const stillLogin = /sign-in|login/i.test(url) || (await page.getByPlaceholder('Password', { exact: false }).count()) > 0;
-  return stillLogin ? { ok: false, error: 'Login nicht erfolgreich — Workspace/Username/Passwort prüfen (evtl. Workspace=AP200000, Username=Meetup).', url }
-                    : { ok: true, url, workspace, user };
 }
 
 // ── Tools ────────────────────────────────────────────────────────────────────────────────────
@@ -238,7 +129,7 @@ const TOOLS = [
       const browser = await chromium.launch({ headless: true });
       try {
         const page = await browser.newPage();
-        const login = await uiLogin(page, a); if (!login.ok) return { ok: false, error: login.error };
+        const login = await uiLogin(page, uiCfg(a)); if (!login.ok) return { ok: false, error: login.error };
         const imp = await uiImportFile(page, tmp, { appId });
         return { ...imp, pageId, appId: Number(appId), analysis: derived._analysis, ajaxItem: opts.needsAjaxItem ? `P${pageId}_AJAX` : null, runtimeHint: `${ENV.baseUrl.replace(/\/$/, '')}/f?p=${appId}:${pageId}`, note: imp.oraError ? 'Import-Fehler — SQL/Instanz prüfen' : 'Seite eingespielt (bei „Replace"-Bestätigung wurde die bestehende Seite ersetzt).' };
       } finally { try { fs.rmSync(path.dirname(tmp), { recursive: true, force: true }); } catch { /* egal */ } await browser.close(); }
@@ -256,9 +147,8 @@ const TOOLS = [
     run: async (a) => {
       const url = a.url || (ENV.baseUrl && a.appId != null && a.pageId != null ? `${ENV.baseUrl.replace(/\/$/, '')}/f?p=${a.appId}:${a.pageId}` : null);
       if (!url) return { ok: false, error: 'url fehlt (oder APEX_BASE_URL + appId/pageId setzen).' };
-      let chromium;
-      try { ({ chromium } = await import(pathToFileURL(path.join(process.cwd(), 'node_modules', 'playwright', 'index.mjs')).href)); }
-      catch { try { ({ chromium } = await import('playwright')); } catch { return { ok: false, error: 'Playwright nicht installiert — Headless-Test kann nicht laufen (npm i playwright im Aufruf-Verzeichnis).' }; } }
+      const chromium = await loadChromium();
+      if (!chromium) return { ok: false, error: 'Playwright nicht installiert — Headless-Test kann nicht laufen (npm i playwright im Aufruf-Verzeichnis).' };
       const browser = await chromium.launch({ headless: true });
       try {
         const page = await browser.newPage();
@@ -269,25 +159,12 @@ const TOOLS = [
         // Generischer APEX-Login, falls die Login-Seite kommt und Credentials gesetzt sind.
         const user = process.env.APEX_LOGIN_USER, pass = process.env.APEX_LOGIN_PASS;
         if (user && pass && await page.locator('#P9999_USERNAME, #P101_USERNAME').count()) {
-          const u = page.locator('#P9999_USERNAME, #P101_USERNAME').first();
-          const p = page.locator('#P9999_PASSWORD, #P101_PASSWORD').first();
-          await u.fill(user); await p.fill(pass);
+          await page.locator('#P9999_USERNAME, #P101_USERNAME').first().fill(user);
+          await page.locator('#P9999_PASSWORD, #P101_PASSWORD').first().fill(pass);
           await page.keyboard.press('Enter');
           await page.waitForLoadState('domcontentloaded');
         }
-        await page.waitForTimeout(a.settleMs ?? 3500); // Plugin-Init/async-Render (mxGraph u.ä.) abwarten
-        const body = (await page.locator('body').innerText().catch(() => '')).replace(/\s+/g, ' ');
-        // APEX-Server-Fehlerseite ehrlich erkennen (ORA-/is_internal_error) — NICHT als grün durchwinken.
-        const apexError = /Error processing request|apex_error_code|ORA-\d{4,5}/i.test(body)
-          ? (body.match(/ORA-\d{4,5}: [^A-Z]{0,80}|apex_error_code: [\w.]+/i) || ['APEX-Fehlerseite'])[0] : null;
-        const sel = a.selector || 'body';
-        const visibleText = (await page.locator(sel).first().innerText().catch(() => '')).trim();
-        const hasGraphics = await page.locator('canvas, svg, .mxgraph, [class*="mx"]').count();
-        const stillLogin = /sign-in|\/login/i.test(page.url());
-        const ok = !apexError && !stillLogin && errors.length === 0 && (visibleText.length > 0 || hasGraphics > 0);
-        return { ok, url: page.url().replace(/session=\d+/, 'session=…'), apexError, needsLogin: stillLogin || undefined,
-                 jsErrors: errors.slice(0, 20), rendered: !apexError && (hasGraphics > 0), graphics: hasGraphics,
-                 note: apexError ? `APEX-Fehlerseite: ${apexError} — Plugin-Render schlug fehl (Region-/Laufzeit-Setup prüfen).` : (stillLogin ? 'Laufzeit verlangt App-Login (Seite nicht öffentlich?).' : undefined) };
+        return await smokeCheckPage(page, errors, { selector: a.selector, settleMs: a.settleMs });
       } finally { await browser.close(); }
     },
   },
@@ -312,7 +189,7 @@ const TOOLS = [
       const chromium = await loadChromium();
       if (!chromium) return { ok: false, error: 'Playwright nicht installiert.' };
       const browser = await chromium.launch({ headless: true });
-      try { const page = await browser.newPage(); const r = await uiLogin(page, a); return r; }
+      try { const page = await browser.newPage(); const r = await uiLogin(page, uiCfg(a)); return r; }
       finally { await browser.close(); }
     },
   },
@@ -336,7 +213,7 @@ const TOOLS = [
       const clickFirst = async (page, locators) => { for (const l of locators) { if (await l.count()) { await l.first().click(); await page.waitForLoadState('networkidle').catch(() => {}); await page.waitForTimeout(1000); return true; } } return false; };
       try {
         const page = await browser.newPage();
-        const login = await uiLogin(page, a); steps.push({ step: 'login', ok: login.ok, url: login.url });
+        const login = await uiLogin(page, uiCfg(a)); steps.push({ step: 'login', ok: login.ok, url: login.url });
         if (!login.ok) return { ok: false, steps, error: login.error };
         // App-internen Plug-in-Import ansteuern (verifizierter Pfad, moderne Friendly-URLs, Session bleibt durch Klicks erhalten):
         // App-Kachel (fb_flow_id=appId) → Shared Components → Plug-ins → Import.
@@ -396,7 +273,7 @@ const TOOLS = [
       const browser = await chromium.launch({ headless: true });
       try {
         const page = await browser.newPage();
-        const login = await uiLogin(page, a); if (!login.ok) return { ok: false, error: login.error };
+        const login = await uiLogin(page, uiCfg(a)); if (!login.ok) return { ok: false, error: login.error };
         const r = await uiSetPluginFileUrls(page, { appId: a.appId ?? ENV.appId, displayName: parsePluginDisplayName(sql), jsUrls, cssUrls, overwrite: a.overwrite });
         return { ...r, jsUrls, cssUrls };
       } finally { await browser.close(); }
