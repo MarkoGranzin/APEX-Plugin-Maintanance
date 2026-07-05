@@ -121,6 +121,68 @@ export async function uiSetPluginFileUrls(page, o = {}) {
 }
 
 /**
+ * Setzt Plugin-Region-Attribute (z.B. ConfigJSON) über den PAGE DESIGNER — der zuverlässige Weg,
+ * weil der Seiten-Import-Wizard p_attribute_NN nicht persistiert (B-28). Öffnet die Seite im Page
+ * Designer (session-erhaltend per Klick, KEIN goto), wählt die Region und setzt jedes Attribut
+ * anhand seines Property-Labels (= Plugin-Attribut-Prompt), dann Strg+S.
+ * @param {{appId:number|string, pageId:number|string, regionName:string,
+ *          attributes:Array<{label:string, value:string}>}} o
+ */
+export async function uiSetPluginAttributes(page, o = {}) {
+  const attrs = (o.attributes || []).filter((a) => a && a.label && a.value != null && a.value !== '');
+  if (!attrs.length) return { ok: true, skipped: 'keine Attribute' };
+  const appTile = page.locator(`a[href*="fb_flow_id=${o.appId}"]`);
+  if (!(await appTile.count())) return { ok: false, error: `App ${o.appId} nicht gefunden.` };
+  await appTile.first().click(); await page.waitForLoadState('networkidle').catch(() => {}); await page.waitForTimeout(1200);
+  // In der Pages-Liste die Seite anklicken → Page Designer (session-erhaltend).
+  let opened = false;
+  for (const l of [page.getByRole('link', { name: new RegExp(`\\b${o.pageId}\\b`) }), page.locator(`a:has-text("${o.pageId}")`)]) {
+    if (await l.count()) { await l.first().click(); opened = true; break; }
+  }
+  if (!opened) return { ok: false, error: `Seite ${o.pageId} in der Liste nicht gefunden.` };
+  await page.waitForLoadState('networkidle').catch(() => {}); await page.waitForTimeout(3500);
+  if (!new RegExp(`${o.appId}:${o.pageId}`).test(await page.title().catch(() => ''))) {
+    return { ok: false, error: 'Page Designer nicht geöffnet (Titel weicht ab).' };
+  }
+  // Region-Knoten im Rendering-Tree wählen → Property-Editor lädt die Plugin-Attribute.
+  const nameRe = new RegExp(`^${String(o.regionName).replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, 'i');
+  const node = page.getByText(nameRe);
+  if (!(await node.count())) return { ok: false, error: `Region „${o.regionName}" im Baum nicht gefunden.` };
+  await node.first().click(); await page.waitForTimeout(2000);
+  // Jedes Attribut anhand seines Property-Labels setzen (über die APEX-Item-API des Feldes).
+  const results = [];
+  for (const a of attrs) {
+    const res = await page.evaluate(({ label, value }) => {
+      const props = [...document.querySelectorAll('.a-Property')];
+      const p = props.find((el) => (el.querySelector('.a-Property-label')?.innerText || '').trim() === label);
+      if (!p) return { label, error: 'Property nicht gefunden' };
+      const inp = p.querySelector('textarea, input, select');
+      if (!inp || !inp.id) return { label, error: 'Feld ohne id' };
+      try {
+        if (window.apex && apex.item(inp.id) && apex.item(inp.id).node) {
+          apex.item(inp.id).setValue(value);
+          inp.dispatchEvent(new Event('change', { bubbles: true }));
+          inp.dispatchEvent(new Event('blur', { bubbles: true }));
+          return { label, set: true, id: inp.id };
+        }
+      } catch (e) { return { label, error: String(e.message || e) }; }
+      return { label, error: 'apex.item fehlt' };
+    }, { label: a.label, value: a.value });
+    results.push(res);
+  }
+  // Speichern (Strg+S), sonst Save-Button.
+  await page.waitForTimeout(800);
+  await page.keyboard.press('Control+s');
+  await page.waitForTimeout(2000);
+  const saveBtn = page.locator('#pdSave, button:has-text("Save")');
+  if (await saveBtn.count()) { await saveBtn.first().click().catch(() => {}); }
+  await page.waitForLoadState('networkidle').catch(() => {}); await page.waitForTimeout(2500);
+  const body = (await page.locator('body').innerText().catch(() => '')).replace(/\s+/g, ' ');
+  const saveError = (body.match(/ORA-\d+[^.]{0,120}|processing failed|could not be saved/i) || [])[0] || null;
+  return { ok: results.every((r) => r.set) && !saveError, results, saveError };
+}
+
+/**
  * Headless Render-Smoke-Test einer bereits geladenen Seite: erkennt APEX-Fehlerseiten (ORA-/
  * is_internal_error) und Login-Redirects ehrlich (kein False-Green) und prüft sichtbares Rendern.
  * Der Aufrufer navigiert zur URL und sammelt JS-Fehler (errors) via page.on('pageerror'/'console').
