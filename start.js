@@ -22,6 +22,7 @@ import { createHistory, recordRun, listRuns } from './src/report/history.js';
 import { createSettings, setApexTarget } from './src/config/settings.js';
 import { deployAndTest, findPluginExport } from './src/service/apex-live.js';
 import { loadChromium, uiLogin } from './mcp-apex-deploy/lib/apex-ui.js';
+import { buildSetupManifest } from './mcp-apex-deploy/lib/apex.js';
 import { createComponentStore } from './src/gui/store.js';
 import { apiHandler, metaApiHandler } from './src/gui/api.js';
 import { defaultGather } from './src/gui/components.js';
@@ -61,7 +62,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const DATA_DIR = process.env.AISPP_DATA_DIR || path.join(__dirname, 'data');
 // Build-Marker: muss mit APP_BUILD in public/app.html übereinstimmen. Bei Backend-Änderungen erhöhen.
 // Das Frontend vergleicht beide und warnt, wenn der laufende Dienst veraltet ist (Neustart nötig).
-const BUILD = '2026-07-05.70';
+const BUILD = '2026-07-05.71';
 const C = { reset: '\x1b[0m', bold: '\x1b[1m', dim: '\x1b[2m', green: '\x1b[32m', yellow: '\x1b[33m', red: '\x1b[31m', cyan: '\x1b[36m' };
 const c = (col, s) => `${C[col]}${s}${C.reset}`;
 
@@ -709,6 +710,22 @@ function cmdServe(portArg) {
       // Passwort/Verbindung nie ins Ergebnis spiegeln (deployAndTest gibt es ohnehin nicht zurück).
       return json(res, r, 200);
     });
+
+    // Setup-Manifest („Rezept") pro Plugin: alles zum Einrichten der Testseite, rein aus der Analyse.
+    // Wird auch als .maintenance/apex-setup.json abgelegt (für eine quasi-statische Einrichtung).
+    if (p.startsWith('/api/components/') && p.endsWith('/apex-setup') && req.method === 'GET') {
+      const id = p.split('/')[3];
+      const c = store.get(id);
+      if (!c) return json(res, { error: 'not found' }, 404);
+      const exportFile = c.path ? findPluginExport(c.path) : null;
+      if (!exportFile) return json(res, { error: 'Keine Plugin-Export-SQL im Repo gefunden (Repo zuordnen?).' }, 400);
+      try {
+        const sqlText = fs.readFileSync(exportFile, 'utf8');
+        const manifest = buildSetupManifest(sqlText);
+        try { const dir = path.join(c.path, '.maintenance'); fs.mkdirSync(dir, { recursive: true }); fs.writeFileSync(path.join(dir, 'apex-setup.json'), JSON.stringify(manifest, null, 2)); } catch { /* egal */ }
+        return json(res, manifest, 200);
+      } catch (e) { return json(res, { error: String(e?.message ?? e) }, 500); }
+    }
 
     if (p.startsWith('/api/components/') && p.endsWith('/rebuild-requirements') && req.method === 'POST') return withComponentRunning(async (c, id) => {
       const sl = slugify(c.name); const mockUrl = `http://localhost:${port}/mock/${sl}/index.html`;

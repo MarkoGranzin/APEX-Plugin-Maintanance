@@ -139,6 +139,47 @@ export function analyzePlugin(sqlText) {
   };
 }
 
+/**
+ * Setup-Manifest („Rezept") für EIN Plugin: alles, was zum Einrichten einer Testseite nötig ist —
+ * Region-Typ, benötigtes Page-Item + AJAX-Wiring, Datenquelle (eigene oder plugin-Beispielquery),
+ * Attribute mit Defaults, JS/CSS-File-URLs. Rein aus der Analyse abgeleitet (kein APEX nötig), sodass
+ * eine quasi-statische App / ein Page-Designer-Runner damit generisch einrichten kann.
+ * @param {string} sqlText  Plugin-Export-SQL
+ * @param {{pageId?:number, sourceSql?:string}} [opts]
+ */
+export function buildSetupManifest(sqlText, opts = {}) {
+  const a = analyzePlugin(sqlText);
+  const { jsUrls, cssUrls } = pluginLoadFiles(sqlText);
+  const pageId = Number(opts.pageId ?? 9999);
+  const ajaxItem = a.usesAjaxItemsToSubmit ? `P${pageId}_AJAX` : null;
+  const clean = (v) => (v != null ? String(v).replace(/[\x00-\x1f]+/g, ' ').trim() : null);
+  return {
+    manifestVersion: 1,
+    plugin: {
+      internalName: a.internalName,
+      displayName: a.displayName,
+      apiVersion: a.apiVersion,
+      regionSourceType: a.internalName ? `${a.sourceTypePrefix}${a.internalName}` : null,
+      hasAjaxCallback: a.hasAjaxCallback,
+    },
+    standardAttributes: a.standardAttributes,
+    testPage: {
+      id: pageId,
+      name: `Live-Test: ${a.internalName || 'plugin'}`,
+      isPublic: true,
+      region: { name: `Test: ${a.internalName || 'plugin'}`, plugin: a.displayName || a.internalName },
+      // Page-Item, das die Region über „Items to Submit" referenziert (Pflicht bei AJAX_ITEMS_TO_SUBMIT).
+      pageItem: ajaxItem ? { name: ajaxItem, type: 'Hidden', ajaxItemsToSubmit: true } : null,
+      // Datenquelle: eigene SQL des Aufrufers, sonst die plugin-eigene Beispielquery.
+      source: a.hasSourceSql ? { type: 'SQL Query', sql: opts.sourceSql || a.defaultSourceSql || null } : null,
+    },
+    // Region-Attribute (ConfigJSON etc.) — im Page Designer je Prompt-Label zu setzen.
+    attributes: (a.customAttributes || []).map((x) => ({ key: x.key, prompt: x.prompt, required: !!x.required, default: clean(x.default) })),
+    // File URLs to Load am Plugin (Shared Components → Plug-ins), #PLUGIN_FILES#-Referenzen.
+    fileUrls: { js: jsUrls, css: cssUrls },
+  };
+}
+
 /** Internal name / p_name des Plugins aus einem Export-SQL lesen (create_plugin-Aufruf). */
 export function parsePluginName(sqlText) {
   const call = String(sqlText || '').match(/create_plugin\s*\(([\s\S]*?)\)\s*;/i);

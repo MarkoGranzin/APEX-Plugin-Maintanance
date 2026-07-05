@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { spawn } from 'node:child_process';
 import path from 'node:path';
-import { buildInstallScript, buildTestPageSql, parsePluginName, maskConn, pluginLoadFiles, analyzePlugin } from '../mcp-apex-deploy/lib/apex.js';
+import { buildInstallScript, buildTestPageSql, parsePluginName, maskConn, pluginLoadFiles, analyzePlugin, buildSetupManifest } from '../mcp-apex-deploy/lib/apex.js';
 import * as apexUi from '../mcp-apex-deploy/lib/apex-ui.js';
 
 describe('F-31 T-128 apex-deploy: Install-Skript & Sicherheit', () => {
@@ -155,6 +155,34 @@ describe('F-31 T-129 apex-deploy: generische Testseite (APEX 24.x-Format)', () =
     expect(a.defaultSourceSql).toContain("'A' AS TITLE"); // '' → ' korrekt entpackt
     expect(a.defaultSourceSql).toContain('42 AS VALUE');
     expect(a.defaultSourceSql).toContain('FROM DUAL');
+  });
+
+  it('buildSetupManifest: „Rezept" mit Region-Typ, Page-Item/AJAX, Quelle, Attributen, File-URLs', () => {
+    const exp = [
+      `wwv_flow_api.create_plugin(`,
+      ` p_name=>'BAR.1'`,
+      `,p_display_name=>'Bar Plugin'`,
+      `,p_api_version=>1`,
+      `,p_standard_attributes=>'SOURCE_SQL:AJAX_ITEMS_TO_SUBMIT'`,
+      `);`,
+      `wwv_flow_api.create_plugin_attribute(`,
+      ` p_attribute_scope=>'COMPONENT'`,
+      `,p_attribute_sequence=>1`,
+      `,p_prompt=>'ConfigJSON'`,
+      `,p_default_value=>'{"a":1}'`,
+      `);`,
+      `wwv_flow_api.create_plugin_std_attribute(`,
+      ` p_name=>'SOURCE_SQL'`,
+      `,p_default_value=>'select 1 v from dual'`,
+      `);`,
+    ].join('\n');
+    const man = buildSetupManifest(exp, { pageId: 9999 });
+    expect(man.plugin.internalName).toBe('BAR.1');
+    expect(man.plugin.regionSourceType).toBe('PLUGIN_BAR.1'); // api_version 1
+    expect(man.testPage.pageItem).toMatchObject({ name: 'P9999_AJAX', ajaxItemsToSubmit: true });
+    expect(man.testPage.source).toMatchObject({ type: 'SQL Query', sql: 'select 1 v from dual' }); // Fallback = Beispielquery
+    expect(man.attributes[0]).toMatchObject({ key: 'attribute_01', prompt: 'ConfigJSON', default: '{"a":1}' });
+    expect(Array.isArray(man.fileUrls.js)).toBe(true);
   });
 
   it('analyzePlugin: api_version 2 → NATIVE_PLUGIN_; ohne AJAX_ITEMS_TO_SUBMIT → false', () => {
