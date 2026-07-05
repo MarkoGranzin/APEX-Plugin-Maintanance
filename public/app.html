@@ -253,6 +253,15 @@
     <label>Recipients (comma-separated)</label><input id="recipients" placeholder="a@company.com, b@company.com">
     <div class="inline" style="margin-top:8px"><button onclick="sendReport()">✉ Send report now</button><span id="reportOut" class="muted small"></span></div>
 
+    <h3 style="margin:18px 0 4px;font-size:1rem">APEX target (live deploy &amp; test)</h3>
+    <div class="muted small" style="margin-bottom:6px">Zum Einspielen in eine echte APEX-App + Render-Smoke-Test. Nur Test-App/-Instanz verwenden. Passwort wird verschlüsselt gespeichert, nie geloggt.</div>
+    <label>Base URL (ORDS)</label><input id="apxBaseUrl" placeholder="https://host/ords">
+    <div class="row2"><div><label>Workspace</label><input id="apxWorkspace" placeholder="MEETUP"></div><div><label>App-ID</label><input id="apxAppId" placeholder="200000"></div></div>
+    <div class="row2"><div><label>App-Alias (Friendly-URL)</label><input id="apxAlias" placeholder="test"></div><div><label>Login-User (DB-User)</label><input id="apxUser" placeholder="Meetup"></div></div>
+    <label>Password <span id="apxPassState" class="muted small"></span></label><input id="apxPass" type="password" placeholder="stored encrypted">
+    <div class="row2"><div><label>Workspace-ID</label><input id="apxWsId" placeholder="aus App-Export"></div><div><label>Parsing-Schema (owner)</label><input id="apxOwner" placeholder="WKSP_MEETUP"></div></div>
+    <div class="inline" style="margin-top:8px"><button onclick="testApexConn()">🔌 Verbindung testen</button><span id="apxConnOut" class="muted small"></span></div>
+
     <div class="foot">
       <button class="ghost" onclick="closeSettings()">Close</button>
       <button class="primary" onclick="saveSettingsAll()">Save</button>
@@ -508,6 +517,7 @@ async function openDetail(id){
           <div class="inline" style="margin-top:4px;gap:6px">
             <button onclick="runUpdate()" title="Update libraries to the latest version. Safe updates are applied directly; for breaking ones you get a force option (you verify) or use the verified migration in the Tests tab.">⬆ Update libs to latest</button>
             <button onclick="runUpload()" title="Commit current changes on a NEW branch and push it + show the PR link (asks for confirmation). Never touches your current branch.">📤 Upload (branch + PR)</button>
+            <button onclick="apexLive()" title="Spielt das Plugin in die konfigurierte APEX-Ziel-App ein (Shared Components → Plug-ins → Import), setzt die File URLs to Load, legt eine analyse-getriebene Testseite an (Page-Item/AJAX/ConfigJSON) und macht einen headless Render-Smoke-Test. Braucht die APEX-Verbindung in den Settings. Test-App verwenden!">🚀 In APEX einspielen &amp; live testen</button>
           </div>
         </details>
       </div>
@@ -1056,6 +1066,9 @@ function openSettings(){
   $('schedEnabled').checked=!!s.scheduleEnabled; $('schedule').value=s.schedule||''; updateSchedHint();
   $('smtpHost').value=sm.host||''; $('smtpPort').value=sm.port||587; $('smtpSecure').checked=!!sm.secure; $('smtpUser').value=sm.user||''; $('smtpFrom').value=sm.from||''; $('smtpPass').value=''; $('reportOut').textContent='';
   $('recipients').value=(s.recipients||[]).join(', ');
+  const ax = s.apexTarget||{};
+  $('apxBaseUrl').value=ax.baseUrl||''; $('apxWorkspace').value=ax.workspace||''; $('apxAppId').value=ax.appId||''; $('apxAlias').value=ax.alias||'';
+  $('apxUser').value=ax.loginUser||''; $('apxWsId').value=ax.workspaceId||''; $('apxOwner').value=ax.owner||''; $('apxPass').value=''; $('apxPassState').textContent=s.apexPassSet?'(stored)':''; $('apxConnOut').textContent='';
   toggleAi(); $('settingsBg').classList.add('open');
 }
 function closeSettings(){ $('settingsBg').classList.remove('open'); }
@@ -1079,8 +1092,33 @@ async function saveSettingsAll(){
     await api('PUT','/api/settings',{ workDir:$('workDir').value.trim(), aiBackend:ai, smtp, recipients, schedule:$('schedule').value.trim(), scheduleEnabled:$('schedEnabled').checked });
     if($('aiKey').value) await api('POST','/api/ai/key',{key:$('aiKey').value});
     if($('smtpPass').value) await api('POST','/api/smtp/pass',{pass:$('smtpPass').value});
+    await api('PUT','/api/apex-target',{ baseUrl:$('apxBaseUrl').value.trim(), workspace:$('apxWorkspace').value.trim(), appId:$('apxAppId').value.trim(), alias:$('apxAlias').value.trim(), loginUser:$('apxUser').value.trim(), workspaceId:$('apxWsId').value.trim(), owner:$('apxOwner').value.trim(), pass: $('apxPass').value || undefined });
     await loadSettings(); closeSettings(); toast('Settings saved');
   }catch(e){ toast('Error: '+e.message); }
+}
+async function testApexConn(){
+  $('apxConnOut').textContent='testing…';
+  try{
+    // erst speichern (damit der Test die aktuellen Werte nutzt), dann testen
+    await api('PUT','/api/apex-target',{ baseUrl:$('apxBaseUrl').value.trim(), workspace:$('apxWorkspace').value.trim(), appId:$('apxAppId').value.trim(), alias:$('apxAlias').value.trim(), loginUser:$('apxUser').value.trim(), workspaceId:$('apxWsId').value.trim(), owner:$('apxOwner').value.trim(), pass: $('apxPass').value || undefined });
+    const r=await api('POST','/api/apex-target/test',{});
+    $('apxConnOut').textContent = r.ok?'✅ Login ok (App Builder erreicht)':('⛔ '+(r.error||'Login fehlgeschlagen'));
+    await loadSettings();
+  }catch(e){ $('apxConnOut').textContent='Error: '+e.message; }
+}
+// T-135: Plugin in echte APEX-App einspielen & live testen
+async function apexLive(){
+  const c = current; if(!c) return;
+  if(!(await uiConfirm(`„${c.name}" in die konfigurierte APEX-App einspielen und dort live testen? Schreibt in die Ziel-App (Test-App verwenden!).`, 'Einspielen & testen'))) return;
+  setBusy(c.id,true); toast('APEX: einspielen & testen…');
+  try{
+    const r = await api('POST',`/api/components/${c.id}/apex-live`,{});
+    if(!r || r.error){ toast('Error: '+((r&&r.error)||'fehlgeschlagen')); }
+    else if(r.render && r.render.rendered){ toast(`✅ Live gerendert (${r.plugin}) — ${r.render.graphics} Grafik-Element(e)`); }
+    else if(r.render && r.render.apexError){ toast(`⛔ Render-Fehler: ${r.render.apexError}`); }
+    else { toast(`Eingespielt, aber kein Render bestätigt${r.install&&!r.install.ok?' (Install-Problem)':''}`); }
+  }catch(e){ toast('Error: '+e.message); }
+  finally{ setBusy(c.id,false); }
 }
 
 // --- Repo einem Plugin zuordnen (F-21) ---
@@ -1175,7 +1213,7 @@ async function loadLibraries(){
 }
 
 // Build-Marker: muss mit BUILD in start.js übereinstimmen. Erkennt einen veralteten Backend-Prozess.
-const APP_BUILD = '2026-06-28.64';
+const APP_BUILD = '2026-07-05.65';
 async function checkBackend(){
   const b = $('staleBanner');
   try{

@@ -19,7 +19,9 @@ import { fileURLToPath } from 'node:url';
 import { scanRepo } from './src/service/run-repo.js';
 import { createScheduler } from './src/service/scheduler.js';
 import { createHistory, recordRun, listRuns } from './src/report/history.js';
-import { createSettings } from './src/config/settings.js';
+import { createSettings, setApexTarget } from './src/config/settings.js';
+import { deployAndTest, findPluginExport } from './src/service/apex-live.js';
+import { loadChromium, uiLogin } from './mcp-apex-deploy/lib/apex-ui.js';
 import { createComponentStore } from './src/gui/store.js';
 import { apiHandler, metaApiHandler } from './src/gui/api.js';
 import { defaultGather } from './src/gui/components.js';
@@ -59,7 +61,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const DATA_DIR = process.env.AISPP_DATA_DIR || path.join(__dirname, 'data');
 // Build-Marker: muss mit APP_BUILD in public/app.html übereinstimmen. Bei Backend-Änderungen erhöhen.
 // Das Frontend vergleicht beide und warnt, wenn der laufende Dienst veraltet ist (Neustart nötig).
-const BUILD = '2026-06-28.64';
+const BUILD = '2026-07-05.65';
 const C = { reset: '\x1b[0m', bold: '\x1b[1m', dim: '\x1b[2m', green: '\x1b[32m', yellow: '\x1b[33m', red: '\x1b[31m', cyan: '\x1b[36m' };
 const c = (col, s) => `${C[col]}${s}${C.reset}`;
 
@@ -483,6 +485,26 @@ function cmdServe(portArg) {
       secretStore.set('smtp-pass', body.pass); saveSecrets();
       return json(res, { ok: true });
     }
+
+    // T-134/T-135 — APEX-Ziel-Konfiguration (Passwort NUR verschlüsselt im SecretStore 'apex-pass').
+    const apexPassSet = () => { try { return !!secretStore.get('apex-pass'); } catch { return false; } };
+    if (p === '/api/apex-target' && req.method === 'PUT') {
+      const body = await readBody(req);
+      setApexTarget(settings, body || {});
+      if (body?.pass) { secretStore.set('apex-pass', body.pass); saveSecrets(); }
+      saveSettings();
+      return json(res, { ok: true, apexTarget: settings.apexTarget, passSet: apexPassSet() });
+    }
+    if (p === '/api/apex-target/test' && req.method === 'POST') {
+      const t = settings.apexTarget || {}; let pass; try { pass = secretStore.get('apex-pass'); } catch {}
+      if (!t.baseUrl || !t.workspace || !t.loginUser || !pass) return json(res, { ok: false, error: 'APEX-Verbindung unvollständig — Base-URL/Workspace/User/Passwort setzen.' }, 200);
+      const chromium = await loadChromium();
+      if (!chromium) return json(res, { ok: false, error: 'Playwright nicht installiert.' }, 200);
+      const browser = await chromium.launch({ headless: true });
+      try { const page = await browser.newPage(); const r = await uiLogin(page, { baseUrl: t.baseUrl, workspace: t.workspace, user: t.loginUser, pass }); return json(res, { ok: r.ok, error: r.error, url: r.url }); }
+      catch (e) { return json(res, { ok: false, error: String(e?.message ?? e) }, 200); }
+      finally { await browser.close(); }
+    }
     // Report jetzt senden — nur wenn SMTP & Empfänger konfiguriert sind
     if (p === '/api/report/send' && req.method === 'POST') {
       if (!settings.smtp?.host || !settings.recipients?.length) {
@@ -674,6 +696,20 @@ function cmdServe(portArg) {
 
     // T-127 — Requirements/Akzeptanz-Vertrag GEZIELT neu anstoßen (frisch aus dem Mock-Self-Test
     // abgeleitet, inkl. Schnittstelle). Schreibt nur .maintenance/acceptance.json, kein Push.
+    // T-135 — In echte APEX-App einspielen & live testen (analyse-getrieben, headless Render-Smoke-Test).
+    if (p.startsWith('/api/components/') && p.endsWith('/apex-live') && req.method === 'POST') return withComponentRunning(async (c) => {
+      const t = settings.apexTarget || {}; let pass; try { pass = secretStore.get('apex-pass'); } catch {}
+      if (!t.baseUrl || !t.workspace || !t.loginUser || !pass || !t.appId) return json(res, { ok: false, error: 'APEX-Verbindung/App unvollständig — in den Einstellungen (APEX-Ziel) setzen + Verbindung testen.' }, 200);
+      const exportFile = findPluginExport(c.path);
+      if (!exportFile) return json(res, { ok: false, error: 'Keine Plugin-Export-SQL im Repo gefunden (Repo zuordnen?).' }, 200);
+      const body = await readBody(req).catch(() => ({}));
+      setStep(c.id, 'APEX: einspielen & testen…');
+      const r = await deployAndTest({ exportFile, sourceSql: body?.sourceSql, target: { baseUrl: t.baseUrl, workspace: t.workspace, user: t.loginUser, pass, appId: Number(t.appId), alias: t.alias, workspaceId: t.workspaceId, owner: t.owner, release: t.release } });
+      try { store.addReview(c.id, { kind: 'apex-live', pass: r.ok, rendered: !!r.render?.rendered, apexError: r.render?.apexError || null, url: r.render?.url || null, plugin: r.plugin }); } catch { /* egal */ }
+      // Passwort/Verbindung nie ins Ergebnis spiegeln (deployAndTest gibt es ohnehin nicht zurück).
+      return json(res, r, 200);
+    });
+
     if (p.startsWith('/api/components/') && p.endsWith('/rebuild-requirements') && req.method === 'POST') return withComponentRunning(async (c, id) => {
       const sl = slugify(c.name); const mockUrl = `http://localhost:${port}/mock/${sl}/index.html`;
       const derive = async () => {
@@ -761,6 +797,8 @@ function cmdServe(portArg) {
       try {
         const { status, body: out } = await metaApiHandler(req.method, p, body, metaCtx);
         if (req.method !== 'GET' && (p === '/api/settings' || p.startsWith('/api/repos'))) saveSettings();
+        // T-134: ob das APEX-Passwort verschlüsselt hinterlegt ist (nie das Passwort selbst) → GUI-Anzeige „(stored)".
+        if (p === '/api/settings' && req.method === 'GET' && out && typeof out === 'object') { let ps = false; try { ps = !!secretStore.get('apex-pass'); } catch {} out.apexPassSet = ps; }
         return json(res, out, status);
       } catch (err) {
         return json(res, { error: String(err?.message ?? err) }, 500);

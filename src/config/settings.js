@@ -19,7 +19,25 @@ export function createSettings(initial = {}) {
     autoRepair: initial.autoRepair ?? false, // nach Erkennung automatisch reparieren (Check → volle Pflege) (T-83)
     smtp: initial.smtp ?? { host: '', port: 587, secure: false, user: '', from: '' }, // Mailversand
     aiBackend: initial.aiBackend ?? { kind: 'cli', command: 'claude' },
+    // T-134: Ziel-APEX-App für „Live einspielen & testen" (F-31). Passwort NUR verschlüsselt im SecretStore
+    // (secretRef 'apex-pass'), hier nur die nicht-geheime Konfig. workspaceId/owner aus einem App-Export.
+    apexTarget: initial.apexTarget ?? { baseUrl: '', workspace: '', appId: '', alias: '', loginUser: '', workspaceId: '', owner: '', release: '24.2' },
   };
+}
+
+export function setApexTarget(settings, cfg = {}) {
+  const cur = settings.apexTarget ?? {};
+  settings.apexTarget = {
+    baseUrl: (cfg.baseUrl ?? cur.baseUrl ?? '').trim().replace(/\/$/, ''),
+    workspace: (cfg.workspace ?? cur.workspace ?? '').trim(),
+    appId: String(cfg.appId ?? cur.appId ?? '').trim(),
+    alias: (cfg.alias ?? cur.alias ?? '').trim(),
+    loginUser: (cfg.loginUser ?? cur.loginUser ?? '').trim(),
+    workspaceId: (cfg.workspaceId ?? cur.workspaceId ?? '').trim(),
+    owner: (cfg.owner ?? cur.owner ?? '').trim(),
+    release: (cfg.release ?? cur.release ?? '24.2').trim(),
+  };
+  return settings;
 }
 
 export function setSmtp(settings, cfg = {}) {

@@ -88,6 +88,7 @@ export async function metaApiHandler(method, pathname, body, ctx) {
       autoRepair: !!settings.autoRepair,
       smtp: settings.smtp,
       aiBackend: aiBackendView(settings),
+      apexTarget: settings.apexTarget, // T-134 (nicht-geheime APEX-Ziel-Konfig; Passwort separat via secretStore)
     });
     if (method === 'GET') return { status: 200, body: view() };
     if (method === 'PUT') {
