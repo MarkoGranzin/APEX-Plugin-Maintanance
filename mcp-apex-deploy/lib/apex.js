@@ -148,12 +148,18 @@ export function parsePluginName(sqlText) {
 }
 
 const q = (s) => `'${String(s ?? '').replace(/'/g, "''")}'`;
-// APEX-Strings >~1000 Zeichen müssen als wwv_flow_string.join-Liste geschrieben werden.
+// Kurze EINZEILIGE Werte als Literal; alles Mehrzeilige oder Lange als wwv_flow_string.join.
+// Die Import-Engine akzeptiert KEINE rohen Zeilenumbrüche in einem einzelnen Literal (→ „Bad Request").
+// wwv_flow_string.join reassembliert die Elemente mit chr(10) → jede ZEILE als eigenes Element gibt
+// mehrzeilige SQL byte-genau zurück (wie echte APEX-Exports).
 function sqlString(s) {
   const str = String(s ?? '');
-  if (str.length <= 800) return q(str);
+  if (str.length <= 800 && !str.includes('\n')) return q(str);
   const parts = [];
-  for (let i = 0; i < str.length; i += 800) parts.push(q(str.slice(i, i + 800)));
+  for (const line of str.split('\n')) {
+    if (line.length <= 800) parts.push(q(line));
+    else for (let i = 0; i < line.length; i += 800) parts.push(q(line.slice(i, i + 800)));
+  }
   return `wwv_flow_string.join(wwv_flow_t_varchar2(\n${parts.join(',\n')}))`;
 }
 

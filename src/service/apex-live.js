@@ -125,10 +125,14 @@ export async function deployAndTest(o = {}, deps = {}) {
     rt.on('pageerror', (e) => errors.push(String(e?.message ?? e)));
     rt.on('console', (m) => { if (m.type() === 'error') errors.push(m.text()); });
     await rt.goto(url, { waitUntil: 'domcontentloaded', timeout: 30000 }).catch(() => {});
-    result.render = await d.smokeCheckPage(rt, errors, { settleMs: o.settleMs });
+    // expectMarker = interner Plugin-Name → der Seitentitel „Live-Test: <plugin>" muss ihn enthalten,
+    // sonst zeigt die URL noch eine alte/fremde Seite (Import nicht durchgelaufen) → kein False-Green.
+    result.render = await d.smokeCheckPage(rt, errors, { settleMs: o.settleMs, expectMarker: an.internalName });
     result.render.url = url;
 
-    result.ok = !!(result.install?.ok && result.render?.rendered);
+    // ok NUR wenn Install UND Seiten-Import UND Render echt durchliefen (testPage.ok verhindert False-Green
+    // bei „Bad Request"/abgelehntem Import, während ein übrig gebliebenes Fremd-SVG noch sichtbar ist).
+    result.ok = !!(result.install?.ok && result.testPage?.ok && result.render?.rendered);
     result.at = d.now();
     return result;
   } finally { await browser.close(); }

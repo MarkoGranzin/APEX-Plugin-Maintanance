@@ -80,7 +80,12 @@ export async function uiImportFile(page, filePath, o = {}) {
   }
   const body = (await page.locator('body').innerText().catch(() => '')).replace(/\s+/g, ' ');
   const oraErr = (body.match(/ORA-\d+[^.]{0,120}|PLS-\d+[^.]{0,120}/i) || [])[0] || null;
-  return { ok: !oraErr, steps, oraError: oraErr, resultTitle: await page.locator('title').first().innerText().catch(() => '') };
+  const resultTitle = await page.locator('title').first().innerText().catch(() => '');
+  // Import-Fehlerseiten ehrlich erkennen (sonst False-Green): „Bad Request"/400/Forbidden/500 im Titel
+  // oder am Anfang der Seite bedeuten, dass der Import NICHT durchlief.
+  const importErr = /Bad Request|HTTP Status 4\d\d|HTTP Status 5\d\d|Forbidden|Not Authorized|Internal Server Error/i
+    .test(`${resultTitle} ${body.slice(0, 200)}`) ? (resultTitle || 'Bad Request') : null;
+  return { ok: !oraErr && !importErr, steps, oraError: oraErr, importError: importErr, resultTitle };
 }
 
 /**
@@ -187,11 +192,14 @@ export async function uiSetPluginAttributes(page, o = {}) {
  * is_internal_error) und Login-Redirects ehrlich (kein False-Green) und prüft sichtbares Rendern.
  * Der Aufrufer navigiert zur URL und sammelt JS-Fehler (errors) via page.on('pageerror'/'console').
  * @param {string[]} errors  gesammelte JS-Fehler
- * @param {{selector?:string, settleMs?:number}} o
+ * @param {{selector?:string, settleMs?:number, expectMarker?:string}} o
+ *   expectMarker: Text, der im Seitentitel stehen MUSS (z.B. Plugin-Name) — sonst zeigt die URL noch
+ *   eine ALTE/fremde Seite (Import nicht durchgelaufen) → kein Grün auf einem übrig gebliebenen SVG.
  */
 export async function smokeCheckPage(page, errors = [], o = {}) {
   await page.waitForTimeout(o.settleMs ?? 3500); // Plugin-Init/async-Render (mxGraph u.ä.) abwarten
   const body = (await page.locator('body').innerText().catch(() => '')).replace(/\s+/g, ' ');
+  const pageTitle = (await page.locator('title').first().innerText().catch(() => '')) || '';
   const apexError = /Error processing request|apex_error_code|ORA-\d{4,5}/i.test(body)
     ? (body.match(/ORA-\d{4,5}: [^A-Z]{0,80}|apex_error_code: [\w.]+/i) || ['APEX-Fehlerseite'])[0] : null;
   const is404 = /Not Found|HTTP Status Code: 404/i.test(body);
@@ -199,12 +207,16 @@ export async function smokeCheckPage(page, errors = [], o = {}) {
   const visibleText = (await page.locator(sel).first().innerText().catch(() => '')).trim();
   const hasGraphics = await page.locator('canvas, svg, .mxgraph, [class*="mx"]').count();
   const stillLogin = /sign-in|\/login/i.test(page.url());
-  const ok = !apexError && !is404 && !stillLogin && errors.length === 0 && (visibleText.length > 0 || hasGraphics > 0);
+  // Titel-Abgleich: zeigt die Seite noch das falsche Plugin, ist der Import NICHT durchgelaufen.
+  const wrongPage = o.expectMarker && pageTitle && !pageTitle.toLowerCase().includes(String(o.expectMarker).toLowerCase()) ? pageTitle : null;
+  const ok = !apexError && !is404 && !stillLogin && !wrongPage && errors.length === 0 && (visibleText.length > 0 || hasGraphics > 0);
   return {
     ok, url: page.url().replace(/session=\d+/, 'session=…'), apexError, is404: is404 || undefined, needsLogin: stillLogin || undefined,
-    jsErrors: errors.slice(0, 20), rendered: !apexError && !is404 && (hasGraphics > 0), graphics: hasGraphics,
+    wrongPage: wrongPage || undefined, pageTitle,
+    jsErrors: errors.slice(0, 20), rendered: !apexError && !is404 && !wrongPage && (hasGraphics > 0), graphics: hasGraphics,
     note: apexError ? `APEX-Fehlerseite: ${apexError} — Plugin-Render schlug fehl (Region-/Laufzeit-Setup prüfen).`
       : is404 ? 'Seite nicht gefunden (404) — Seiten-ID/Alias prüfen.'
-        : stillLogin ? 'Laufzeit verlangt App-Login (Seite nicht öffentlich?).' : undefined,
+        : wrongPage ? `Falsche Seite gerendert („${wrongPage}") — Seiten-Import lief nicht durch (kein Grün auf Fremd-Inhalt).`
+          : stillLogin ? 'Laufzeit verlangt App-Login (Seite nicht öffentlich?).' : undefined,
   };
 }
