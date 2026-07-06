@@ -207,11 +207,16 @@ async function pdOpenOrCreatePage(page, o) {
   const wizFrame = () => page.frames().find((f) => f !== page.mainFrame());
   const appTile = page.locator(`a[href*="fb_flow_id=${o.appId}"]`);
   if (!(await appTile.count())) return { ok: false, error: `App ${o.appId} nicht gefunden.` };
-  await appTile.first().click(); await settle();
+  // Landing ist der Pages-Report (IRR) — genug Zeit lassen, bis der Report die Seiten-Links geladen hat.
+  // Sonst wird die BESTEHENDE Seite des Plugins nicht erkannt → fälschlich neu angelegt (statt wiederverwendet).
+  await appTile.first().click(); await settle(2800);
   const existing = page.getByRole('link', { name: new RegExp(`\\b${o.pageId}\\b`) });
   let mode = 'reuse';
   if (await existing.count()) {
-    await existing.first().click(); await settle(2500);
+    // Force-/JS-Klick: die IRR-Toolbar überlagert die Zelle und fängt normale Klicks ab.
+    await existing.first().scrollIntoViewIfNeeded().catch(() => {});
+    await existing.first().click({ force: true }).catch(async () => { await existing.first().evaluate((a) => a.click()).catch(() => {}); });
+    await settle(2500);
   } else {
     mode = 'create';
     await page.getByRole('button', { name: /create page/i }).first().click(); await page.waitForTimeout(3500);
@@ -287,23 +292,28 @@ export async function uiCreateItemTestPage(page, o = {}) {
     return box && box.width > 0 ? { x: Math.round(box.x), y: Math.round(box.y), w: Math.round(box.width), h: Math.round(box.height) } : null;
   }, rxEsc(hostName)).catch(() => null);
 
-  // 2) Item VOM Plugin-Typ aus der Items-Gallery in die Host-Region ziehen.
-  const treeBefore = await page.locator('.a-TreeView-label').evaluateAll((els) => els.map((e) => e.innerText.trim()));
-  await page.locator('[role=tab]:has-text("Items"), button:has-text("Items")').first().click().catch(() => {}); await page.waitForTimeout(1200);
-  const isrc = page.locator('.a-Gallery-pageItem').filter({ hasText: rxi(o.pluginDisplayName) }).first();
-  if (!(await isrc.count())) return { ok: false, error: `Item-Typ „${o.pluginDisplayName}" nicht in der Items-Gallery (installiert?).` };
-  await isrc.scrollIntoViewIfNeeded().catch(() => {}); await page.waitForTimeout(300);
-  const ib = await isrc.boundingBox();
-  const tx = hostBox ? hostBox.x + Math.min(hostBox.w / 2, 120) : Math.round(1500 * 0.5);
-  const ty = hostBox ? hostBox.y + Math.min(hostBox.h / 2, 40) : 300;
-  await pdMouseDrag(page, ib, tx, ty);
-  // Prüfen, ob ein Page-Item entstand (neuer Knoten P<page>_… bzw. selektiertes Name-Property).
-  const selName = await page.evaluate(() => { const pr = [...document.querySelectorAll('.a-Property')].find((e) => (e.querySelector('.a-Property-label')?.innerText || '').trim() === 'Name'); const inp = pr?.querySelector('input,textarea'); return inp ? inp.value : null; });
-  if (!selName || !/^P\d+_/.test(selName)) return { ok: false, error: 'Item-Drag verfehlte die Host-Region (kein Page-Item angelegt).' };
-
-  // 3) Item benennen + Custom-Attribute setzen.
-  const rName = await pdSetProp(page, 'Name', o.itemName);
-  await page.getByText(new RegExp(`^${rxEsc(o.itemName)}$`)).first().click().catch(() => {}); await page.waitForTimeout(800);
+  // 2) Item VOM Plugin-Typ anlegen — ODER, bei Wiederverwendung der Seite, das schon vorhandene Item
+  //    selektieren (kein zweites Item anlegen; der erneute Update-Test soll die Seite nicht zumüllen).
+  const itemRx = new RegExp(`^${rxEsc(o.itemName)}$`);
+  let rName = 'ok'; let selName = o.itemName;
+  if (await page.getByText(itemRx).count()) {
+    await page.getByText(itemRx).first().click(); await page.waitForTimeout(800);
+  } else {
+    await page.locator('[role=tab]:has-text("Items"), button:has-text("Items")').first().click().catch(() => {}); await page.waitForTimeout(1200);
+    const isrc = page.locator('.a-Gallery-pageItem').filter({ hasText: rxi(o.pluginDisplayName) }).first();
+    if (!(await isrc.count())) return { ok: false, error: `Item-Typ „${o.pluginDisplayName}" nicht in der Items-Gallery (installiert?).` };
+    await isrc.scrollIntoViewIfNeeded().catch(() => {}); await page.waitForTimeout(300);
+    const ib = await isrc.boundingBox();
+    const tx = hostBox ? hostBox.x + Math.min(hostBox.w / 2, 120) : Math.round(1500 * 0.5);
+    const ty = hostBox ? hostBox.y + Math.min(hostBox.h / 2, 40) : 300;
+    await pdMouseDrag(page, ib, tx, ty);
+    // Prüfen, ob ein Page-Item entstand (neuer Knoten P<page>_… bzw. selektiertes Name-Property).
+    selName = await page.evaluate(() => { const pr = [...document.querySelectorAll('.a-Property')].find((e) => (e.querySelector('.a-Property-label')?.innerText || '').trim() === 'Name'); const inp = pr?.querySelector('input,textarea'); return inp ? inp.value : null; });
+    if (!selName || !/^P\d+_/.test(selName)) return { ok: false, error: 'Item-Drag verfehlte die Host-Region (kein Page-Item angelegt).' };
+    // 3) Item benennen + selektieren.
+    rName = await pdSetProp(page, 'Name', o.itemName);
+    await page.getByText(itemRx).first().click().catch(() => {}); await page.waitForTimeout(800);
+  }
   const attrs = [];
   for (const a of (o.attributes || [])) { if (a && a.prompt && a.value != null && a.value !== '') attrs.push({ prompt: a.prompt, r: await pdSetProp(page, a.prompt, a.value) }); }
 
@@ -328,26 +338,30 @@ export async function uiCreateDynamicActionTestPage(page, o = {}) {
   const selectionType = o.selectionType || 'jQuery Selector';
   const selector = o.selector || 'body';
 
-  // 1) Dynamic-Actions-Tab → Event-Knoten rechtsklicken → „Create Dynamic Action".
+  // 1) Dynamic-Actions-Tab öffnen. Existiert bei Seiten-Wiederverwendung schon eine DA mit diesem Plugin,
+  //    diese selektieren statt eine ZWEITE anzulegen (erneuter Update-Test soll nicht zumüllen).
   await page.locator('[role=tab]:has-text("Dynamic Actions")').first().click().catch(() => {}); await page.waitForTimeout(1200);
-  const evNode = page.locator('.a-TreeView-label').filter({ hasText: new RegExp(`^${rxEsc(event)}$`) }).first();
-  if (!(await evNode.count())) return { ok: false, error: `Event „${event}" im DA-Baum nicht gefunden.` };
-  await evNode.click().catch(() => {}); await page.waitForTimeout(300);
-  await evNode.click({ button: 'right' }).catch(() => {}); await page.waitForTimeout(1000);
-  await page.getByText(/^Create Dynamic Action$/i).first().click().catch(async () => { await page.getByRole('menuitem', { name: /Create Dynamic Action/i }).first().click().catch(() => {}); });
-  await page.waitForTimeout(2200);
-  // Prüfen, dass eine DA + True-Aktion „Show" entstand.
-  if (!(await page.locator('.a-TreeView-label').filter({ hasText: /^Show$/ }).count())) return { ok: false, error: 'Dynamic Action wurde nicht angelegt (keine „Show"-Aktion).' };
-
-  // 2) True-Aktion „Show" selektieren → Action auf den Plugin-Typ setzen. Danach heißt der Aktions-Knoten
-  //    „<Plugin> [Plug-In]" → für alle weiteren Property-Zugriffe RE-SELEKTIEREN (der Property-Editor lädt
-  //    sonst nicht die Plugin-Attribute + das Selection-Type-Feld zuverlässig).
-  await page.locator('.a-TreeView-label').filter({ hasText: /^Show$/ }).first().click().catch(() => {}); await page.waitForTimeout(1000);
-  const act = await pdSetProp(page, 'Action', o.pluginDisplayName);
-  if (act !== 'ok') return { ok: false, error: `Action „${o.pluginDisplayName}" nicht setzbar (installiert?): ${act}` };
-  await page.waitForTimeout(1200);
   const reselect = async () => { await page.locator('.a-TreeView-label').filter({ hasText: rxi(o.pluginDisplayName) }).first().click().catch(() => {}); await page.waitForTimeout(900); };
-  await reselect();
+  let act = 'ok';
+  if (await page.locator('.a-TreeView-label').filter({ hasText: rxi(o.pluginDisplayName) }).count()) {
+    await reselect();
+  } else {
+    // Event-Knoten rechtsklicken → „Create Dynamic Action".
+    const evNode = page.locator('.a-TreeView-label').filter({ hasText: new RegExp(`^${rxEsc(event)}$`) }).first();
+    if (!(await evNode.count())) return { ok: false, error: `Event „${event}" im DA-Baum nicht gefunden.` };
+    await evNode.click().catch(() => {}); await page.waitForTimeout(300);
+    await evNode.click({ button: 'right' }).catch(() => {}); await page.waitForTimeout(1000);
+    await page.getByText(/^Create Dynamic Action$/i).first().click().catch(async () => { await page.getByRole('menuitem', { name: /Create Dynamic Action/i }).first().click().catch(() => {}); });
+    await page.waitForTimeout(2200);
+    if (!(await page.locator('.a-TreeView-label').filter({ hasText: /^Show$/ }).count())) return { ok: false, error: 'Dynamic Action wurde nicht angelegt (keine „Show"-Aktion).' };
+    // True-Aktion „Show" selektieren → Action auf den Plugin-Typ setzen. Danach heißt der Knoten
+    // „<Plugin> [Plug-In]" → für alle weiteren Property-Zugriffe RE-SELEKTIEREN.
+    await page.locator('.a-TreeView-label').filter({ hasText: /^Show$/ }).first().click().catch(() => {}); await page.waitForTimeout(1000);
+    act = await pdSetProp(page, 'Action', o.pluginDisplayName);
+    if (act !== 'ok') return { ok: false, error: `Action „${o.pluginDisplayName}" nicht setzbar (installiert?): ${act}` };
+    await page.waitForTimeout(1200);
+    await reselect();
+  }
 
   // 3) Ziel-Element festlegen (Selection Type + Selektor) — sonst bleibt „Selection Type (Error)" und der
   //    Save wird blockiert (Seite bliebe privat). Selektor-Feld-Label = gewählter Selection-Type.
