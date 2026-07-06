@@ -86,6 +86,13 @@ export function analyzePlugin(sqlText) {
   const g = (re, src = t) => (src.match(re) || [])[1] || null;
   const internalName = g(/p_name=>'((?:[^']|'')*)'/i, head);
   const apiVersion = Number(g(/p_api_version=>(\d+)/i) || 1);
+  // Plugin-TYP (bestimmt, WIE die Testseite eingerichtet wird): Region/Item/Dynamic Action/Template-Component.
+  const rawType = g(/p_plugin_type=>'([^']*)'/i, head) || (/create_template_component\b/i.test(t) ? 'TEMPLATE COMPONENT' : null);
+  const kind = (/template/i.test(rawType || '') || /create_template_component\b/i.test(t)) ? 'template-component'
+    : /item\s*type/i.test(rawType || '') ? 'item'
+      : /dynamic\s*action/i.test(rawType || '') ? 'dynamic-action'
+        : /region\s*type/i.test(rawType || '') ? 'region'
+          : 'other';
   const standard = (g(/p_standard_attributes=>'([^']*)'/i) || '').split(':').map((s) => s.trim()).filter(Boolean);
   const hasAjaxFn = /p_ajax_function=>/i.test(t);
   const usesGetAjaxId = /GET_AJAX_IDENTIFIER/i.test(t);
@@ -129,6 +136,7 @@ export function analyzePlugin(sqlText) {
   return {
     internalName, displayName: (g(/p_display_name=>'((?:[^']|'')*)'/i, head) || '').replace(/''/g, "'").trim() || null,
     apiVersion,
+    pluginType: rawType, kind, // Region/Item/Dynamic Action/Template-Component → bestimmt die Einricht-Art
     sourceTypePrefix: apiVersion >= 2 ? 'NATIVE_PLUGIN_' : 'PLUGIN_',
     standardAttributes: standard,
     hasSourceSql: standard.includes('SOURCE_SQL'),
@@ -161,6 +169,8 @@ export function buildSetupManifest(sqlText, opts = {}) {
       internalName: a.internalName,
       displayName: a.displayName,
       apiVersion: a.apiVersion,
+      pluginType: a.pluginType, // roher APEX-Typ (z.B. „REGION TYPE", „ITEM TYPE")
+      kind: a.kind, // normalisiert: region | item | dynamic-action | template-component | other
       regionSourceType: a.internalName ? `${a.sourceTypePrefix}${a.internalName}` : null,
       hasAjaxCallback: a.hasAjaxCallback,
     },
@@ -169,6 +179,9 @@ export function buildSetupManifest(sqlText, opts = {}) {
       id: pageId,
       name: `Live-Test: ${a.internalName || 'plugin'}`,
       isPublic: true,
+      // Wie die Testseite gebaut wird: region = Plugin-Region; item = Page-Item vom Plugin-Typ;
+      // dynamic-action/template-component = eigener Aufbau (noch nicht automatisiert).
+      setupKind: a.kind,
       region: { name: `Test: ${a.internalName || 'plugin'}`, plugin: a.displayName || a.internalName },
       // Page-Item, das die Region über „Items to Submit" referenziert (Pflicht bei AJAX_ITEMS_TO_SUBMIT).
       pageItem: ajaxItem ? { name: ajaxItem, type: 'Hidden', ajaxItemsToSubmit: true } : null,

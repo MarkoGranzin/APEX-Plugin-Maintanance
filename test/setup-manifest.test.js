@@ -20,7 +20,7 @@ function fakeDeps(over = {}) {
 describe('T-138 setupFromManifest: JSON → APEX (standalone/wiederverwendbar)', () => {
   const manifest = {
     manifestVersion: 1,
-    plugin: { internalName: 'BAR.1', displayName: 'Bar Plugin', apiVersion: 1, regionSourceType: 'PLUGIN_BAR.1' },
+    plugin: { internalName: 'BAR.1', displayName: 'Bar Plugin', apiVersion: 1, kind: 'region', pluginType: 'REGION TYPE', regionSourceType: 'PLUGIN_BAR.1' },
     standardAttributes: ['SOURCE_SQL', 'AJAX_ITEMS_TO_SUBMIT'],
     testPage: { id: 20000, name: 'Live-Test: BAR.1', region: { name: 'Test: BAR.1', plugin: 'Bar Plugin' }, source: { type: 'SQL Query', sql: 'select 1 v from dual' } },
     attributes: [{ key: 'attribute_01', prompt: 'ConfigJSON', default: '{"a":1}' }],
@@ -66,7 +66,7 @@ describe('T-138 setupFromManifest: JSON → APEX (standalone/wiederverwendbar)',
   });
 
   it('buildSetupManifest + setupFromManifest zusammen (rundlauf ohne Browser)', async () => {
-    const exp = `wwv_flow_api.create_plugin(\n p_name=>'X.Y'\n,p_display_name=>'XY'\n,p_api_version=>1\n,p_standard_attributes=>'SOURCE_SQL'\n);\nwwv_flow_api.create_plugin_std_attribute(\n p_name=>'SOURCE_SQL'\n,p_default_value=>'select 9 v from dual'\n);`;
+    const exp = `wwv_flow_api.create_plugin(\n p_name=>'X.Y'\n,p_plugin_type=>'REGION TYPE'\n,p_display_name=>'XY'\n,p_api_version=>1\n,p_standard_attributes=>'SOURCE_SQL'\n);\nwwv_flow_api.create_plugin_std_attribute(\n p_name=>'SOURCE_SQL'\n,p_default_value=>'select 9 v from dual'\n);`;
     const man = buildSetupManifest(exp, { pageId: 20000 });
     let pageArg;
     const r = await setupFromManifest(man, connection, {}, fakeDeps({ uiCreateTestPage: async (_p, a) => { pageArg = a; return { ok: true }; } }));

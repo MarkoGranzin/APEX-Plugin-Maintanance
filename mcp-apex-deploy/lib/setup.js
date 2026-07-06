@@ -57,7 +57,15 @@ export async function setupFromManifest(manifest, connection, o = {}, deps = {})
       result.fileUrls = await d.uiSetPluginFileUrls(page, { appId: c.appId, displayName, jsUrls: js, cssUrls: css });
     }
 
-    // 3) Testseite im Page Designer aus dem Manifest bauen (frische, eingeloggte Seite → sauberer Nav-Start).
+    // 3) Testseite im Page Designer aus dem Manifest bauen — abhängig vom Plugin-TYP.
+    //    region = Plugin-Region (automatisiert). item/dynamic-action/template-component = eigener Aufbau,
+    //    noch nicht automatisiert → Plugin ist installiert + File-URLs gesetzt, aber keine Testseite gebaut.
+    const kind = m.plugin?.kind || m.testPage?.setupKind || 'region';
+    if (kind !== 'region') {
+      result.testPage = { ok: false, setupKind: kind, error: `Testseiten-Aufbau für Typ „${kind}" (${m.plugin?.pluginType || '?'}) ist noch nicht automatisiert — automatisiert ist aktuell „region". Das Plugin wurde installiert${result.fileUrls ? ' und die File-URLs gesetzt' : ''}.` };
+      result.render = { rendered: false, note: `Kein Auto-Render für Typ „${kind}".` };
+      return result;
+    }
     const pdPage = await browser.newPage();
     const pdLogin = await d.uiLogin(pdPage, cfg);
     result.testPage = pdLogin.ok

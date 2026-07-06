@@ -8,7 +8,7 @@ function fakeDeps(over = {}) {
   const fakePage = { on() {}, async goto() {}, async close() {} };
   return {
     exists: () => true,
-    readFile: () => `wwv_flow_api.create_plugin(\n p_name=>'MY.PLUGIN.1'\n,p_display_name=>'My Plugin'\n,p_api_version=>1\n,p_ajax_function=>'F_AJAX'\n,p_standard_attributes=>'SOURCE_SQL:AJAX_ITEMS_TO_SUBMIT'\n);\ncreate_plugin_attribute(\n p_attribute_sequence=>1\n,p_prompt=>'ConfigJSON'\n,p_default_value=>'{"a":1}'\n);\nwwv_flow_api.create_plugin_file(\n p_file_name=>'plugin.js'\n);`,
+    readFile: () => `wwv_flow_api.create_plugin(\n p_name=>'MY.PLUGIN.1'\n,p_plugin_type=>'REGION TYPE'\n,p_display_name=>'My Plugin'\n,p_api_version=>1\n,p_ajax_function=>'F_AJAX'\n,p_standard_attributes=>'SOURCE_SQL:AJAX_ITEMS_TO_SUBMIT'\n);\ncreate_plugin_attribute(\n p_attribute_sequence=>1\n,p_prompt=>'ConfigJSON'\n,p_default_value=>'{"a":1}'\n);\nwwv_flow_api.create_plugin_file(\n p_file_name=>'plugin.js'\n);`,
     writeTmp: (name, content) => `/tmp/${name}`,
     now: () => 't0',
     loadChromium: async () => ({ launch: async () => ({ async newPage() { return fakePage; }, async close() {} }) }),
@@ -47,7 +47,7 @@ describe('T-135 apex-live: Einspielen + Testseite + Render-Verify (orchestriert)
   it('ohne eigene SQL → nutzt die plugin-eigene SOURCE_SQL-Beispielquery als Datenquelle', async () => {
     let seen;
     const deps = fakeDeps({
-      readFile: () => `wwv_flow_api.create_plugin(\n p_name=>'BAR.1'\n,p_api_version=>1\n,p_standard_attributes=>'SOURCE_SQL:AJAX_ITEMS_TO_SUBMIT'\n);\nwwv_flow_api.create_plugin_std_attribute(\n p_name=>'SOURCE_SQL'\n,p_default_value=>wwv_flow_string.join(wwv_flow_t_varchar2(\n'SELECT 1 AS TITLE, 99 AS VALUE FROM DUAL'))\n);`,
+      readFile: () => `wwv_flow_api.create_plugin(\n p_name=>'BAR.1'\n,p_plugin_type=>'REGION TYPE'\n,p_api_version=>1\n,p_standard_attributes=>'SOURCE_SQL:AJAX_ITEMS_TO_SUBMIT'\n);\nwwv_flow_api.create_plugin_std_attribute(\n p_name=>'SOURCE_SQL'\n,p_default_value=>wwv_flow_string.join(wwv_flow_t_varchar2(\n'SELECT 1 AS TITLE, 99 AS VALUE FROM DUAL'))\n);`,
       uiCreateTestPage: async (_p, arg) => { seen = arg; return { ok: true, mode: 'create' }; },
     });
     const r = await deployAndTest({ exportFile: 'plugin.sql', target /* KEIN sourceSql */ }, deps);
@@ -58,7 +58,7 @@ describe('T-135 apex-live: Einspielen + Testseite + Render-Verify (orchestriert)
   it('setzt Plugin-Attribute (ConfigJSON) generisch beim Einrichten, Steuerzeichen bereinigt', async () => {
     let seen = null;
     const deps = fakeDeps({
-      readFile: () => `wwv_flow_api.create_plugin(\n p_name=>'MY.PLUGIN.1'\n,p_display_name=>'My Plugin'\n,p_api_version=>1\n,p_standard_attributes=>'SOURCE_SQL'\n);\ncreate_plugin_attribute(\n p_attribute_sequence=>1\n,p_prompt=>'ConfigJSON'\n,p_default_value=>'{"a":\nfoo}'\n);`,
+      readFile: () => `wwv_flow_api.create_plugin(\n p_name=>'MY.PLUGIN.1'\n,p_plugin_type=>'REGION TYPE'\n,p_display_name=>'My Plugin'\n,p_api_version=>1\n,p_standard_attributes=>'SOURCE_SQL'\n);\ncreate_plugin_attribute(\n p_attribute_sequence=>1\n,p_prompt=>'ConfigJSON'\n,p_default_value=>'{"a":\nfoo}'\n);`,
       uiCreateTestPage: async (_p, arg) => { seen = arg; return { ok: true, mode: 'create' }; },
     });
     const r = await deployAndTest({ exportFile: 'plugin.sql', target }, deps);
