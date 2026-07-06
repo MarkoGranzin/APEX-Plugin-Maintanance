@@ -23,6 +23,7 @@ import { createSettings, setApexTarget } from './src/config/settings.js';
 import { deployAndTest, findPluginExport } from './src/service/apex-live.js';
 import { loadChromium, uiLogin, uiDeletePage, uiDeletePlugin } from './mcp-apex-deploy/lib/apex-ui.js';
 import { purgeComponent } from './src/service/purge-component.js';
+import { importFromFiles } from './src/service/import-file.js';
 import { buildSetupManifest } from './mcp-apex-deploy/lib/apex.js';
 import { createComponentStore } from './src/gui/store.js';
 import { apiHandler, metaApiHandler } from './src/gui/api.js';
@@ -63,7 +64,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const DATA_DIR = process.env.AISPP_DATA_DIR || path.join(__dirname, 'data');
 // Build-Marker: muss mit APP_BUILD in public/app.html übereinstimmen. Bei Backend-Änderungen erhöhen.
 // Das Frontend vergleicht beide und warnt, wenn der laufende Dienst veraltet ist (Neustart nötig).
-const BUILD = '2026-07-06.77';
+const BUILD = '2026-07-06.78';
 const C = { reset: '\x1b[0m', bold: '\x1b[1m', dim: '\x1b[2m', green: '\x1b[32m', yellow: '\x1b[33m', red: '\x1b[31m', cyan: '\x1b[36m' };
 const c = (col, s) => `${C[col]}${s}${C.reset}`;
 
@@ -788,6 +789,19 @@ function cmdServe(portArg) {
       writeLog(c, `[purge] Plugin gelöscht — APEX: ${result.apex ? (result.apex.ok ? 'entfernt' : result.apex.error) : 'übersprungen (keine Verbindung)'}; Platte: ${result.removed.length} Pfad(e)`);
       return json(res, result, 200);
     });
+
+    // T-144 — Einfacher DATEI-IMPORT (Alternative zu Git): Plugin aus hochgeladenen Dateien anlegen.
+    // Body {name?, files:[{name,content}]} → schreibt in ein verwaltetes Verzeichnis + legt Komponente an.
+    if (p === '/api/import-file' && req.method === 'POST') {
+      const body = await readBody(req).catch(() => null);
+      const r = importFromFiles(store, body || {}, {
+        workDir: settings.workDir,
+        mkdir: (pp) => fs.mkdirSync(pp, { recursive: true }),
+        writeFile: (pp, c) => fs.writeFileSync(pp, c),
+      });
+      if (r.error) return json(res, r, 400);
+      return json(res, r, 201);
+    }
 
     // Setup-Manifest („Rezept") pro Plugin: alles zum Einrichten der Testseite, rein aus der Analyse.
     // Wird auch als .maintenance/apex-setup.json abgelegt (für eine quasi-statische Einrichtung).
