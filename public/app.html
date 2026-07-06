@@ -121,7 +121,7 @@
   <span class="sp"></span>
   <a class="small" href="/readme.html" target="_blank">Docs ↗</a>
   <button class="ghost" onclick="openSettings()">⚙ Settings</button>
-  <button class="ghost" onclick="openImport()" title="Import a plugin directly from files (plugin export .sql + optional JS/CSS) — for when you don't use Git. The files are stored in a managed folder and analysed like a repo.">⬆ Import file</button>
+  <button class="ghost" onclick="openEdit()" title="Same as “+ Plugin” — add a plugin. Use the Git URL/path field, or the file import at the bottom (for when you don't use Git).">⬆ Import file</button>
   <button class="primary" onclick="openEdit()">+ Plugin</button>
 </header>
 
@@ -191,24 +191,14 @@
     <input type="hidden" id="mId">
     <label>Name</label><input id="mName" placeholder="e.g. ColorPicker">
     <label>Directory or Git URL <span class="muted small">(optional)</span></label><input id="mPath" placeholder="https://github.com/org/plugin  ·  D:\repos\plugin">
+    <div id="mFilesRow">
+      <div class="small muted" style="margin:10px 0 2px">— or, if you don't use Git —</div>
+      <label>Import files <span class="muted small">(.sql required · + optional JS/CSS/JSON)</span></label>
+      <input id="mFiles" type="file" multiple accept=".sql,.js,.css,.json,.md,.txt">
+    </div>
     <div class="foot">
       <button class="ghost" onclick="closeModal()">Cancel</button>
       <button class="primary" onclick="saveComponent()">Save</button>
-    </div>
-  </div>
-</div>
-
-<!-- Datei-Import-Modal (T-144) — Plugin ohne Git direkt aus Dateien anlegen -->
-<div class="modal-bg" id="importBg" onclick="if(event.target===this)this.classList.remove('open')">
-  <div class="modal">
-    <h2>Import plugin from file</h2>
-    <p class="muted small" style="margin-top:0">For when you don't use Git. Pick the plugin export (.sql) — add JS/CSS assets if you have them. The files are stored in a managed folder and analysed like a repo.</p>
-    <label>Name <span class="muted small">(optional — derived from the .sql if empty)</span></label><input id="impName" placeholder="e.g. ColorPicker">
-    <label>Files <span class="muted small">(.sql required; .js/.css/.json optional)</span></label>
-    <input id="impFiles" type="file" multiple accept=".sql,.js,.css,.json,.md,.txt">
-    <div class="foot">
-      <button class="ghost" onclick="closeImport()">Cancel</button>
-      <button class="primary" onclick="doImport()">Import</button>
     </div>
   </div>
 </div>
@@ -1002,32 +992,34 @@ async function openLog(name, targetId='logArchive'){
   }catch(e){ toast('Error: '+e.message); }
 }
 
-// T-144: Datei-Import (kein Git) — Dateien als Text lesen und an /api/import-file senden.
-function openImport(){ $('impName').value=''; $('impFiles').value=''; $('importBg').classList.add('open'); }
-function closeImport(){ $('importBg').classList.remove('open'); }
-async function doImport(){
-  const input = $('impFiles');
-  const fl = input && input.files ? [...input.files] : [];
-  if(!fl.length) return toast('Pick at least the plugin .sql file');
-  if(!fl.some(f=>/\.sql$/i.test(f.name))) return toast('A plugin export (.sql) is required');
-  toast('Importing…');
-  try{
-    const files = await Promise.all(fl.map(f => f.text().then(content => ({ name: f.name, content }))));
-    const r = await api('POST','/api/import-file', { name: $('impName').value.trim(), files });
-    closeImport(); await load();
-    toast(`Imported “${r.component.name}” (${(r.files||[]).length} file(s))`);
-    if(r.component&&r.component.id) openDetail(r.component.id);
-  }catch(e){ toast('Error: '+(e.message||e)); }
-}
-
 function openEdit(c){
-  $('mTitle').textContent = c&&c.id ? 'Edit plugin' : 'Add plugin';
+  const editing = !!(c&&c.id);
+  $('mTitle').textContent = editing ? 'Edit plugin' : 'Add plugin';
   $('mId').value=c&&c.id||''; $('mName').value=c&&c.name||''; $('mPath').value=c&&c.path||'';
+  // Datei-Import nur beim Anlegen anbieten (beim Bearbeiten sinnlos).
+  const fr=$('mFilesRow'); if(fr) fr.style.display = editing ? 'none' : 'block';
+  const mf=$('mFiles'); if(mf) mf.value='';
   $('modalBg').classList.add('open');
 }
 function closeModal(){ $('modalBg').classList.remove('open'); }
 async function saveComponent(){
   const id=$('mId').value;
+  // Herkunft 1 — Datei-Import (kein Git): sind beim Anlegen Dateien gewählt, diese hochladen.
+  const mf=$('mFiles');
+  const fl = (!id && mf && mf.files) ? [...mf.files] : [];
+  if(fl.length){
+    if(!fl.some(f=>/\.sql$/i.test(f.name))) return toast('A plugin export (.sql) is required');
+    toast('Importing…');
+    try{
+      const files = await Promise.all(fl.map(f => f.text().then(content => ({ name: f.name, content }))));
+      const r = await api('POST','/api/import-file', { name: $('mName').value.trim(), files });
+      closeModal(); await load();
+      toast(`Imported “${r.component.name}” (${(r.files||[]).length} file(s))`);
+      if(r.component&&r.component.id) openDetail(r.component.id);
+    }catch(e){ toast('Error: '+(e.message||e)); }
+    return;
+  }
+  // Herkunft 2 — Git-URL/lokaler Pfad (bestehendes Verhalten).
   const p=$('mPath').value.trim();
   const isUrl=/^(https?:\/\/|git@)/i.test(p); // URL → klonen (Repo zuordnen), lokaler Pfad → direkt
   // Typ/Format/Status werden automatisch erkannt — der Nutzer wählt sie nicht.
