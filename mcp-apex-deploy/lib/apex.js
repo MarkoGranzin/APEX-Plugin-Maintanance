@@ -183,6 +183,8 @@ export function buildSetupManifest(sqlText, opts = {}) {
       // dynamic-action/template-component = eigener Aufbau (noch nicht automatisiert).
       setupKind: a.kind,
       region: { name: `Test: ${a.internalName || 'plugin'}`, plugin: a.displayName || a.internalName },
+      // Bei Item-Plugins: das Page-Item VOM Plugin-Typ, das in einer Host-Region angelegt wird.
+      item: a.kind === 'item' ? { name: `P${pageId}_ITEM`, plugin: a.displayName || a.internalName, hostRegion: 'Host' } : null,
       // Page-Item, das die Region über „Items to Submit" referenziert (Pflicht bei AJAX_ITEMS_TO_SUBMIT).
       pageItem: ajaxItem ? { name: ajaxItem, type: 'Hidden', ajaxItemsToSubmit: true } : null,
       // Datenquelle: eigene SQL des Aufrufers, sonst die plugin-eigene Beispielquery.

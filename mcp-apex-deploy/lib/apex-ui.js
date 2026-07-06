@@ -141,6 +141,16 @@ async function pdSetProp(page, label, value) {
   }, { label, value });
 }
 
+/** jQuery-UI-Draggable-kompatibler Maus-Drag: down → Threshold-Ruck → in Schritten zum Ziel → up.
+ *  Startet in der Mitte der Quell-Box (sb = boundingBox), lässt bei (tx,ty) los. */
+async function pdMouseDrag(page, sb, tx, ty) {
+  await page.mouse.move(sb.x + sb.width / 2, sb.y + sb.height / 2); await page.mouse.down();
+  await page.mouse.move(sb.x + sb.width / 2 + 8, sb.y + sb.height / 2 + 8); await page.waitForTimeout(200);
+  for (let i = 1; i <= 12; i++) { await page.mouse.move(sb.x + (tx - sb.x) * i / 12, sb.y + (ty - sb.y) * i / 12); await page.waitForTimeout(60); }
+  await page.mouse.move(tx, ty); await page.waitForTimeout(400); await page.mouse.up();
+  await page.waitForTimeout(2500);
+}
+
 /**
  * Löscht eine Seite über den Page Designer (Utilities → „Delete Page" → „Permanently Delete Page").
  * Für das Aufräumen alter/verwaister Testseiten. @param {{appId:number|string, pageId:number|string}} o
@@ -161,6 +171,117 @@ export async function uiDeletePage(page, o = {}) {
   await page.waitForLoadState('networkidle').catch(() => {}); await page.waitForTimeout(2500);
   const gone = !new RegExp(`${o.appId}:${o.pageId}\\b`).test(await page.title().catch(() => ''));
   return { ok: clicked && gone, deleted: gone };
+}
+
+/**
+ * Öffnet die Testseite im Page Designer: existiert sie → wiederverwenden, sonst per Create-Page-Wizard
+ * (Blank) neu anlegen. Gemeinsame Basis für Region- UND Item-Testseiten. Setzt ein großes, festes Viewport
+ * (Layout/Gallery-Positionen für den Maus-Drag vorhersehbar). Gibt {ok, mode|error} zurück; bei ok ist der
+ * Page Designer der Zielseite offen.
+ * @param {{appId:number|string, pageId:number|string, pageName:string}} o
+ */
+async function pdOpenOrCreatePage(page, o) {
+  await page.setViewportSize({ width: 1500, height: 950 }).catch(() => {});
+  const settle = async (ms = 1500) => { await page.waitForLoadState('networkidle').catch(() => {}); await page.waitForTimeout(ms); };
+  const wizFrame = () => page.frames().find((f) => f !== page.mainFrame());
+  const appTile = page.locator(`a[href*="fb_flow_id=${o.appId}"]`);
+  if (!(await appTile.count())) return { ok: false, error: `App ${o.appId} nicht gefunden.` };
+  await appTile.first().click(); await settle();
+  const existing = page.getByRole('link', { name: new RegExp(`\\b${o.pageId}\\b`) });
+  let mode = 'reuse';
+  if (await existing.count()) {
+    await existing.first().click(); await settle(2500);
+  } else {
+    mode = 'create';
+    await page.getByRole('button', { name: /create page/i }).first().click(); await page.waitForTimeout(3500);
+    let fr = wizFrame();
+    if (!fr) return { ok: false, error: 'Create-Page-Wizard nicht geöffnet.' };
+    await fr.getByText(/^Blank Page$/i).first().click().catch(() => {});
+    await fr.getByRole('button', { name: /^Next/i }).first().click().catch(() => {}); await page.waitForTimeout(2500);
+    fr = wizFrame() || fr;
+    await fr.evaluate(({ pg, nm }) => {
+      const byLbl = (re) => [...document.querySelectorAll('input')].find((i) => { const l = document.querySelector(`label[for='${i.id}']`); return l && re.test(l.innerText); });
+      const n = byLbl(/page number/i); if (n) { n.value = pg; try { apex.item(n.id).setValue(pg); } catch (e) { /* egal */ } }
+      const m = byLbl(/^name$/i); if (m) { m.value = nm; try { apex.item(m.id).setValue(nm); } catch (e) { /* egal */ } }
+    }, { pg: String(o.pageId), nm: o.pageName });
+    await page.waitForTimeout(500);
+    for (let i = 0; i < 4; i++) { const cr = fr.getByRole('button', { name: /^Create Page$|^Create$/i }); const nx = fr.getByRole('button', { name: /^Next/i }); if (await cr.count()) { await cr.first().click(); break; } else if (await nx.count()) { await nx.first().click(); } else break; await page.waitForTimeout(2000); fr = wizFrame() || fr; }
+    await settle(2500);
+  }
+  if (!new RegExp(`${o.appId}:${o.pageId}`).test(await page.title().catch(() => ''))) return { ok: false, error: 'Page Designer nicht geöffnet.' };
+  return { ok: true, mode };
+}
+
+/** Seite öffentlich machen + speichern (gemeinsamer Abschluss für Region- und Item-Testseiten). */
+async function pdPublishAndSave(page, o) {
+  await page.locator('.a-TreeView-label').filter({ hasText: rxi(`Page ${o.pageId}`) }).first().click().catch(() => {}); await page.waitForTimeout(700);
+  const auth = await pdSetProp(page, 'Authentication', 'Page Is Public');
+  await page.waitForTimeout(400);
+  await page.locator('#pdSave, button:has-text("Save")').first().click().catch(() => {});
+  await page.waitForLoadState('networkidle').catch(() => {}); await page.waitForTimeout(2500);
+  const body = (await page.locator('body').innerText().catch(() => '')).replace(/\s+/g, ' ');
+  const saveError = (body.match(/ORA-\d+[^.]{0,100}|could not be saved|processing failed/i) || [])[0] || null;
+  return { auth, saveError };
+}
+
+/**
+ * Baut eine Testseite für ein ITEM-Plugin im PAGE DESIGNER: Create/Reuse-Seite → Host-Region (Static
+ * Content) per Drag → Page-Item VOM Plugin-Typ per Drag aus der Items-Gallery IN die Host-Region → Item-Name
+ * + Custom-Attribute (z.B. „Color Json") → Seite öffentlich → Save. Generisch für jedes Item-Plugin.
+ * @param {{appId:number|string, pageId:number|string, pageName:string, pluginDisplayName:string,
+ *          itemName:string, hostRegionName?:string, attributes?:Array<{prompt:string,value:string}>}} o
+ */
+export async function uiCreateItemTestPage(page, o = {}) {
+  const opened = await pdOpenOrCreatePage(page, o);
+  if (!opened.ok) return opened;
+  const hostName = o.hostRegionName || 'Host';
+
+  // 1) Host-Region (Static Content) anlegen, falls noch nicht vorhanden.
+  let hostNode = page.getByText(new RegExp(`^${rxEsc(hostName)}$`)).first();
+  if (!(await hostNode.count())) {
+    await page.locator('button:has-text("Regions"),[role=tab]:has-text("Regions")').first().click().catch(() => {}); await page.waitForTimeout(1000);
+    const rsrc = page.locator('.a-Gallery-region').filter({ hasText: /Static Content/i }).first();
+    if (!(await rsrc.count())) return { ok: false, error: 'Static-Content-Region nicht in der Gallery.' };
+    await rsrc.scrollIntoViewIfNeeded().catch(() => {}); await page.waitForTimeout(400);
+    const rb = await rsrc.boundingBox();
+    await pdMouseDrag(page, rb, Math.round(1500 * 0.57), Math.min(rb.y - 80, 684));
+    await pdSetProp(page, 'Name', hostName);
+    await page.waitForTimeout(500);
+  }
+  await page.getByText(new RegExp(`^${rxEsc(hostName)}$`)).first().click().catch(() => {}); await page.waitForTimeout(800);
+
+  // Host-Region-Position im LAYOUT (Grid) ermitteln — bewusst NUR im Layout-Panel suchen (nicht im
+  // Rendering-Tree), damit das Item-Drop-Ziel die echte Region-Fläche trifft. Drop-Ziel für das Item.
+  const hostBox = await page.evaluate((name) => {
+    const re = new RegExp(name, 'i');
+    const el = [...document.querySelectorAll('.a-Designer-gridRegion, [class*=Designer] [class*=region], .a-Designer-region')].find((e) => re.test(e.innerText || ''));
+    const box = el?.getBoundingClientRect();
+    return box && box.width > 0 ? { x: Math.round(box.x), y: Math.round(box.y), w: Math.round(box.width), h: Math.round(box.height) } : null;
+  }, rxEsc(hostName)).catch(() => null);
+
+  // 2) Item VOM Plugin-Typ aus der Items-Gallery in die Host-Region ziehen.
+  const treeBefore = await page.locator('.a-TreeView-label').evaluateAll((els) => els.map((e) => e.innerText.trim()));
+  await page.locator('[role=tab]:has-text("Items"), button:has-text("Items")').first().click().catch(() => {}); await page.waitForTimeout(1200);
+  const isrc = page.locator('.a-Gallery-pageItem').filter({ hasText: rxi(o.pluginDisplayName) }).first();
+  if (!(await isrc.count())) return { ok: false, error: `Item-Typ „${o.pluginDisplayName}" nicht in der Items-Gallery (installiert?).` };
+  await isrc.scrollIntoViewIfNeeded().catch(() => {}); await page.waitForTimeout(300);
+  const ib = await isrc.boundingBox();
+  const tx = hostBox ? hostBox.x + Math.min(hostBox.w / 2, 120) : Math.round(1500 * 0.5);
+  const ty = hostBox ? hostBox.y + Math.min(hostBox.h / 2, 40) : 300;
+  await pdMouseDrag(page, ib, tx, ty);
+  // Prüfen, ob ein Page-Item entstand (neuer Knoten P<page>_… bzw. selektiertes Name-Property).
+  const selName = await page.evaluate(() => { const pr = [...document.querySelectorAll('.a-Property')].find((e) => (e.querySelector('.a-Property-label')?.innerText || '').trim() === 'Name'); const inp = pr?.querySelector('input,textarea'); return inp ? inp.value : null; });
+  if (!selName || !/^P\d+_/.test(selName)) return { ok: false, error: 'Item-Drag verfehlte die Host-Region (kein Page-Item angelegt).' };
+
+  // 3) Item benennen + Custom-Attribute setzen.
+  const rName = await pdSetProp(page, 'Name', o.itemName);
+  await page.getByText(new RegExp(`^${rxEsc(o.itemName)}$`)).first().click().catch(() => {}); await page.waitForTimeout(800);
+  const attrs = [];
+  for (const a of (o.attributes || [])) { if (a && a.prompt && a.value != null && a.value !== '') attrs.push({ prompt: a.prompt, r: await pdSetProp(page, a.prompt, a.value) }); }
+
+  // 4) Öffentlich + Save.
+  const { auth, saveError } = await pdPublishAndSave(page, o);
+  return { ok: rName === 'ok' && !saveError, mode: opened.mode, item: { name: rName, was: selName }, attributes: attrs, auth, saveError };
 }
 
 /**

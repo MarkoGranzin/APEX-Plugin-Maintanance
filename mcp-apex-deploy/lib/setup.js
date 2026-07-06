@@ -9,7 +9,7 @@
  * Resultat: mcp-apex-deploy/lib/setup.js
  */
 
-import { loadChromium, uiLogin, uiImportFile, uiSetPluginFileUrls, uiCreateTestPage, smokeCheckPage } from './apex-ui.js';
+import { loadChromium, uiLogin, uiImportFile, uiSetPluginFileUrls, uiCreateTestPage, uiCreateItemTestPage, smokeCheckPage } from './apex-ui.js';
 
 const clean = (v) => String(v ?? '').replace(/[\x00-\x1f]+/g, ' ');
 
@@ -21,7 +21,7 @@ const clean = (v) => String(v ?? '').replace(/[\x00-\x1f]+/g, ' ');
  * @param {object} [deps]  injizierbar (Default: echte apex-ui-Funktionen)
  */
 export async function setupFromManifest(manifest, connection, o = {}, deps = {}) {
-  const d = { loadChromium, uiLogin, uiImportFile, uiSetPluginFileUrls, uiCreateTestPage, smokeCheckPage, ...deps };
+  const d = { loadChromium, uiLogin, uiImportFile, uiSetPluginFileUrls, uiCreateTestPage, uiCreateItemTestPage, smokeCheckPage, ...deps };
   const m = manifest || {};
   if (!m.plugin || !m.plugin.internalName) return { ok: false, error: 'Manifest ohne plugin.internalName.' };
   const c = connection || {};
@@ -58,19 +58,26 @@ export async function setupFromManifest(manifest, connection, o = {}, deps = {})
     }
 
     // 3) Testseite im Page Designer aus dem Manifest bauen — abhängig vom Plugin-TYP.
-    //    region = Plugin-Region (automatisiert). item/dynamic-action/template-component = eigener Aufbau,
-    //    noch nicht automatisiert → Plugin ist installiert + File-URLs gesetzt, aber keine Testseite gebaut.
+    //    region = Plugin-Region · item = Page-Item vom Plugin-Typ in einer Host-Region (beide automatisiert).
+    //    dynamic-action/template-component = eigener Aufbau, noch nicht automatisiert → Plugin ist installiert
+    //    + File-URLs gesetzt, aber keine Testseite gebaut (ehrlich gemeldet).
     const kind = m.plugin?.kind || m.testPage?.setupKind || 'region';
-    if (kind !== 'region') {
-      result.testPage = { ok: false, setupKind: kind, error: `Testseiten-Aufbau für Typ „${kind}" (${m.plugin?.pluginType || '?'}) ist noch nicht automatisiert — automatisiert ist aktuell „region". Das Plugin wurde installiert${result.fileUrls ? ' und die File-URLs gesetzt' : ''}.` };
+    if (kind !== 'region' && kind !== 'item') {
+      result.testPage = { ok: false, setupKind: kind, error: `Testseiten-Aufbau für Typ „${kind}" (${m.plugin?.pluginType || '?'}) ist noch nicht automatisiert — automatisiert sind aktuell „region" und „item". Das Plugin wurde installiert${result.fileUrls ? ' und die File-URLs gesetzt' : ''}.` };
       result.render = { rendered: false, note: `Kein Auto-Render für Typ „${kind}".` };
       return result;
     }
     const pdPage = await browser.newPage();
     const pdLogin = await d.uiLogin(pdPage, cfg);
-    result.testPage = pdLogin.ok
-      ? await d.uiCreateTestPage(pdPage, { appId: c.appId, pageId, pageName, pluginDisplayName: displayName, regionName, sourceSql, attributes })
-      : { ok: false, error: 'Login für Page-Designer-Schritt fehlgeschlagen.' };
+    if (!pdLogin.ok) {
+      result.testPage = { ok: false, error: 'Login für Page-Designer-Schritt fehlgeschlagen.' };
+    } else if (kind === 'item') {
+      const itemName = m.testPage?.item?.name || `P${pageId}_ITEM`;
+      const hostRegionName = m.testPage?.item?.hostRegion || 'Host';
+      result.testPage = await d.uiCreateItemTestPage(pdPage, { appId: c.appId, pageId, pageName, pluginDisplayName: displayName, itemName, hostRegionName, attributes });
+    } else {
+      result.testPage = await d.uiCreateTestPage(pdPage, { appId: c.appId, pageId, pageName, pluginDisplayName: displayName, regionName, sourceSql, attributes });
+    }
     await pdPage.close().catch(() => {});
 
     // 4) Render-Smoke-Test über die Friendly-URL (öffentliche Testseite).
