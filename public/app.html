@@ -281,6 +281,7 @@
   <div class="modal">
     <h2 id="confirmTitle">Please confirm</h2>
     <p id="confirmMsg" class="muted small" style="margin-top:0"></p>
+    <input id="confirmInput" style="display:none;width:100%;margin:2px 0 10px" oninput="__confirmTypeCheck()" autocomplete="off">
     <div class="foot">
       <button class="ghost" onclick="__resolveConfirm(false)">Cancel</button>
       <button class="primary danger" id="confirmOk" onclick="__resolveConfirm(true)">Delete</button>
@@ -520,6 +521,13 @@ async function openDetail(id){
             <button onclick="runUpload()" title="Commit current changes on a NEW branch and push it + show the PR link (asks for confirmation). Never touches your current branch.">📤 Upload (branch + PR)</button>
             <button onclick="apexLive()" title="Spielt das Plugin in die konfigurierte APEX-Ziel-App ein (Shared Components → Plug-ins → Import), setzt die File URLs to Load, legt eine analyse-getriebene Testseite an (Page-Item/AJAX/ConfigJSON) und macht einen headless Render-Smoke-Test. Braucht die APEX-Verbindung in den Settings. Test-App verwenden!">🚀 In APEX einspielen &amp; live testen</button>
           </div>
+          <details class="moreact" style="margin-top:12px">
+            <summary style="color:var(--red)">⚠ Danger zone</summary>
+            <div class="small muted" style="margin-top:8px">Removes the plugin from this tool, deletes its test page + plug-in from the configured APEX app, and deletes the data stored on disk (clone, mock, logs, tests). Cannot be undone.</div>
+            <div class="inline" style="margin-top:6px">
+              <button class="ghost small danger" onclick="purgeComponent()" title="Löscht das Plugin überall: Tool-Registry, APEX-Testseite + Plug-in, und die auf der Platte gespeicherten Daten (Klon, Mock, Logs, Tests). Fragt zur Sicherheit den exakten Namen ab.">🗑 Delete plugin everywhere…</button>
+            </div>
+          </details>
         </details>
       </div>
       ${c.reviewUrl?`<div class="finding low" style="margin-top:8px">📤 Open review: <a href="${esc(c.reviewUrl)}" target="_blank" rel="noopener" style="color:var(--accent)">branch ${esc(c.reviewBranch||'')} → open PR ↗</a></div>`:''}
@@ -1008,18 +1016,38 @@ async function saveComponent(){
 function busyOverlay(on, txt){ const o=$('busyOverlay'); if(!o) return; if(txt) $('busyOverlayTxt').textContent=txt; o.hidden=!on; }
 // App-eigene, nicht-blockierende Bestätigung (ersetzt natives confirm()): gibt ein Promise<bool> zurück.
 let __confirmResolve = null;
-function __resolveConfirm(v){ const bg=$('confirmBg'); if(bg) bg.classList.remove('open'); const r=__confirmResolve; __confirmResolve=null; if(r) r(v); }
-function uiConfirm(msg, okLabel){
+let __confirmExpect = null; // bei destruktiven Aktionen: exakter Text, der zum Bestätigen getippt werden muss
+function __resolveConfirm(v){ const bg=$('confirmBg'); if(bg) bg.classList.remove('open'); const inp=$('confirmInput'); if(inp){inp.style.display='none';inp.value='';} $('confirmOk').disabled=false; __confirmExpect=null; const r=__confirmResolve; __confirmResolve=null; if(r) r(v); }
+function __confirmTypeCheck(){ $('confirmOk').disabled = ($('confirmInput').value !== __confirmExpect); }
+function uiConfirm(msg, okLabel, opts){
+  opts = opts || {};
   return new Promise((resolve)=>{
     __confirmResolve = resolve;
     $('confirmMsg').textContent = msg;
     if(okLabel) $('confirmOk').textContent = okLabel;
+    const inp = $('confirmInput'); __confirmExpect = opts.requireText || null;
+    if(__confirmExpect){ inp.style.display='block'; inp.value=''; inp.placeholder = opts.placeholder || `Type “${__confirmExpect}” to confirm`; $('confirmOk').disabled = true; setTimeout(()=>inp.focus(), 60); }
+    else { inp.style.display='none'; $('confirmOk').disabled = false; }
     $('confirmBg').classList.add('open');
   });
 }
 async function delComponent(c){
   if(!(await uiConfirm(`Really delete component “${c.name}”? This removes it from the list.`, 'Delete'))) return;
   await api('DELETE','/api/components/'+c.id); await load(); toast('Deleted'); // await → Header/Kennzahlen sofort aktualisiert
+}
+// T-143: Plugin ÜBERALL löschen (Tool + APEX-Testseite/Plug-in + Platten-Daten). Bewusst versteckt
+// (Danger zone) + Tipp-Bestätigung (exakter Name), weil destruktiv und nicht umkehrbar.
+async function purgeComponent(){
+  const c = current; if(!c) return;
+  const ok = await uiConfirm(`Delete “${c.name}” EVERYWHERE — from this tool, from the APEX test app (its test page + plug-in), and its data on disk (clone, mock, logs, tests). This cannot be undone.`, 'Delete everywhere', { requireText: c.name });
+  if(!ok) return;
+  toast('Deleting everywhere…');
+  try{
+    const r = await api('POST','/api/components/'+c.id+'/purge', { confirm: c.name });
+    closeDrawer(); await load();
+    const apex = r.apex ? (r.apex.ok ? 'APEX cleaned' : 'APEX: '+(r.apex.error||'partial')) : 'APEX skipped (no connection)';
+    toast(`Deleted “${r.component}” — ${apex}, ${(r.removed||[]).length} path(s) removed`);
+  }catch(e){ toast('Error: '+(e.message||e)); }
 }
 // F-30/T-120: Anforderungen (Akzeptanz-Vertrag) als Gherkin .feature exportieren (devhub-tauglich).
 async function exportRequirements(c){
@@ -1232,7 +1260,7 @@ async function loadLibraries(){
 }
 
 // Build-Marker: muss mit BUILD in start.js übereinstimmen. Erkennt einen veralteten Backend-Prozess.
-const APP_BUILD = '2026-07-05.76';
+const APP_BUILD = '2026-07-06.77';
 async function checkBackend(){
   const b = $('staleBanner');
   try{

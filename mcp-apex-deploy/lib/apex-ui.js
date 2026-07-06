@@ -195,6 +195,41 @@ export async function uiDeletePage(page, o = {}) {
 }
 
 /**
+ * Deinstalliert ein Plug-in aus der App (Shared Components → Plug-ins → Plugin öffnen → Delete → bestätigen).
+ * Für das vollständige Löschen eines Plugins aus der Test-App. Löscht nur das per displayName benannte
+ * plugin-EIGENE Plug-in. @param {{appId:number|string, displayName:string}} o
+ */
+export async function uiDeletePlugin(page, o = {}) {
+  const clickFirst = async (locs) => { for (const l of locs) { if (await l.count()) { await l.first().click(); await page.waitForLoadState('networkidle').catch(() => {}); await page.waitForTimeout(1000); return true; } } return false; };
+  const appTile = page.locator(`a[href*="fb_flow_id=${o.appId}"]`);
+  if (!(await appTile.count())) return { ok: false, error: `App ${o.appId} nicht gefunden.` };
+  await appTile.first().click(); await page.waitForLoadState('networkidle').catch(() => {}); await page.waitForTimeout(1500);
+  await clickFirst([page.getByRole('link', { name: /shared components/i }), page.getByText(/shared components/i)]);
+  await clickFirst([page.getByRole('link', { name: /^plug-?ins$/i }), page.getByText(/^plug-?ins$/i)]);
+  const nameRe = rxi(o.displayName);
+  const listUrl = page.url();
+  if (!(await clickFirst([page.getByRole('link', { name: nameRe })]))) return { ok: true, deleted: false, note: 'Plugin nicht in der Liste (schon entfernt?).' };
+  await page.waitForTimeout(800);
+  // Delete-Button auf der Plug-in-Edit-Seite. APEX BLENDET ihn aus, wenn das Plug-in noch REFERENZIERT ist
+  // (z.B. auf einer Seite genutzt) — dann ehrlich melden statt zu tun als sei gelöscht. Sicherheits-Feature:
+  // ein anderweitig genutztes Plugin wird nicht genullt (die eigene Testseite wird beim Purge vorher gelöscht).
+  const delBtn = page.locator('button:has-text("Delete"), a.a-Button:has-text("Delete"), input[type=button][value="Delete" i]').first();
+  if (!(await delBtn.count())) return { ok: false, deleted: false, note: 'Kein Delete-Button — Plug-in ist noch referenziert (erst alle Nutzungen/Testseite entfernen).' };
+  page.on('dialog', (d) => d.accept().catch(() => {})); // Sicherung, falls confirmDelete einen NATIVEN Dialog nutzt
+  await delBtn.click().catch(() => {});
+  await page.waitForTimeout(1200);
+  // Der Delete-Button ruft confirmDelete(...) → jQuery-UI-Bestätigungsdialog. Dessen Bestätigungs-Button
+  // (OK/Delete) im DIALOG-Button-Pane klicken (NICHT den verdeckten Edit-Seiten-Delete-Button).
+  const dlgOk = page.locator('.ui-dialog-buttonpane button, .ui-dialog button.ui-button, [role=dialog] button').filter({ hasText: /^(OK|Delete|Yes)$/i }).first();
+  if (await dlgOk.count()) await dlgOk.click().catch(() => {});
+  await page.waitForLoadState('networkidle').catch(() => {}); await page.waitForTimeout(2000);
+  // Ehrlich verifizieren: zurück zur Plug-ins-Liste und prüfen, dass das Plugin dort WIRKLICH fehlt.
+  await page.goto(listUrl, { waitUntil: 'domcontentloaded' }).catch(() => {}); await page.waitForTimeout(1500);
+  const gone = !(await page.getByRole('link', { name: nameRe }).count());
+  return { ok: gone, deleted: gone };
+}
+
+/**
  * Öffnet die Testseite im Page Designer: existiert sie → wiederverwenden, sonst per Create-Page-Wizard
  * (Blank) neu anlegen. Gemeinsame Basis für Region- UND Item-Testseiten. Setzt ein großes, festes Viewport
  * (Layout/Gallery-Positionen für den Maus-Drag vorhersehbar). Gibt {ok, mode|error} zurück; bei ok ist der

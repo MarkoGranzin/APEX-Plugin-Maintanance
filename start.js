@@ -21,7 +21,8 @@ import { createScheduler } from './src/service/scheduler.js';
 import { createHistory, recordRun, listRuns } from './src/report/history.js';
 import { createSettings, setApexTarget } from './src/config/settings.js';
 import { deployAndTest, findPluginExport } from './src/service/apex-live.js';
-import { loadChromium, uiLogin } from './mcp-apex-deploy/lib/apex-ui.js';
+import { loadChromium, uiLogin, uiDeletePage, uiDeletePlugin } from './mcp-apex-deploy/lib/apex-ui.js';
+import { purgeComponent } from './src/service/purge-component.js';
 import { buildSetupManifest } from './mcp-apex-deploy/lib/apex.js';
 import { createComponentStore } from './src/gui/store.js';
 import { apiHandler, metaApiHandler } from './src/gui/api.js';
@@ -62,7 +63,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const DATA_DIR = process.env.AISPP_DATA_DIR || path.join(__dirname, 'data');
 // Build-Marker: muss mit APP_BUILD in public/app.html übereinstimmen. Bei Backend-Änderungen erhöhen.
 // Das Frontend vergleicht beide und warnt, wenn der laufende Dienst veraltet ist (Neustart nötig).
-const BUILD = '2026-07-05.76';
+const BUILD = '2026-07-06.77';
 const C = { reset: '\x1b[0m', bold: '\x1b[1m', dim: '\x1b[2m', green: '\x1b[32m', yellow: '\x1b[33m', red: '\x1b[31m', cyan: '\x1b[36m' };
 const c = (col, s) => `${C[col]}${s}${C.reset}`;
 
@@ -750,6 +751,42 @@ function cmdServe(portArg) {
       try { store.addReview(c.id, { kind: 'apex-live', pass: r.ok, rendered: !!r.render?.rendered, apexError: r.render?.apexError || null, url: r.render?.url || null, plugin: r.plugin, pageId }); } catch { /* egal */ }
       // Passwort/Verbindung nie ins Ergebnis spiegeln (deployAndTest gibt es ohnehin nicht zurück).
       return json(res, r, 200);
+    });
+
+    // T-143 — Plugin VOLLSTÄNDIG löschen (Purge): aus dem Tool, aus der Test-APEX-App (eigene Seite +
+    // eigenes Plug-in) UND von der Platte (nur verwaltete Pfade). Bewusst destruktiv → Namens-Bestätigung
+    // Pflicht (confirm === exakter Name). APEX-Cleanup ist best-effort (fehlt die Verbindung → nur Platte+Tool).
+    if (p.startsWith('/api/components/') && p.endsWith('/purge') && req.method === 'POST') return withComponent(async (c, id) => {
+      const body = await readBody(req).catch(() => ({}));
+      if (!body || String(body.confirm || '') !== c.name) {
+        return json(res, { ok: false, error: 'Bestätigung stimmt nicht — zum Löschen den exakten Plugin-Namen eingeben.' }, 400);
+      }
+      const t = settings.apexTarget || {}; let pass; try { pass = secretStore.get('apex-pass'); } catch { /* kein Passwort */ }
+      const apexCleanup = (t.baseUrl && t.workspace && t.loginUser && pass && t.appId) ? async (comp) => {
+        const exportFile = comp.path ? findPluginExport(comp.path) : null;
+        let displayName = null;
+        try { if (exportFile) displayName = buildSetupManifest(fs.readFileSync(exportFile, 'utf8')).plugin.displayName; } catch { /* Analyse optional */ }
+        const chromium = await loadChromium(__dirname);
+        if (!chromium) return { ok: false, error: 'Playwright nicht installiert — APEX-Cleanup übersprungen.' };
+        const browser = await chromium.launch({ headless: true });
+        try {
+          const pg = await browser.newPage();
+          const login = await uiLogin(pg, { baseUrl: t.baseUrl, workspace: t.workspace, user: t.loginUser, pass });
+          if (!login.ok) return { ok: false, error: 'APEX-Login fehlgeschlagen — Seite/Plug-in nicht entfernt.' };
+          const out = { ok: true };
+          if (comp.apexPageId) out.page = await uiDeletePage(pg, { appId: Number(t.appId), pageId: comp.apexPageId });
+          if (displayName) out.plugin = await uiDeletePlugin(pg, { appId: Number(t.appId), displayName });
+          return out;
+        } finally { await browser.close(); }
+      } : null;
+
+      const result = await purgeComponent(store, id, {
+        apexCleanup, dataDir: DATA_DIR, workDir: settings.workDir, slugify,
+        rm: (pp) => fs.rmSync(pp, { recursive: true, force: true }),
+        exists: (pp) => fs.existsSync(pp),
+      });
+      writeLog(c, `[purge] Plugin gelöscht — APEX: ${result.apex ? (result.apex.ok ? 'entfernt' : result.apex.error) : 'übersprungen (keine Verbindung)'}; Platte: ${result.removed.length} Pfad(e)`);
+      return json(res, result, 200);
     });
 
     // Setup-Manifest („Rezept") pro Plugin: alles zum Einrichten der Testseite, rein aus der Analyse.
