@@ -474,14 +474,10 @@ function renderTable(){
       <td class="small muted">${(c.libs||[]).slice(0,4).map(l=>`<span class="badge" style="${l.status==='verwundbar'?'color:var(--red);border-color:#f8514966':(l.status==='nicht gepflegt'||l.status==='veraltet')?'color:var(--yellow);border-color:#d2992266':l.status==='unbekannt'?'color:var(--muted)':''}" title="${esc((libStatusLabel(l.status)||l.status||'')+(l.action&&l.action!=='ok'?' → '+l.action+(l.actionPath?' ('+l.actionPath+')':''):'')+(l.security&&l.security.scanned?' · 🛡 '+l.security.reason:''))}">${esc(l.name)}@${esc(l.version)}</span>${l.status==='veraltet'?secMark(l):''}`).join(' ')||'—'}${(c.libs||[]).length>4?` <span class="muted">+${c.libs.length-4}</span>`:''}</td>
       <td class="small muted">${fmtDate(c.lastChange&&c.lastChange.at)}</td>
       <td class="small">${esc(c.changeSummary)}</td>
-      <td><div class="actions">
-        ${c.mockUrl?`<button class="ghost small" data-act="mock" title="Open the rendered mock in a new tab${c.mockMode==='ai'?' (AI-written)':c.mockMode?' (static fallback)':''}">🧪 Open mock</button>`:''}
-        ${c.mockSelfCheck?`<button class="ghost small" data-act="req" title="Export the acceptance requirements (works-as-before) as a Gherkin .feature — devhub-ready">⤓ Req</button>`:''}
-        ${(c.libActions&&c.libActions.redevelop)?`<button class="ghost small" data-act="redev" title="Dead library without successor → slice-wise re-development against the acceptance contract (license-gated)">🧬 Re-develop</button>`:''}
-        <button class="ghost small" data-act="edit">Edit</button>
-        <button class="ghost small danger" data-act="del">Delete</button>
-      </div></td>`;
-    tr.onclick = (e)=>{ const a=e.target.getAttribute('data-act'); if(a==='mock'){e.stopPropagation();window.open(c.mockUrl,'_blank','noopener');} else if(a==='req'){e.stopPropagation();exportRequirements(c);} else if(a==='redev'){e.stopPropagation();redevelopDeadLib(c);} else if(a==='edit'){e.stopPropagation();openEdit(c);} else if(a==='del'){e.stopPropagation();delComponent(c);} else openDetail(c.id); };
+      <td style="text-align:right;color:var(--muted);font-size:18px;width:24px" title="Open details">›</td>`;
+    // Actions leben jetzt im Drawer (bessere UX): die ganze Zeile öffnet das Detail.
+    tr.style.cursor = 'pointer';
+    tr.onclick = ()=> openDetail(c.id);
     rows.appendChild(tr);
   }
   renderOverview();
@@ -508,34 +504,40 @@ async function openDetail(id){
         <span class="badge">${c.type==='template_component'?'Template Component':'Plugin'}</span>
         <span class="badge ${c.formatBadge==='APEX-SQL-Export'?'export':''}">${esc(c.formatBadge)}</span>
       </div>
-      <div class="inline" style="margin-top:10px;gap:6px">
+      <!-- Aktionen (UX-Rework): Primär prominent, Häufige gleich daneben, Erweitertes/Git eingeklappt, Löschen in der Danger-Zone. -->
+      <div class="inline" style="margin-top:10px;gap:6px;flex-wrap:wrap">
         <button class="primary" onclick="runMaintain()" title="Full cycle: check → web lib check → apply SAFE lib updates → auto-fix → re-test. Writes files in the workspace. Pushes only if “allow push” is ON.">🧰 Full maintenance now</button>
         <button onclick="runOne()" title="Read-only analysis (status, libraries, protocol). With auto-repair ON this runs Full maintenance instead.">▶ Check</button>
-        <details class="moreact"><summary>⋯ More actions</summary>
-          <div class="small muted" style="margin-top:8px">Read-only / local</div>
-          <div class="inline" style="margin-top:4px;gap:6px">
-            <button onclick="openAssign()" title="Connect/clone the Git repo so check, tests and library detection work.">🔗 Assign repo</button>
-            <button onclick="openGit()" title="Open the repo URL in the browser. No changes.">🌐 Open Git</button>
-            <button onclick="openDir()" title="Open the local working copy in the OS file manager. No changes.">📂 Open locally</button>
-            <button onclick="runReview()" title="Security + quality gate. Read-only — reports findings, changes nothing.">🔍 Manual review</button>
-            <button onclick="rebuildRequirements()" title="Re-derive the acceptance requirements (works-as-before contract incl. the exact APEX parameter/JSON interface) freshly from the mock self-test. Writes only .maintenance/acceptance.json.">🔄 Rebuild requirements</button>
-            <button onclick="apexSetup()" title="Erzeugt aus der Plugin-Analyse das Setup-JSON („Rezept" zum Einrichten einer Testseite: Region-Typ, benötigtes Page-Item + AJAX, Datenquelle/Beispielquery, Attribute mit Defaults, JS/CSS-File-URLs) und lädt es herunter. Schreibt .maintenance/apex-setup.json. Read-only.">🧩 Setup-JSON</button>
-          </div>
-          <div class="small muted" style="margin-top:10px">Writes files / Git <span class="muted">— fixes &amp; AI review live inside “🧰 Full maintenance now”</span></div>
-          <div class="inline" style="margin-top:4px;gap:6px">
-            <button onclick="runUpdate()" title="Update libraries to the latest version. Safe updates are applied directly; for breaking ones you get a force option (you verify) or use the verified migration in the Tests tab.">⬆ Update libs to latest</button>
-            <button onclick="runUpload()" title="Commit current changes on a NEW branch and push it + show the PR link (asks for confirmation). Never touches your current branch.">📤 Upload (branch + PR)</button>
-            <button onclick="apexLive()" title="Spielt das Plugin in die konfigurierte APEX-Ziel-App ein (Shared Components → Plug-ins → Import), setzt die File URLs to Load, legt eine analyse-getriebene Testseite an (Page-Item/AJAX/ConfigJSON) und macht einen headless Render-Smoke-Test. Braucht die APEX-Verbindung in den Settings. Test-App verwenden!">🚀 In APEX einspielen &amp; live testen</button>
-          </div>
-          <details class="moreact" style="margin-top:12px">
-            <summary style="color:var(--red)">⚠ Danger zone</summary>
-            <div class="small muted" style="margin-top:8px">Removes the plugin from this tool, deletes its test page + plug-in from the configured APEX app, and deletes the data stored on disk (clone, mock, logs, tests). Cannot be undone.</div>
-            <div class="inline" style="margin-top:6px">
-              <button class="ghost small danger" onclick="purgeComponent()" title="Löscht das Plugin überall: Tool-Registry, APEX-Testseite + Plug-in, und die auf der Platte gespeicherten Daten (Klon, Mock, Logs, Tests). Fragt zur Sicherheit den exakten Namen ab.">🗑 Delete plugin everywhere…</button>
-            </div>
-          </details>
-        </details>
+        ${c.mockUrl?`<button onclick="window.open(current.mockUrl,'_blank','noopener')" title="Open the rendered mock in a new tab${c.mockMode==='ai'?' (AI-written)':c.mockMode?' (static fallback)':''}">🧪 Open mock</button>`:''}
+        ${c.mockSelfCheck?`<button onclick="exportRequirements(current)" title="Export the acceptance requirements (works-as-before) as a Gherkin .feature — devhub-ready">⤓ Requirements</button>`:''}
+        <button onclick="openEdit(current)" title="Edit the plugin name / repo path.">✏ Edit</button>
       </div>
+      <details class="moreact" style="margin-top:8px"><summary>⋯ More actions</summary>
+        <div class="small muted" style="margin-top:8px">Read-only / local</div>
+        <div class="inline" style="margin-top:4px;gap:6px;flex-wrap:wrap">
+          <button onclick="openAssign()" title="Connect/clone the Git repo so check, tests and library detection work.">🔗 Assign repo</button>
+          <button onclick="openGit()" title="Open the repo URL in the browser. No changes.">🌐 Open Git</button>
+          <button onclick="openDir()" title="Open the local working copy in the OS file manager. No changes.">📂 Open locally</button>
+          <button onclick="runReview()" title="Security + quality gate. Read-only — reports findings, changes nothing.">🔍 Manual review</button>
+          <button onclick="rebuildRequirements()" title="Re-derive the acceptance requirements (works-as-before contract incl. the exact APEX parameter/JSON interface) freshly from the mock self-test. Writes only .maintenance/acceptance.json.">🔄 Rebuild requirements</button>
+          <button onclick="apexSetup()" title="Erzeugt aus der Plugin-Analyse das Setup-JSON („Rezept" zum Einrichten einer Testseite: Region-Typ, benötigtes Page-Item + AJAX, Datenquelle/Beispielquery, Attribute mit Defaults, JS/CSS-File-URLs) und lädt es herunter. Schreibt .maintenance/apex-setup.json. Read-only.">🧩 Setup-JSON</button>
+          ${(c.libActions&&c.libActions.redevelop)?`<button onclick="redevelopDeadLib(current)" title="Dead library without successor → slice-wise re-development against the acceptance contract (license-gated)">🧬 Re-develop</button>`:''}
+        </div>
+        <div class="small muted" style="margin-top:10px">Writes files / Git <span class="muted">— fixes &amp; AI review live inside “🧰 Full maintenance now”</span></div>
+        <div class="inline" style="margin-top:4px;gap:6px;flex-wrap:wrap">
+          <button onclick="runUpdate()" title="Update libraries to the latest version. Safe updates are applied directly; for breaking ones you get a force option (you verify) or use the verified migration in the Tests tab.">⬆ Update libs to latest</button>
+          <button onclick="runUpload()" title="Commit current changes on a NEW branch and push it + show the PR link (asks for confirmation). Never touches your current branch.">📤 Upload (branch + PR)</button>
+          <button onclick="apexLive()" title="Spielt das Plugin in die konfigurierte APEX-Ziel-App ein (Shared Components → Plug-ins → Import), setzt die File URLs to Load, legt eine analyse-getriebene Testseite an (Page-Item/AJAX/ConfigJSON) und macht einen headless Render-Smoke-Test. Braucht die APEX-Verbindung in den Settings. Test-App verwenden!">🚀 In APEX einspielen &amp; live testen</button>
+        </div>
+        <details class="moreact" style="margin-top:12px">
+          <summary style="color:var(--red)">⚠ Danger zone</summary>
+          <div class="inline" style="margin-top:8px;gap:6px;flex-wrap:wrap">
+            <button class="ghost small danger" onclick="delComponent(current)" title="Remove from this tool's list only. The APEX app and the files on disk are kept.">Remove from list</button>
+            <button class="ghost small danger" onclick="purgeComponent()" title="Löscht das Plugin überall: Tool-Registry, APEX-Testseite + Plug-in, und die auf der Platte gespeicherten Daten (Klon, Mock, Logs, Tests). Fragt zur Sicherheit den exakten Namen ab.">🗑 Delete everywhere…</button>
+          </div>
+          <div class="small muted" style="margin-top:6px">“Remove from list” only unregisters it here. “Delete everywhere” also removes the APEX test page + plug-in and the data on disk (clone, mock, logs, tests) — cannot be undone.</div>
+        </details>
+      </details>
       ${c.reviewUrl?`<div class="finding low" style="margin-top:8px">📤 Open review: <a href="${esc(c.reviewUrl)}" target="_blank" rel="noopener" style="color:var(--accent)">branch ${esc(c.reviewBranch||'')} → open PR ↗</a></div>`:''}
       <div id="reviewOut" style="margin-top:8px"></div>
     </div>
