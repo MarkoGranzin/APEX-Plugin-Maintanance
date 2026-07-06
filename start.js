@@ -62,7 +62,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const DATA_DIR = process.env.AISPP_DATA_DIR || path.join(__dirname, 'data');
 // Build-Marker: muss mit APP_BUILD in public/app.html übereinstimmen. Bei Backend-Änderungen erhöhen.
 // Das Frontend vergleicht beide und warnt, wenn der laufende Dienst veraltet ist (Neustart nötig).
-const BUILD = '2026-07-05.73';
+const BUILD = '2026-07-05.74';
 const C = { reset: '\x1b[0m', bold: '\x1b[1m', dim: '\x1b[2m', green: '\x1b[32m', yellow: '\x1b[33m', red: '\x1b[31m', cyan: '\x1b[36m' };
 const c = (col, s) => `${C[col]}${s}${C.reset}`;
 
@@ -385,7 +385,7 @@ function cmdServe(portArg) {
         let pageId = store.get(id).apexPageId;
         if (!pageId) {
           const used = new Set(store.list().map((x) => x.apexPageId).filter(Boolean));
-          let n = Number(t.nextPageId) || 9001; while (used.has(n)) n += 1; pageId = n;
+          let n = Number(t.nextPageId) || 20000; while (used.has(n)) n += 1; pageId = n;
           store.update(id, { apexPageId: pageId });
           settings.apexTarget = { ...t, nextPageId: pageId + 1 }; try { saveSettings(); } catch { /* egal */ }
         }
@@ -727,11 +727,12 @@ function cmdServe(portArg) {
       if (!exportFile) return json(res, { ok: false, error: 'Keine Plugin-Export-SQL im Repo gefunden (Repo zuordnen?).' }, 200);
       const body = await readBody(req).catch(() => ({}));
       // Pro-Plugin-Seiten-Register: jedes Plugin bekommt eine EIGENE Testseite, die für dasselbe Plugin
-      // wiederverwendet wird (kein Überschreiben fremder Plugins). Neue Seiten fortlaufend ab 9001.
+      // wiederverwendet wird (kein Überschreiben fremder/reservierter Seiten). Neue Seiten fortlaufend
+      // ab 20000 — bewusst WEIT oberhalb der App-eigenen Seiten (nie 9999 o.ä. überschreiben).
       let pageId = c.apexPageId;
       if (!pageId) {
         const used = new Set(store.list().map((x) => x.apexPageId).filter(Boolean));
-        let next = Number(t.nextPageId) || 9001;
+        let next = Number(t.nextPageId) || 20000;
         while (used.has(next)) next += 1;
         pageId = next;
         try { store.update(c.id, { apexPageId: pageId }); } catch { /* egal */ }
