@@ -40,6 +40,31 @@ describe('T-68/T-69 Vendored-Lib-Erkennung, Unmaintained, SBOM', () => {
     expect(detectVendoredLibraries('/x', { files: ['three.js'], readFile: () => 'var REVISION = REVISION;' }).find((l) => l.name === 'three').version).toBe('unbekannt');
   });
 
+  it('T-146: Version generisch aus Bannern/Zuweisungen — d3/fullcalendar/maptopojson/dompurify/masonry', () => {
+    const rf = {
+      'js/lib/d3.js': '// https://d3js.org v7.8.5 Copyright 2010-2023 Mike Bostock\n!function(){}();var s={};s.version="7.8.5";',
+      'js/lib/fullCalendar.js': "/*!\nFullCalendar Standard Bundle v6.1.9\n*/\nvar x; e.version = '6.1.9';",
+      'js/lib/maptopojson.js': '// https://github.com/topojson/topojson Version 3.0.2. Copyright 2017 Mike Bostock.\n(function(){})();',
+      'js/lib/purify.js': '/*! @license DOMPurify 3.2.4 | (c) Cure53 | Released under Apache 2.0 */\nvar d=1;',
+      'js/lib/masonry.pkgd.js': '/*!\n * Masonry PACKAGED v4.2.2\n */\nvar m=1;',
+    };
+    const files = Object.keys(rf);
+    const libs = detectVendoredLibraries('/x', { files, readFile: (f) => rf[f] || '' });
+    const v = Object.fromEntries(libs.map((l) => [l.name, l.version]));
+    expect(v.d3).toBe('7.8.5');
+    expect(v.fullcalendar).toBe('6.1.9');
+    expect(v.maptopojson).toBe('3.0.2');
+    expect(v.purify).toBe('3.2.4');       // name-adjazent zu „DOMPurify 3.2.4"
+    expect(v['masonry.pkgd']).toBe('4.2.2'); // Banner-„v4.2.2"
+  });
+
+  it('T-146: kein blinder vX.Y.Z-Treffer aus dem Minify-Body (Falschtreffer-Guard)', () => {
+    // Kopf ohne Version; im Body ein zufaelliges „v2.2.2" als String (KEINE version=-Zuweisung) → unbekannt.
+    const rf = { 'js/lib/mystery.js': '/* internal bundle */\n!function(){var a="return v2.2.2 token";return a;}();' };
+    const libs = detectVendoredLibraries('/x', { files: ['js/lib/mystery.js'], readFile: (f) => rf[f] || '' });
+    expect(libs.find((l) => l.name === 'mystery').version).toBe('unbekannt');
+  });
+
   it('scanRepo: mxgraph nicht gepflegt, jquery verwundbar, libWarning gesetzt', () => {
     const r = scanRepo(dir);
     const byName = Object.fromEntries(r.libs.map((l) => [l.name, l]));

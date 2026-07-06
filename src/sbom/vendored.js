@@ -35,13 +35,46 @@ const KNOWN = [
 const OWN = /(^|\/)(script|prescript|app|widget|plugin|main|index)(\.min)?\.(js|css)$/i;
 const APEX_CORE = /(^|\/)font-apex/i;
 
-// Header-Muster (nur Datei-Anfang ~3 KB) — Lizenz-/Banner-Konventionen. KEIN generisches „vX.Y.Z"
-// quer durchs Minify-Bundle (sonst falsche Treffer wie three@2.2.2 aus einem zufälligen Token).
-const HEADER_RES = [
-  /jquery[^\n]{0,40}?v(\d+\.\d+\.\d+)/i,
-  /font\s*awesome[^\n]{0,40}?(\d+\.\d+(?:\.\d+)?)/i, // „Font Awesome 4.7.0 by @davegandy"
-  /@version\s+v?(\d+\.\d+(?:\.\d+)?)/i,
-];
+/**
+ * T-146 — Version generisch identifizieren, „egal wie versteckt" — OHNE blindes „vX.Y.Z" quer durchs
+ * Minify-Bundle (das erzeugte Falschtreffer). Geschichtet nach Verlässlichkeit, jede Schicht ist eng
+ * verankert (Schlüsselwort, Wort „Version", Lib-Name-Nähe, oder v-Präfix NUR im Banner-Kopf):
+ *   1) explizite Zuweisung  version="1.2.3" / VERSION: '1.2.3'  (irgendwo, bis Größen-Cap) — sehr sicher
+ *   2) JSDoc  @version 1.2.3                                     (Kopf)
+ *   3) Wort  „Version 3.0.2."                                    (Kopf) — z.B. maptopojson
+ *   4) name-adjazent  „<LibName> … v?X.Y.Z"                      (Kopf) — z.B. „Font Awesome 4.7.0", DOMPurify
+ *   5) Banner-„vX.Y.Z" (v-Präfix, 3 Teile)                        (Kopf) — z.B. „Masonry PACKAGED v4.2.2"
+ * @param {string} content  Dateiinhalt   @param {string} name  erkannter Lib-Name (für die Nähe-Prüfung)
+ * @returns {string|null}
+ */
+function versionFromContent(content, name) {
+  if (!content) return null;
+  const head = content.slice(0, 4000);
+  const body = content.slice(0, 2_000_000);
+  // Führender Banner-Kommentar (`/* … */` oder zusammenhängende `//`-Zeilen) — NUR dort dürfen die
+  // generischen Muster (Wort „Version", name-adjazent, Banner-„vX.Y.Z") greifen; sonst gäbe ein zufälliges
+  // „vX.Y.Z" im Minify-Body Falschtreffer.
+  const banner = (head.match(/^\s*(\/\*[\s\S]*?\*\/|(?:[ \t]*\/\/[^\n]*\n?)+)/) || ['', ''])[1];
+  const norm = (s) => String(s).toLowerCase().replace(/[^a-z0-9]/g, '');
+  const nname = norm(name);
+  let m;
+  // 1) explizite Zuweisung version="1.2.3" / VERSION:'1.2.3' — Schlüsselwort + Quotes → sehr sicher (ganze Datei)
+  if ((m = body.match(/\b(?:VERSION|version)\s*[:=]\s*['"`]v?(\d+\.\d+(?:\.\d+)?)['"`]/))) return m[1];
+  // 2) JSDoc @version 1.2.3 (im Banner)
+  if ((m = banner.match(/@version\s+v?(\d+\.\d+(?:\.\d+)?)/i))) return m[1];
+  // 3) Wort „Version 3.0.2" (im Banner)
+  if ((m = banner.match(/\bversion\s+v?(\d+\.\d+(?:\.\d+)?)/i))) return m[1];
+  // 4) name-adjazent „<LibName> … vX.Y.Z" (im Banner)
+  if (nname && nname.length >= 3) {
+    const needle = nname.slice(0, Math.min(nname.length, 10));
+    for (const mm of banner.matchAll(/([^\n]{0,60}?)\bv?(\d+\.\d+(?:\.\d+)?)\b/gi)) {
+      if (norm(mm[1]).includes(needle)) return mm[2];
+    }
+  }
+  // 5) Banner-„vX.Y.Z" (v-Präfix, 3 Teile) — nur im Banner-Kommentar
+  if ((m = banner.match(/(?:^|[\s(*/])v(\d+\.\d+\.\d+)\b/))) return m[1];
+  return null;
+}
 // Lib-spezifische Marker, die irgendwo in der (ggf. großen) Datei stehen dürfen.
 const ANCHOR = {
   // three: REVISION = '116dev' / "160" / r152 → 0.<rev>.0 (Dev-/Buchstaben-Suffix tolerieren, T-90)
@@ -87,10 +120,9 @@ export function detectVendoredLibraries(dir, opts = {}) {
     let version = versionFromName(f);
     if (!version) {
       const content = readFile(f);
-      const head = content.slice(0, 3000);
-      for (const re of HEADER_RES) { const m = head.match(re); if (m) { version = m[1]; break; } }
-      // sonst: lib-spezifischer Marker irgendwo in der Datei (kein generisches vX.Y.Z → keine Falschtreffer)
-      if (!version && ANCHOR[name]) version = ANCHOR[name](content);
+      // Spezielle Nicht-Semver-Marker zuerst (three REVISION, mxClient.VERSION), dann generisch (T-146).
+      if (ANCHOR[name]) version = ANCHOR[name](content);
+      if (!version) version = versionFromContent(content, name);
     }
     const cand = { name, version: version ?? 'unbekannt', detectedBy: 'vendored', evidence: f };
     const prev = byName.get(name);
