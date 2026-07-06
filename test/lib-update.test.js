@@ -71,3 +71,28 @@ describe('T-79 applyVendoredUpdates', () => {
     expect(fs.readFileSync(path.join(dir, 'index.html'), 'utf8')).toContain('lz-string-1.0.2.js');
   });
 });
+
+describe('B-24 Re-Dev: Lib-Tausch funktioniert auch OHNE durchgereichtes fetchFile (Fallback greift)', () => {
+  let dir;
+  beforeEach(() => { dir = fs.mkdtempSync(path.join(os.tmpdir(), 'aisp-b24-')); fs.mkdirSync(path.join(dir, 'lib'), { recursive: true }); });
+  afterEach(() => { try { fs.rmSync(dir, { recursive: true, force: true }); } catch { /* egal */ } });
+
+  it('breaking Lib (jquery 1.12.4 → 4.0.0) wird mit force=true getauscht, obwohl deps.fetchFile fehlt', async () => {
+    fs.writeFileSync(path.join(dir, 'lib', 'jquery.min.js'), '/*! jQuery v1.12.4 */ var OLD=1;');
+    const libs = [{ name: 'jquery', version: '1.12.4', latest: '4.0.0', outdated: true }];
+    // Wie im Re-Dev-Pfad (redev.js:110): KEIN fetchFile — nur ein fake fetch (Fallback: defaultFetchFile nutzt deps.fetch).
+    let fetched = null;
+    const fetch = async (url) => { fetched = url; return { ok: true, status: 200, text: async () => '/*! jQuery v4.0.0 */ var NEW=1;' }; };
+    const { results } = await applyVendoredUpdates(dir, libs, { force: true, fetch });
+    expect(results[0]).toMatchObject({ name: 'jquery', applied: true });
+    expect(fetched).toContain('jquery@4.0.0'); // wirklich geladen (Fallback → CDN-URL)
+    expect(fs.readFileSync(path.join(dir, 'lib', 'jquery.min.js'), 'utf8')).toContain('v4.0.0'); // real getauscht
+  });
+
+  it('ohne force bleibt breaking ungetauscht (gemeldet) — Sicherheits-Gate unverändert', async () => {
+    fs.writeFileSync(path.join(dir, 'lib', 'jquery.min.js'), 'var OLD=1;');
+    const libs = [{ name: 'jquery', version: '1.12.4', latest: '4.0.0', outdated: true }];
+    const { results } = await applyVendoredUpdates(dir, libs, { fetch: async () => ({ ok: true, text: async () => 'NEW' }) });
+    expect(results[0]).toMatchObject({ applied: false, breaking: true });
+  });
+});
