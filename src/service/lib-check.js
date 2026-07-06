@@ -12,7 +12,7 @@
 import fs from 'node:fs';
 import { listFiles } from '../inventory/inventory.js';
 import { isLibraryFile } from '../inventory/format.js';
-import { fetchNpmInfo } from '../sbom/registry.js';
+import { fetchNpmInfo, versionAtDate } from '../sbom/registry.js';
 import { classifyLicense } from '../sbom/licenses.js';
 
 const DAY = 86400000;
@@ -55,10 +55,12 @@ export async function checkLibrariesOnline(libs, deps = {}) {
   const fetchInfo = deps.fetchInfo ?? fetchNpmInfo;
   const now = deps.now ?? (() => Date.now());
   const out = [];
+  const timeByIdx = new Map(); // idx → npm-time-Map, für die Datums-Inferenz unbekannter Versionen (T-146)
   for (const lib of libs ?? []) {
     const e = { ...lib };
     try {
       const info = await fetchInfo(lib.name, deps);
+      if (!(lib.version && lib.version !== 'unbekannt')) timeByIdx.set(out.length, info.time || {});
       e.latest = info.latest ?? null;
       e.releasedAt = info.releasedAt ?? null;
       e.source = info.links?.source ?? null; // Quelle (z.B. GitHub)
@@ -80,6 +82,30 @@ export async function checkLibrariesOnline(libs, deps = {}) {
       e.webError = String(err?.message ?? err);
     }
     out.push(e);
+  }
+  // T-146 — zeitliche Korrelation für Libs mit unbekannter Version: Referenzdatum = jüngstes Release-Datum
+  // der Libs mit BEKANNTER Version (Untergrenze der Bündel-Bauzeit; die gebündelten Files stammen aus
+  // derselben Zeit), optional per deps.buildDate übersteuert (z.B. Plugin-Datum aus apexplugin.json).
+  // Daraus die Version ableiten, die zu diesem Zeitpunkt aktuell war — transparent als „inferred" markiert.
+  const knownDates = out.map((e) => e.installedReleasedAt).filter(Boolean).map((d) => Date.parse(d)).filter((n) => !Number.isNaN(n));
+  const refIso = deps.buildDate || (knownDates.length ? new Date(Math.max(...knownDates)).toISOString() : null);
+  if (refIso) {
+    for (const [idx, time] of timeByIdx) {
+      const e = out[idx];
+      if (e.version && e.version !== 'unbekannt') continue;
+      const v = versionAtDate(time, refIso);
+      if (!v) continue;
+      e.version = v;
+      e.versionInferred = true; // NICHT direkt gelesen, sondern aus dem Bau-Zeitpunkt abgeleitet
+      e.versionInferredFrom = refIso;
+      e.detectedBy = 'inferred-by-date';
+      const instTime = time[v];
+      e.installedReleasedAt = instTime ?? e.installedReleasedAt;
+      e.installedAgeDays = instTime ? Math.max(0, Math.floor((now() - Date.parse(instTime)) / DAY)) : e.installedAgeDays;
+      e.outdated = !!(e.latest && e.latest !== v);
+      e.webStatus = e.outdated ? 'veraltet' : (e.latest ? 'aktuell' : 'unbekannt');
+      e.status = libStatus(e);
+    }
   }
   return out;
 }

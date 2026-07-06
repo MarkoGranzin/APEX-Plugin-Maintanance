@@ -48,6 +48,27 @@ export function normalizeRepoUrl(repo) {
     .replace(/\.git$/, '');
 }
 
+/**
+ * T-146 — zeitliche Korrelation: die zuletzt VOR/AM Referenzdatum stabil erschienene Version.
+ * Idee: wenn die Version einer gebündelten Lib nicht direkt lesbar ist, aber der Bündel-Bauzeitpunkt
+ * bekannt ist (z.B. aus den Release-Daten der lesbaren Geschwister-Libs), war die gesuchte Version die,
+ * die zu diesem Zeitpunkt aktuell war. Pre-Releases (mit „-") werden ignoriert.
+ * @param {object} time  npm-`time`-Map: Version → ISO-Datum
+ * @param {string} refIso  Referenz-Datum (ISO)
+ * @returns {string|null}
+ */
+export function versionAtDate(time, refIso) {
+  if (!time || !refIso) return null;
+  const ref = Date.parse(refIso);
+  if (Number.isNaN(ref)) return null;
+  const cand = Object.entries(time)
+    .filter(([v]) => v !== 'created' && v !== 'modified' && !/-/.test(v))
+    .map(([v, d]) => [v, Date.parse(d)])
+    .filter(([, d]) => !Number.isNaN(d) && d <= ref)
+    .sort((a, b) => a[1] - b[1]);
+  return cand.length ? cand[cand.length - 1][0] : null;
+}
+
 export async function fetchNpmInfo(name, deps = {}) {
   const fetchFn = deps.fetch ?? globalThis.fetch;
   if (!fetchFn) throw new Error('kein fetch verfügbar');

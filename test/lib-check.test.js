@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { libraryFiles, checkLibrariesOnline } from '../src/service/lib-check.js';
-import { npmPackageName, normalizeRepoUrl } from '../src/sbom/registry.js';
+import { npmPackageName, normalizeRepoUrl, versionAtDate } from '../src/sbom/registry.js';
 
 describe('T-59 Bibliotheks-Erkennung + Web-Lookup', () => {
   let dir;
@@ -69,5 +69,27 @@ describe('T-59 Bibliotheks-Erkennung + Web-Lookup', () => {
     expect(npmPackageName('chart')).toBe('chart.js');
     expect(npmPackageName('AngularJS')).toBe('angular');
     expect(npmPackageName('jquery')).toBe('jquery');
+  });
+
+  it('T-146 versionAtDate: waehlt die zuletzt vor/am Referenzdatum stabile Version', () => {
+    const time = { '1.0.0': '2020-01-01T00:00:00Z', '2.0.0': '2022-06-01T00:00:00Z', '2.1.0': '2023-09-01T00:00:00Z', '3.0.0-beta': '2024-01-01T00:00:00Z', '3.0.0': '2025-01-01T00:00:00Z', created: '2019-01-01', modified: '2025-02-01' };
+    expect(versionAtDate(time, '2023-03-01')).toBe('2.0.0'); // 2.1.0 noch nicht erschienen
+    expect(versionAtDate(time, '2024-06-01')).toBe('2.1.0'); // 3.0.0-beta (Pre-Release) ignoriert
+    expect(versionAtDate(time, '2025-06-01')).toBe('3.0.0');
+    expect(versionAtDate(time, '2019-01-01')).toBe(null);    // nichts vor dem Datum
+  });
+
+  it('T-146 checkLibrariesOnline: unbekannte Version wird aus dem Bau-Zeitpunkt der Geschwister-Libs abgeleitet', async () => {
+    const infos = {
+      d3: { name: 'd3', latest: '7.9.0', releasedAt: '2024-01-01T00:00:00Z', time: { '7.8.5': '2023-06-01T00:00:00Z', '7.9.0': '2024-01-01T00:00:00Z' }, links: {} },
+      pell: { name: 'pell', latest: '1.0.6', releasedAt: '2019-01-01T00:00:00Z', time: { '1.0.0': '2018-01-01T00:00:00Z', '1.0.4': '2023-05-01T00:00:00Z', '1.0.6': '2024-08-01T00:00:00Z' }, links: {} },
+    };
+    const libs = [ { name: 'd3', version: '7.8.5' }, { name: 'pell', version: 'unbekannt' } ];
+    const out = await checkLibrariesOnline(libs, { fetchInfo: async (n) => infos[n], now: () => Date.parse('2025-01-01') });
+    const pell = out.find((l) => l.name === 'pell');
+    // Referenzdatum = juengstes bekanntes Release (d3 7.8.5 = 2023-06-01) -> pell-Version zu diesem Zeitpunkt = 1.0.4
+    expect(pell.version).toBe('1.0.4');
+    expect(pell.versionInferred).toBe(true);
+    expect(pell.detectedBy).toBe('inferred-by-date');
   });
 });
