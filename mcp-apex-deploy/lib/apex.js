@@ -185,6 +185,14 @@ export function buildSetupManifest(sqlText, opts = {}) {
       region: { name: `Test: ${a.internalName || 'plugin'}`, plugin: a.displayName || a.internalName },
       // Bei Item-Plugins: das Page-Item VOM Plugin-Typ, das in einer Host-Region angelegt wird.
       item: a.kind === 'item' ? { name: `P${pageId}_ITEM`, plugin: a.displayName || a.internalName, hostRegion: 'Host' } : null,
+      // Bei Dynamic-Action-Plugins: die DA auf einem Event mit dem Plugin als True-Aktion, Ziel = Selektor.
+      dynamicAction: a.kind === 'dynamic-action' ? { event: 'Page Load', action: a.displayName || a.internalName, selectionType: 'jQuery Selector', selector: 'body' } : null,
+      // Bei Template-Component-Plugins (region-artig, datengebunden): Beispiel-SQL + Best-Effort-Spalten-Mapping.
+      templateComponent: a.kind === 'template-component' ? {
+        region: { name: `Test: ${a.internalName || 'plugin'}`, plugin: a.displayName || a.internalName },
+        source: { type: 'SQL Query', sql: opts.sourceSql || "select level as id, 'Card '||level as title, 'Backside '||level as subtitle from dual connect by level<=4" },
+        columnMap: { Title: '&TITLE.', Subtitle: '&SUBTITLE.' },
+      } : null,
       // Page-Item, das die Region über „Items to Submit" referenziert (Pflicht bei AJAX_ITEMS_TO_SUBMIT).
       pageItem: ajaxItem ? { name: ajaxItem, type: 'Hidden', ajaxItemsToSubmit: true } : null,
       // Datenquelle: eigene SQL des Aufrufers, sonst die plugin-eigene Beispielquery.

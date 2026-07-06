@@ -128,10 +128,13 @@ export async function uiSetPluginFileUrls(page, o = {}) {
 const rxEsc = (s) => String(s).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 const rxi = (s) => new RegExp(rxEsc(s), 'i');
 
-/** Property im Page-Designer-Property-Editor per Label setzen (Text→apex.item, Select→Options-Text→Value). */
+/** Property im Page-Designer-Property-Editor per Label setzen (Text→apex.item, Select→Options-Text→Value).
+ *  Label-Matching ist tolerant: APEX hängt bei Validierungsfehlern „(Error)"/„(Warning)" ans Label
+ *  (z.B. „Selection Type\n(Error)") — der Suffix wird abgeschnitten, sonst würde das Feld nie gefunden. */
 async function pdSetProp(page, label, value) {
   return page.evaluate(({ label, value }) => {
-    const pr = [...document.querySelectorAll('.a-Property')].find((e) => (e.querySelector('.a-Property-label')?.innerText || '').trim() === label);
+    const norm = (s) => String(s || '').replace(/\s*\((?:error|warning)\)\s*$/i, '').replace(/\s+/g, ' ').trim();
+    const pr = [...document.querySelectorAll('.a-Property')].find((e) => norm(e.querySelector('.a-Property-label')?.innerText) === label);
     if (!pr) return 'no-prop';
     const inp = pr.querySelector('input,textarea,select'); if (!inp || !inp.id) return 'no-input';
     let v = value;
@@ -139,6 +142,20 @@ async function pdSetProp(page, label, value) {
     try { if (window.apex && apex.item(inp.id) && apex.item(inp.id).node) { apex.item(inp.id).setValue(v); inp.dispatchEvent(new Event('change', { bubbles: true })); return 'ok'; } } catch (e) { return 'err:' + e.message; }
     return 'noitem';
   }, { label, value });
+}
+
+/** Setzt das ERSTE Select im Property-Editor, dessen Optionen `wantOption` enthalten (Text-Match).
+ *  Für Felder, deren Label mehrdeutig ist (z.B. die Source-„Type"-Auswahl vs. die Region-„Type"-Auswahl):
+ *  hier zählt die Option, nicht das Label. */
+async function pdSetSelectByOption(page, wantOption) {
+  return page.evaluate(({ wantOption }) => {
+    for (const pr of document.querySelectorAll('.a-Property')) {
+      const sel = pr.querySelector('select'); if (!sel || !sel.id) continue;
+      const o = [...sel.options].find((x) => x.text.trim().toLowerCase() === String(wantOption).toLowerCase());
+      if (o) { try { apex.item(sel.id).setValue(o.value); sel.dispatchEvent(new Event('change', { bubbles: true })); return 'ok'; } catch (e) { return 'err:' + e.message; } }
+    }
+    return 'no-option';
+  }, { wantOption });
 }
 
 /** jQuery-UI-Draggable-kompatibler Maus-Drag: down → Threshold-Ruck → in Schritten zum Ziel → up.
@@ -212,10 +229,17 @@ async function pdOpenOrCreatePage(page, o) {
   return { ok: true, mode };
 }
 
-/** Seite öffentlich machen + speichern (gemeinsamer Abschluss für Region- und Item-Testseiten). */
+/** Seite öffentlich machen + speichern (gemeinsamer Abschluss für Region-/Item-/DA-Testseiten).
+ *  Zuerst auf den Rendering-Tab schalten — nur dort führt der Page-Root-Knoten zuverlässig die
+ *  Page-Attribute inkl. „Authentication" (aus dem DA-/Processing-Tab fehlt das Feld → Seite bliebe privat). */
 async function pdPublishAndSave(page, o) {
+  await page.locator('[role=tab]:has-text("Rendering")').first().click().catch(() => {}); await page.waitForTimeout(700);
   await page.locator('.a-TreeView-label').filter({ hasText: rxi(`Page ${o.pageId}`) }).first().click().catch(() => {}); await page.waitForTimeout(700);
-  const auth = await pdSetProp(page, 'Authentication', 'Page Is Public');
+  let auth = await pdSetProp(page, 'Authentication', 'Page Is Public');
+  if (auth !== 'ok') { // Fallback: Page-Attribute-Tab öffnen, dann erneut
+    await page.locator('[role=tab]:has-text("Attributes")').first().click().catch(() => {}); await page.waitForTimeout(700);
+    auth = await pdSetProp(page, 'Authentication', 'Page Is Public');
+  }
   await page.waitForTimeout(400);
   await page.locator('#pdSave, button:has-text("Save")').first().click().catch(() => {});
   await page.waitForLoadState('networkidle').catch(() => {}); await page.waitForTimeout(2500);
@@ -282,6 +306,105 @@ export async function uiCreateItemTestPage(page, o = {}) {
   // 4) Öffentlich + Save.
   const { auth, saveError } = await pdPublishAndSave(page, o);
   return { ok: rName === 'ok' && !saveError, mode: opened.mode, item: { name: rName, was: selName }, attributes: attrs, auth, saveError };
+}
+
+/**
+ * Baut eine Testseite für ein DYNAMIC-ACTION-Plugin im PAGE DESIGNER: Create/Reuse-Seite → Dynamic-Actions-
+ * Tab → Rechtsklick auf das Event (Standard „Page Load") → „Create Dynamic Action" → die True-Aktion „Show"
+ * auf den Plugin-Typ setzen → Selection Type + Selektor (Standard: jQuery Selector „body") → Custom-Attribute
+ * → Seite öffentlich → Save. Generisch für jedes DA-Plugin. Hinweis: DAs rendern oft einen Effekt (Canvas/
+ * WebGL); die Render-Verifikation kann headless je nach Plugin eingeschränkt sein (ehrlich gemeldet).
+ * @param {{appId:number|string, pageId:number|string, pageName:string, pluginDisplayName:string,
+ *          event?:string, selectionType?:string, selector?:string, attributes?:Array<{prompt:string,value:string}>}} o
+ */
+export async function uiCreateDynamicActionTestPage(page, o = {}) {
+  const opened = await pdOpenOrCreatePage(page, o);
+  if (!opened.ok) return opened;
+  const event = o.event || 'Page Load';
+  const selectionType = o.selectionType || 'jQuery Selector';
+  const selector = o.selector || 'body';
+
+  // 1) Dynamic-Actions-Tab → Event-Knoten rechtsklicken → „Create Dynamic Action".
+  await page.locator('[role=tab]:has-text("Dynamic Actions")').first().click().catch(() => {}); await page.waitForTimeout(1200);
+  const evNode = page.locator('.a-TreeView-label').filter({ hasText: new RegExp(`^${rxEsc(event)}$`) }).first();
+  if (!(await evNode.count())) return { ok: false, error: `Event „${event}" im DA-Baum nicht gefunden.` };
+  await evNode.click().catch(() => {}); await page.waitForTimeout(300);
+  await evNode.click({ button: 'right' }).catch(() => {}); await page.waitForTimeout(1000);
+  await page.getByText(/^Create Dynamic Action$/i).first().click().catch(async () => { await page.getByRole('menuitem', { name: /Create Dynamic Action/i }).first().click().catch(() => {}); });
+  await page.waitForTimeout(2200);
+  // Prüfen, dass eine DA + True-Aktion „Show" entstand.
+  if (!(await page.locator('.a-TreeView-label').filter({ hasText: /^Show$/ }).count())) return { ok: false, error: 'Dynamic Action wurde nicht angelegt (keine „Show"-Aktion).' };
+
+  // 2) True-Aktion „Show" selektieren → Action auf den Plugin-Typ setzen. Danach heißt der Aktions-Knoten
+  //    „<Plugin> [Plug-In]" → für alle weiteren Property-Zugriffe RE-SELEKTIEREN (der Property-Editor lädt
+  //    sonst nicht die Plugin-Attribute + das Selection-Type-Feld zuverlässig).
+  await page.locator('.a-TreeView-label').filter({ hasText: /^Show$/ }).first().click().catch(() => {}); await page.waitForTimeout(1000);
+  const act = await pdSetProp(page, 'Action', o.pluginDisplayName);
+  if (act !== 'ok') return { ok: false, error: `Action „${o.pluginDisplayName}" nicht setzbar (installiert?): ${act}` };
+  await page.waitForTimeout(1200);
+  const reselect = async () => { await page.locator('.a-TreeView-label').filter({ hasText: rxi(o.pluginDisplayName) }).first().click().catch(() => {}); await page.waitForTimeout(900); };
+  await reselect();
+
+  // 3) Ziel-Element festlegen (Selection Type + Selektor) — sonst bleibt „Selection Type (Error)" und der
+  //    Save wird blockiert (Seite bliebe privat). Selektor-Feld-Label = gewählter Selection-Type.
+  const selType = await pdSetProp(page, 'Selection Type', selectionType);
+  await page.waitForTimeout(900);
+  const selField = await pdSetProp(page, selectionType, selector);
+  await page.waitForTimeout(500);
+
+  // 4) Plugin-Custom-Attribute setzen (ConfigJSON, Animation Type etc.) — Aktion nochmal re-selektieren.
+  await reselect();
+  const attrs = [];
+  for (const a of (o.attributes || [])) { if (a && a.prompt && a.value != null && a.value !== '') attrs.push({ prompt: a.prompt, r: await pdSetProp(page, a.prompt, a.value) }); }
+
+  // 5) Öffentlich + Save.
+  const { auth, saveError } = await pdPublishAndSave(page, o);
+  return { ok: act === 'ok' && !saveError, mode: opened.mode, action: act, selection: { type: selType, selector: selField }, attributes: attrs, auth, saveError };
+}
+
+/**
+ * Baut eine Testseite für ein TEMPLATE-COMPONENT-Plugin im PAGE DESIGNER. Template Components sind
+ * region-artig (in der Regions-Gallery) und datengebunden: Create/Reuse-Seite → TC per Drag aus der Regions-
+ * Gallery → Name → Source „Type"=SQL Query + Beispiel-SQL → Spalten-Mapping (z.B. Title=&TITLE.) → Pflicht-
+ * Attribute (Defaults) → öffentlich → Save. Generisch; das Spalten-Mapping ist Best-Effort (TC-spezifische
+ * Feldnamen), fehlende Felder werden ignoriert (no-prop). @param {{appId,pageId,pageName,pluginDisplayName,
+ * regionName,sourceSql?,columnMap?:object,attributes?:Array<{prompt,value}>}} o
+ */
+export async function uiCreateTemplateComponentTestPage(page, o = {}) {
+  const opened = await pdOpenOrCreatePage(page, o);
+  if (!opened.ok) return opened;
+  const rx = new RegExp(`^${rxEsc(o.regionName)}$`);
+  const reselect = async () => { await page.getByText(rx).first().click().catch(() => {}); await page.waitForTimeout(800); };
+
+  // 1) TC als Region aus der Gallery ziehen (falls nicht schon vorhanden).
+  if (!(await page.getByText(rx).count())) {
+    await page.locator('button:has-text("Regions"),[role=tab]:has-text("Regions")').first().click().catch(() => {}); await page.waitForTimeout(1000);
+    const src = page.locator('.a-Gallery-region').filter({ hasText: rxi(o.pluginDisplayName) }).first();
+    if (!(await src.count())) return { ok: false, error: `Template Component „${o.pluginDisplayName}" nicht in der Regions-Gallery (installiert?).` };
+    await src.scrollIntoViewIfNeeded().catch(() => {}); await page.waitForTimeout(400);
+    const sb = await src.boundingBox();
+    if (!sb) return { ok: false, error: 'Gallery-Item nicht sichtbar.' };
+    await pdMouseDrag(page, sb, Math.round(1500 * 0.57), Math.min(sb.y - 80, 684));
+    await pdSetProp(page, 'Name', o.regionName);
+  }
+  await reselect();
+
+  // 2) Datenquelle: Source-„Type" = SQL Query (per Option, nicht Label — „Type" ist mehrdeutig) + SQL.
+  const srcType = await pdSetSelectByOption(page, 'SQL Query');
+  await page.waitForTimeout(900);
+  const sql = o.sourceSql ? await pdSetProp(page, 'SQL Query', o.sourceSql) : 'skip';
+  await page.waitForTimeout(1000);
+  await reselect();
+
+  // 3) Spalten-Mapping (Best-Effort) + Pflicht-Attribute (Defaults).
+  const maps = [];
+  for (const [label, value] of Object.entries(o.columnMap || {})) { maps.push({ label, r: await pdSetProp(page, label, value) }); }
+  const attrs = [];
+  for (const a of (o.attributes || [])) { if (a && a.prompt && a.value != null && a.value !== '') attrs.push({ prompt: a.prompt, r: await pdSetProp(page, a.prompt, a.value) }); }
+
+  // 4) Öffentlich + Save.
+  const { auth, saveError } = await pdPublishAndSave(page, o);
+  return { ok: srcType === 'ok' && (sql === 'ok' || sql === 'skip') && !saveError, mode: opened.mode, sourceType: srcType, sql, columnMap: maps, attributes: attrs, auth, saveError };
 }
 
 /**

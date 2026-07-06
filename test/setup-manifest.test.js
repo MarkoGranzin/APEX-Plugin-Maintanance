@@ -89,6 +89,63 @@ describe('T-138 setupFromManifest: JSON → APEX (standalone/wiederverwendbar)',
     expect(itemArg.attributes[0]).toMatchObject({ prompt: 'Color Json', value: '{"c":"#fff"}' });
   });
 
+  it('Dynamic-Action-Plugin (kind=dynamic-action) → baut DA-Testseite via uiCreateDynamicActionTestPage', async () => {
+    const daManifest = {
+      manifestVersion: 1,
+      plugin: { internalName: 'RW.VANTA', displayName: 'APEX Vanta.js Plug-in', apiVersion: 1, kind: 'dynamic-action', pluginType: 'DYNAMIC ACTION' },
+      standardAttributes: [],
+      testPage: { id: 20052, name: 'Live-Test: RW.VANTA', setupKind: 'dynamic-action', dynamicAction: { event: 'Page Load', action: 'APEX Vanta.js Plug-in', selectionType: 'jQuery Selector', selector: 'body' } },
+      attributes: [{ key: 'attribute_01', prompt: 'Animation Type', default: 'WAVES' }],
+      fileUrls: { js: ['#PLUGIN_FILES#vanta.js'], css: [] },
+    };
+    let daArg, itemCalled = false, regionCalled = false;
+    const deps = fakeDeps({
+      uiCreateDynamicActionTestPage: async (_p, a) => { daArg = a; return { ok: true, mode: 'create', action: 'ok' }; },
+      uiCreateItemTestPage: async () => { itemCalled = true; return { ok: true }; },
+      uiCreateTestPage: async () => { regionCalled = true; return { ok: true }; },
+    });
+    const r = await setupFromManifest(daManifest, connection, {}, deps);
+    expect(r.ok).toBe(true);
+    expect(itemCalled).toBe(false);
+    expect(regionCalled).toBe(false);
+    expect(daArg.event).toBe('Page Load');
+    expect(daArg.selectionType).toBe('jQuery Selector');
+    expect(daArg.selector).toBe('body');
+    expect(daArg.pluginDisplayName).toBe('APEX Vanta.js Plug-in');
+    expect(daArg.attributes[0]).toMatchObject({ prompt: 'Animation Type', value: 'WAVES' });
+  });
+
+  it('Template-Component-Plugin (kind=template-component) → baut TC-Testseite via uiCreateTemplateComponentTestPage', async () => {
+    const tcManifest = {
+      manifestVersion: 1,
+      plugin: { internalName: 'UC.FLIP', displayName: 'Flip Card', apiVersion: 1, kind: 'template-component', pluginType: 'TEMPLATE COMPONENT' },
+      standardAttributes: ['REGION_TEMPLATE'],
+      testPage: { id: 20053, name: 'Live-Test: UC.FLIP', setupKind: 'template-component', templateComponent: { region: { name: 'Test: UC.FLIP', plugin: 'Flip Card' }, source: { type: 'SQL Query', sql: 'select 1 id, 2 title from dual' }, columnMap: { Title: '&TITLE.' } } },
+      attributes: [{ key: 'attribute_01', prompt: 'Layout', default: 'a-CardView--grid' }],
+      fileUrls: { js: [], css: ['#PLUGIN_FILES#flip.css'] },
+    };
+    let tcArg;
+    const deps = fakeDeps({ uiCreateTemplateComponentTestPage: async (_p, a) => { tcArg = a; return { ok: true, mode: 'create', sourceType: 'ok' }; } });
+    const r = await setupFromManifest(tcManifest, connection, {}, deps);
+    expect(r.ok).toBe(true);
+    expect(tcArg.regionName).toBe('Test: UC.FLIP');
+    expect(tcArg.sourceSql).toBe('select 1 id, 2 title from dual');
+    expect(tcArg.columnMap).toMatchObject({ Title: '&TITLE.' });
+    expect(tcArg.attributes[0]).toMatchObject({ prompt: 'Layout', value: 'a-CardView--grid' });
+  });
+
+  it('unbekannter Typ (kind=process) → ehrliche „nicht automatisiert"-Meldung, kein False-Green', async () => {
+    const procManifest = {
+      manifestVersion: 1,
+      plugin: { internalName: 'X.PROC', displayName: 'Proc', apiVersion: 1, kind: 'process', pluginType: 'PROCESS TYPE' },
+      standardAttributes: [], testPage: { id: 20099, setupKind: 'process' }, attributes: [], fileUrls: { js: [], css: [] },
+    };
+    const r = await setupFromManifest(procManifest, connection, {}, fakeDeps());
+    expect(r.ok).toBe(false);
+    expect(r.testPage.error).toMatch(/nicht automatisiert/i);
+    expect(r.render.rendered).toBe(false);
+  });
+
   it('buildSetupManifest + setupFromManifest zusammen (rundlauf ohne Browser)', async () => {
     const exp = `wwv_flow_api.create_plugin(\n p_name=>'X.Y'\n,p_plugin_type=>'REGION TYPE'\n,p_display_name=>'XY'\n,p_api_version=>1\n,p_standard_attributes=>'SOURCE_SQL'\n);\nwwv_flow_api.create_plugin_std_attribute(\n p_name=>'SOURCE_SQL'\n,p_default_value=>'select 9 v from dual'\n);`;
     const man = buildSetupManifest(exp, { pageId: 20000 });
