@@ -250,7 +250,14 @@ function cmdServe(portArg) {
   // Report aus dem aktuellen Stand aller Komponenten bauen
   const buildReport = () => {
     const comps = store.list();
-    const updated = comps.filter((x) => x.lastChange).map((x) => ({ artifact: x.name, change: x.lastChange.summary, testResult: x.status, gitLink: x.source || '', reviewUrl: x.reviewUrl || null, rebuilt: !!x.rebuilt }));
+    // Friendly-URL der plugin-eigenen APEX-Testseite (aus dem Page-Register apexPageId + Ziel-Konfig).
+    const at = settings.apexTarget || {};
+    const apexUrlFor = (x) => {
+      if (!x.apexPageId || !at.baseUrl || !at.workspace) return null;
+      const base = String(at.baseUrl).replace(/\/$/, '');
+      return at.alias ? `${base}/r/${String(at.workspace).toLowerCase()}/${at.alias}/${x.apexPageId}` : `${base}/f?p=${at.appId}:${x.apexPageId}`;
+    };
+    const updated = comps.filter((x) => x.lastChange).map((x) => ({ artifact: x.name, change: x.lastChange.summary, testResult: x.status, gitLink: x.source || '', reviewUrl: x.reviewUrl || null, rebuilt: !!x.rebuilt, mockUrl: x.mockUrl || null, apexUrl: apexUrlFor(x) }));
     const risks = comps.filter((x) => x.libWarning).map((x) => ({ name: x.name, label: '⚠ Libs', reasons: [`${x.libWarning.vulnerable || 0} verwundbar, ${x.libWarning.unmaintained || 0} nicht gepflegt`] }));
     const failures = comps.filter((x) => ['zu klären', 'review-blockiert'].includes(x.status)).map((x) => ({ artifact: x.name, reason: x.status }));
     // T-94: neu gebaute/migrierte Komponenten gesondert ausweisen

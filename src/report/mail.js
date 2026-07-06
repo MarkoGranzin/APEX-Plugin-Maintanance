@@ -20,7 +20,7 @@ export function redact(text, secrets = []) {
 /**
  * Rendert den Report.
  * @param {object} run
- * @param {{artifact:string,gitLink:string,change:string,testResult:string}[]} run.updated
+ * @param {{artifact:string,gitLink:string,change:string,testResult:string,reviewUrl?:string,mockUrl?:string,apexUrl?:string}[]} run.updated
  * @param {{name:string,label:string,reasons:string[],gitLink?:string}[]} [run.risks]
  * @param {{artifact:string,reason:string}[]} [run.failures]
  * @param {{secrets?:string[]}} [opts]
@@ -59,6 +59,9 @@ export function renderReport(run, opts = {}) {
   for (const u of updated) {
     lines.push(`- ${u.artifact}: ${u.change} — ${u.testResult}${u.gitLink ? ` — ${u.gitLink}` : ''}${u.rebuilt ? ' — 🚀 rebuilt (verified as before)' : ''}`);
     if (u.reviewUrl) lines.push(`    → Open review/PR: ${u.reviewUrl}`);
+    // Zwei Links zum Nachprüfen der Pflege: der Mock (Review-Artefakt) und die echte APEX-Testseite des Plugins.
+    if (u.mockUrl) lines.push(`    → Mockup (Review): ${u.mockUrl}`);
+    if (u.apexUrl) lines.push(`    → APEX plugin page: ${u.apexUrl}`);
   }
 
   if (failures.length) {
