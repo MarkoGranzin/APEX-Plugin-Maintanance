@@ -16,8 +16,9 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
-import { analyzePlugin, buildTestPageSql, pluginLoadFiles, parsePluginName } from '../../mcp-apex-deploy/lib/apex.js';
+import { analyzePlugin, buildTestPageSql, buildSetupManifest, pluginLoadFiles, parsePluginName } from '../../mcp-apex-deploy/lib/apex.js';
 import { loadChromium, uiLogin, uiImportFile, uiSetPluginFileUrls, uiCreateTestPage, smokeCheckPage } from '../../mcp-apex-deploy/lib/apex-ui.js';
+import { setupFromManifest } from '../../mcp-apex-deploy/lib/setup.js';
 
 const parseDisplayName = (sql) => { const m = String(sql || '').match(/p_display_name=>'((?:[^']|'')*)'/i); return m ? m[1].replace(/''/g, "'").trim() : null; };
 
@@ -42,11 +43,9 @@ export function findPluginExport(dir, opts = {}) {
  */
 export async function deployAndTest(o = {}, deps = {}) {
   const d = {
-    loadChromium, uiLogin, uiImportFile, uiSetPluginFileUrls, uiCreateTestPage, smokeCheckPage,
-    analyzePlugin, buildTestPageSql, pluginLoadFiles,
+    analyzePlugin, buildSetupManifest, setupFromManifest,
     readFile: (f) => fs.readFileSync(f, 'utf8'),
     exists: (f) => fs.existsSync(f),
-    writeTmp: (name, content) => { const f = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'apexlive-')), name); fs.writeFileSync(f, content); return f; },
     now: () => new Date().toISOString(),
     ...deps,
   };
@@ -59,64 +58,18 @@ export async function deployAndTest(o = {}, deps = {}) {
   const exportSql = d.readFile(o.exportFile);
   const an = d.analyzePlugin(exportSql);
   if (!an.internalName) return { ok: false, error: 'Plugin-Name im Export nicht gefunden.' };
-  const pageId = o.pageId ?? 9999;
-  const cfg = { baseUrl: t.baseUrl, workspace: t.workspace, user: t.user, pass: t.pass };
+  const pageId = o.pageId ?? 20000;
 
-  const chromium = await d.loadChromium();
-  if (!chromium) return { ok: false, error: 'Playwright nicht installiert — Live-Test nicht möglich.' };
-  const browser = await chromium.launch({ headless: true });
-  const result = { ok: false, plugin: an.internalName, displayName: an.displayName, appId: Number(appId), pageId, analysis: { apiVersion: an.apiVersion, sourceTypePrefix: an.sourceTypePrefix, usesAjaxItemsToSubmit: an.usesAjaxItemsToSubmit } };
-  try {
-    const page = await browser.newPage();
-    const login = await d.uiLogin(page, cfg);
-    result.login = { ok: login.ok, error: login.error };
-    if (!login.ok) return result;
-
-    // 1) Plugin installieren (app-interner Plug-in-Import).
-    result.install = await d.uiImportFile(page, o.exportFile, { appId, viaPlugins: true });
-
-    // 2) File URLs to Load (JS+CSS) setzen.
-    if (o.setFileUrls !== false) {
-      const { jsUrls, cssUrls } = d.pluginLoadFiles(exportSql);
-      result.fileUrls = await d.uiSetPluginFileUrls(page, { appId, displayName: an.displayName || parseDisplayName(exportSql), jsUrls, cssUrls });
-    }
-
-    // 3) Testseite im PAGE DESIGNER bauen — ersetzt den in dieser Instanz WAF-blockierten Wizard-Import (B-30):
-    //    Create-Page (Blank) → Plugin-Region per Drag → Region-Name + SQL-Quelle + Custom-Attribute (ConfigJSON)
-    //    → Seite öffentlich → Save. Existiert die Seite schon (gleiches Plugin), wird sie wiederverwendet.
-    //    Auf FRISCHER, eingeloggter Seite → sauberer Navigationsstart, unabhängig vom Zustand nach Install.
-    const sourceSql = o.sourceSql || (an.hasSourceSql ? an.defaultSourceSql : undefined) || undefined;
-    const pdAttrs = (an.customAttributes || [])
-      .filter((a) => a.default != null && a.default !== '' && a.prompt)
-      .map((a) => ({ prompt: a.prompt, value: String(a.default).replace(/[\x00-\x1f]+/g, ' ') }));
-    const pdPage = await browser.newPage();
-    const pdLogin = await d.uiLogin(pdPage, cfg);
-    result.testPage = pdLogin.ok
-      ? await d.uiCreateTestPage(pdPage, {
-        appId, pageId, pageName: o.pageName || `Live-Test: ${an.internalName}`,
-        pluginDisplayName: an.displayName || parseDisplayName(exportSql) || an.internalName,
-        regionName: `Test: ${an.internalName}`, sourceSql, attributes: pdAttrs,
-      })
-      : { ok: false, error: 'Login für Page-Designer-Schritt fehlgeschlagen.' };
-    await pdPage.close().catch(() => {});
-
-    // 4) Render-Smoke-Test über die Friendly-URL (öffentliche Testseite).
-    const base = t.baseUrl.replace(/\/$/, '');
-    const url = t.alias ? `${base}/r/${String(t.workspace).toLowerCase()}/${t.alias}/${pageId}` : `${base}/f?p=${appId}:${pageId}`;
-    const rt = await browser.newPage();
-    const errors = [];
-    rt.on('pageerror', (e) => errors.push(String(e?.message ?? e)));
-    rt.on('console', (m) => { if (m.type() === 'error') errors.push(m.text()); });
-    await rt.goto(url, { waitUntil: 'domcontentloaded', timeout: 30000 }).catch(() => {});
-    // expectMarker = interner Plugin-Name → der Seitentitel „Live-Test: <plugin>" muss ihn enthalten,
-    // sonst zeigt die URL noch eine alte/fremde Seite (Import nicht durchgelaufen) → kein False-Green.
-    result.render = await d.smokeCheckPage(rt, errors, { settleMs: o.settleMs, expectMarker: an.internalName });
-    result.render.url = url;
-
-    // ok NUR wenn Install UND Seiten-Import UND Render echt durchliefen (testPage.ok verhindert False-Green
-    // bei „Bad Request"/abgelehntem Import, während ein übrig gebliebenes Fremd-SVG noch sichtbar ist).
-    result.ok = !!(result.install?.ok && result.testPage?.ok && result.render?.rendered);
-    result.at = d.now();
-    return result;
-  } finally { await browser.close(); }
+  // Analyse → Setup-Manifest („Rezept"). Die Einrichtung läuft AUSSCHLIESSLICH über setupFromManifest —
+  // dieselbe Quelle, die auch der standalone apex-deploy-MCP (Tool apex_setup) nutzt. So wird nichts doppelt
+  // „gedacht": das JSON beschreibt die Verwendung, der Runner richtet nur noch daraus ein.
+  const manifest = d.buildSetupManifest(exportSql, { pageId, sourceSql: o.sourceSql });
+  const connection = { baseUrl: t.baseUrl, workspace: t.workspace, user: t.user, pass: t.pass, appId, alias: t.alias };
+  const r = await d.setupFromManifest(manifest, connection, { pageId, sourceSql: o.sourceSql, install: o.exportFile, setFileUrls: o.setFileUrls }, deps);
+  return {
+    ...r,
+    plugin: an.internalName, displayName: an.displayName,
+    analysis: { apiVersion: an.apiVersion, sourceTypePrefix: an.sourceTypePrefix, usesAjaxItemsToSubmit: an.usesAjaxItemsToSubmit },
+    manifest, at: d.now(),
+  };
 }

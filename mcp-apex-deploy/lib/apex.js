@@ -152,7 +152,7 @@ export function analyzePlugin(sqlText) {
 export function buildSetupManifest(sqlText, opts = {}) {
   const a = analyzePlugin(sqlText);
   const { jsUrls, cssUrls } = pluginLoadFiles(sqlText);
-  const pageId = Number(opts.pageId ?? 9999);
+  const pageId = Number(opts.pageId ?? 20000); // Default-Basis 20000 (nie reservierte App-Seiten)
   const ajaxItem = a.usesAjaxItemsToSubmit ? `P${pageId}_AJAX` : null;
   const clean = (v) => (v != null ? String(v).replace(/[\x00-\x1f]+/g, ' ').trim() : null);
   return {

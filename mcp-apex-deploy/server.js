@@ -22,8 +22,9 @@ import { spawn } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { buildInstallScript, buildTestPageSql, parsePluginName, maskConn, pluginLoadFiles, analyzePlugin } from './lib/apex.js';
+import { buildInstallScript, buildTestPageSql, parsePluginName, maskConn, pluginLoadFiles, analyzePlugin, buildSetupManifest } from './lib/apex.js';
 import { loadChromium, uiLogin, uiImportFile, uiSetPluginFileUrls, smokeCheckPage } from './lib/apex-ui.js';
+import { setupFromManifest } from './lib/setup.js';
 
 /** Anzeigename (p_display_name) aus einem Plugin-Export lesen — zum Auffinden in der Plug-ins-Liste. */
 const parsePluginDisplayName = (sqlText) => { const m = String(sqlText || '').match(/p_display_name=>'((?:[^']|'')*)'/i); return m ? m[1].replace(/''/g, "'").trim() : null; };
@@ -35,6 +36,7 @@ const ENV = {
   conn: process.env.APEX_CONN || '',
   workspace: process.env.APEX_WORKSPACE || '',
   appId: process.env.APEX_APP_ID || '',
+  alias: process.env.APEX_APP_ALIAS || '', // App-Alias für die Friendly-URL /r/<ws>/<alias>/<page>
   baseUrl: process.env.APEX_BASE_URL || '',
   // Instanzspezifische Header-Werte für generierte Seiten-Importe (24.x). Aus einem echten App-Export ablesbar.
   workspaceId: process.env.APEX_WORKSPACE_ID || '',
@@ -277,6 +279,41 @@ const TOOLS = [
         const r = await uiSetPluginFileUrls(page, { appId: a.appId ?? ENV.appId, displayName: parsePluginDisplayName(sql), jsUrls, cssUrls, overwrite: a.overwrite });
         return { ...r, jsUrls, cssUrls };
       } finally { await browser.close(); }
+    },
+  },
+  {
+    name: 'apex_build_manifest',
+    description: 'ANALYSE → JSON: erzeugt aus einem Plugin-Export das Setup-Manifest („Rezept", buildSetupManifest) — beschreibt, was das Plugin zum Laufen braucht: Region-Typ, benötigtes Page-Item + AJAX, Datenquelle/Beispielquery, Attribute mit Defaults, JS/CSS-File-URLs. Rein statisch (kein APEX/Browser). Optional als Datei speichern. Dieses JSON ist die portable Beschreibung, mit der apex_setup ALLES einrichtet.',
+    inputSchema: { type: 'object', properties: {
+      exportFile: { type: 'string', description: 'Pfad zum Plugin-Export-SQL' },
+      pageId: { type: 'number', description: 'Testseiten-ID im Manifest (Default 20000)' },
+      out: { type: 'string', description: 'optional: Dateipfad, wohin das JSON geschrieben wird' },
+    }, required: ['exportFile'] },
+    run: async (a) => {
+      if (!fs.existsSync(a.exportFile)) return { ok: false, error: `Export-Datei nicht gefunden: ${a.exportFile}` };
+      const manifest = buildSetupManifest(fs.readFileSync(a.exportFile, 'utf8'), { pageId: a.pageId ?? 20000 });
+      if (a.out) { try { fs.mkdirSync(path.dirname(a.out), { recursive: true }); fs.writeFileSync(a.out, JSON.stringify(manifest, null, 2)); } catch (e) { return { ok: false, error: `Schreiben fehlgeschlagen: ${e.message}`, manifest }; } }
+      return { ok: true, manifest, written: a.out || null };
+    },
+  },
+  {
+    name: 'apex_setup',
+    description: 'JSON → APEX: richtet eine Testseite AUSSCHLIESSLICH anhand des Setup-Manifests ein (setupFromManifest) — der MCP ist damit standalone/wiederverwendbar. Optional Plugin-Install (install=Export-Pfad) → File URLs → Testseite im Page Designer aus dem Manifest (Region-Typ, Quelle, Page-Item, Attribute) → Seite öffentlich → Render-Smoke-Test. Login/App aus env (APEX_LOGIN_USER/PASS, APEX_APP_ID, APEX_BASE_URL, APEX_APP_ALIAS) oder Argumenten. Nichts wird neu „gedacht" — alles kommt aus dem JSON.',
+    inputSchema: { type: 'object', properties: {
+      manifest: { type: 'object', description: 'Setup-Manifest (Objekt) — von apex_build_manifest' },
+      manifestPath: { type: 'string', description: 'ODER: Pfad zu einer manifest-JSON-Datei' },
+      exportFile: { type: 'string', description: 'ODER: Plugin-Export — daraus wird das Manifest gebaut' },
+      install: { type: 'string', description: 'optional: Pfad zum Plugin-Export → Plugin wird zuerst installiert' },
+      pageId: { type: 'number', description: 'Testseiten-ID (überschreibt manifest.testPage.id; Default 20000)' },
+      appId: { type: 'number' }, workspace: { type: 'string' }, alias: { type: 'string', description: 'App-Alias für die Friendly-URL' },
+    } },
+    run: async (a) => {
+      let manifest = a.manifest || null;
+      if (!manifest && a.manifestPath) { if (!fs.existsSync(a.manifestPath)) return { ok: false, error: `Manifest nicht gefunden: ${a.manifestPath}` }; manifest = JSON.parse(fs.readFileSync(a.manifestPath, 'utf8')); }
+      if (!manifest && a.exportFile) { if (!fs.existsSync(a.exportFile)) return { ok: false, error: `Export nicht gefunden: ${a.exportFile}` }; manifest = buildSetupManifest(fs.readFileSync(a.exportFile, 'utf8'), { pageId: a.pageId ?? 20000 }); }
+      if (!manifest) return { ok: false, error: 'Kein manifest/manifestPath/exportFile angegeben.' };
+      const connection = { baseUrl: ENV.baseUrl, workspace: a.workspace || ENV.workspace, user: process.env.APEX_LOGIN_USER, pass: process.env.APEX_LOGIN_PASS, appId: a.appId ?? ENV.appId, alias: a.alias || ENV.alias };
+      return setupFromManifest(manifest, connection, { pageId: a.pageId, install: a.install });
     },
   },
 ];

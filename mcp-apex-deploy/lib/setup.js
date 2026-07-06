@@ -1,0 +1,82 @@
+/**
+ * setup.js — richtet eine Testseite AUSSCHLIESSLICH anhand des Setup-Manifests (buildSetupManifest) ein.
+ *
+ * Damit ist der apex-deploy-MCP standalone/wiederverwendbar: JSON („Rezept") rein → Testseite in APEX raus.
+ * Der Ablauf (optional Plugin-Install → File URLs → Testseite im Page Designer aus dem Manifest → Render-
+ * Smoke-Test) liest ALLES aus dem Manifest; es wird nichts neu „gedacht". Alle Browser-Bausteine sind
+ * injizierbar → ohne echten Browser/Instanz unit-testbar. Secrets (Passwort) kommen vom Aufrufer, nie geloggt.
+ *
+ * Resultat: mcp-apex-deploy/lib/setup.js
+ */
+
+import { loadChromium, uiLogin, uiImportFile, uiSetPluginFileUrls, uiCreateTestPage, smokeCheckPage } from './apex-ui.js';
+
+const clean = (v) => String(v ?? '').replace(/[\x00-\x1f]+/g, ' ');
+
+/**
+ * @param {object} manifest  Ausgabe von buildSetupManifest (plugin/testPage/attributes/fileUrls)
+ * @param {{baseUrl,workspace,user,pass,appId,alias?}} connection  Ziel-APEX + Login (Passwort nie geloggt)
+ * @param {{pageId?:number, sourceSql?:string, install?:string, setFileUrls?:boolean, cwd?:string, settleMs?:number}} [o]
+ *   install = Pfad zum Plugin-Export (.sql) → Plugin wird zuerst über die Plug-ins-UI installiert.
+ * @param {object} [deps]  injizierbar (Default: echte apex-ui-Funktionen)
+ */
+export async function setupFromManifest(manifest, connection, o = {}, deps = {}) {
+  const d = { loadChromium, uiLogin, uiImportFile, uiSetPluginFileUrls, uiCreateTestPage, smokeCheckPage, ...deps };
+  const m = manifest || {};
+  if (!m.plugin || !m.plugin.internalName) return { ok: false, error: 'Manifest ohne plugin.internalName.' };
+  const c = connection || {};
+  if (!c.baseUrl || !c.workspace || !c.user || !c.pass || !c.appId) {
+    return { ok: false, error: 'Verbindung unvollständig (baseUrl/workspace/user/Passwort/appId).' };
+  }
+  const cfg = { baseUrl: c.baseUrl, workspace: c.workspace, user: c.user, pass: c.pass };
+  const pageId = Number(o.pageId ?? m.testPage?.id ?? 20000);
+  const displayName = m.plugin.displayName || m.plugin.internalName;
+  const regionName = m.testPage?.region?.name || `Test: ${m.plugin.internalName}`;
+  const pageName = m.testPage?.name || `Live-Test: ${m.plugin.internalName}`;
+  const sourceSql = o.sourceSql || m.testPage?.source?.sql || undefined;
+  const attributes = (m.attributes || [])
+    .filter((a) => a && a.prompt && a.default != null && a.default !== '')
+    .map((a) => ({ prompt: a.prompt, value: clean(a.default) }));
+
+  const chromium = await d.loadChromium(o.cwd || process.cwd());
+  if (!chromium) return { ok: false, error: 'Playwright nicht installiert — Setup nicht möglich.' };
+  const browser = await chromium.launch({ headless: true });
+  const result = { ok: false, plugin: m.plugin.internalName, appId: Number(c.appId), pageId };
+  try {
+    const page = await browser.newPage();
+    const login = await d.uiLogin(page, cfg);
+    result.login = { ok: login.ok, error: login.error };
+    if (!login.ok) return result;
+
+    // 1) Optional: Plugin installieren (app-interner Plug-in-Import) — nötig, damit der Region-Typ existiert.
+    if (o.install) result.install = await d.uiImportFile(page, o.install, { appId: c.appId, viaPlugins: true });
+
+    // 2) File URLs to Load (JS+CSS) aus dem Manifest setzen.
+    const js = m.fileUrls?.js || [], css = m.fileUrls?.css || [];
+    if (o.setFileUrls !== false && (js.length || css.length)) {
+      result.fileUrls = await d.uiSetPluginFileUrls(page, { appId: c.appId, displayName, jsUrls: js, cssUrls: css });
+    }
+
+    // 3) Testseite im Page Designer aus dem Manifest bauen (frische, eingeloggte Seite → sauberer Nav-Start).
+    const pdPage = await browser.newPage();
+    const pdLogin = await d.uiLogin(pdPage, cfg);
+    result.testPage = pdLogin.ok
+      ? await d.uiCreateTestPage(pdPage, { appId: c.appId, pageId, pageName, pluginDisplayName: displayName, regionName, sourceSql, attributes })
+      : { ok: false, error: 'Login für Page-Designer-Schritt fehlgeschlagen.' };
+    await pdPage.close().catch(() => {});
+
+    // 4) Render-Smoke-Test über die Friendly-URL (öffentliche Testseite).
+    const base = String(c.baseUrl).replace(/\/$/, '');
+    const url = c.alias ? `${base}/r/${String(c.workspace).toLowerCase()}/${c.alias}/${pageId}` : `${base}/f?p=${c.appId}:${pageId}`;
+    const rt = await browser.newPage();
+    const errors = [];
+    rt.on('pageerror', (e) => errors.push(String(e?.message ?? e)));
+    rt.on('console', (mm) => { if (mm.type() === 'error') errors.push(mm.text()); });
+    await rt.goto(url, { waitUntil: 'domcontentloaded', timeout: 30000 }).catch(() => {});
+    result.render = await d.smokeCheckPage(rt, errors, { settleMs: o.settleMs, expectMarker: m.plugin.internalName });
+    result.render.url = url;
+
+    result.ok = !!(result.testPage?.ok && result.render?.rendered);
+    return result;
+  } finally { await browser.close(); }
+}

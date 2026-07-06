@@ -8,10 +8,28 @@
  * Resultat: src/service/run-component.js
  */
 
+import fs from 'node:fs';
+import path from 'node:path';
 import { scanRepo } from './run-repo.js';
 import { libStatus, libWarningFrom } from './lib-check.js';
 import { suggestReplacement } from './lib-replace.js';
 import { buildSbom } from '../sbom/sbom.js';
+import { buildSetupManifest } from '../../mcp-apex-deploy/lib/apex.js';
+import { findPluginExport } from './apex-live.js';
+
+/** Setup-Manifest („Rezept" für die APEX-Einrichtung) aus dem Plugin-Export schreiben (.maintenance/apex-setup.json).
+ *  Wird bei jeder Analyse aufgefrischt → existiert von Anfang an, die Einrichtung liest nur noch das JSON. */
+export function writeSetupManifest(component) {
+  try {
+    const exportFile = component?.path ? findPluginExport(component.path) : null;
+    if (!exportFile) return null;
+    const manifest = buildSetupManifest(fs.readFileSync(exportFile, 'utf8'));
+    const dir = path.join(component.path, '.maintenance');
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(path.join(dir, 'apex-setup.json'), JSON.stringify(manifest, null, 2));
+    return manifest;
+  } catch { return null; }
+}
 
 /** Verdichtet ein Scan-Ergebnis zu einer Kurz-Zusammenfassung. */
 export function summarize(result) {
@@ -92,6 +110,7 @@ export function runComponentOnce(store, component, opts = {}) {
   if (result.format) patch.format = result.format;
   if (result.type) patch.type = result.type;
   store.update(component.id, patch);
+  writeSetupManifest(component); // Analyse → Setup-JSON generisch mitschreiben (Rezept für die Einrichtung)
   if (opts.logSink) {
     try { opts.logSink(component, formatLog(component, lastLog)); } catch { /* Logfehler nicht eskalieren */ }
   }
