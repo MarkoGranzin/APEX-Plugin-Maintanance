@@ -112,6 +112,20 @@
   .protogrp summary .pill{display:inline-block;min-width:18px;text-align:center;font-size:.7rem;padding:1px 7px;border-radius:999px;background:var(--panel2);border:1px solid var(--line);margin-left:6px}
   .protogrp summary .pill.bad{color:var(--red);border-color:rgba(255,90,90,.4)} .protogrp summary .pill.warn{color:var(--yellow)}
   .chk{display:flex;align-items:center;gap:8px} .chk input{width:auto}
+  /* Plugin-Karten (UX-Rework Durchgang 2) — ruhige, scannbare Kacheln statt dichter Tabelle */
+  .cardgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:12px}
+  .pcard{border:1px solid var(--line);border-radius:var(--radius);background:var(--panel);padding:13px 15px;display:flex;flex-direction:column;gap:6px;transition:border-color .12s,background .12s}
+  .pcard:hover{border-color:var(--muted);background:var(--panel2)}
+  .pcard.sev-err{border-left:3px solid var(--red)} .pcard.sev-warn{border-left:3px solid var(--yellow)}
+  .pcard-top{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+  .pcard-name{font-size:1rem;flex:1 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .pcard-sum{color:var(--ink);opacity:.9;min-height:1.1em}
+  .pcard-foot{display:flex;justify-content:space-between;gap:8px;border-top:1px solid var(--line);padding-top:6px;margin-top:2px}
+  .ic{font-size:.74rem;padding:3px 9px;border-radius:999px;border:1px solid var(--line);white-space:nowrap}
+  .ic-ok{color:var(--green);border-color:rgba(84,209,140,.4)}
+  .ic-warn{color:var(--yellow);border-color:rgba(255,200,87,.4)}
+  .ic-err{color:var(--red);border-color:rgba(255,107,107,.4)}
+  .sortsel{background:var(--panel);color:var(--ink);border:1px solid var(--line);border-radius:8px;padding:5px 8px;font-size:.82rem}
 </style>
 </head>
 <body>
@@ -148,20 +162,16 @@
       <button class="chip" data-flt="unmaintained" onclick="setFilterStatus('unmaintained')">Unmaintained</button>
       <button class="chip" data-flt="outdated" onclick="setFilterStatus('outdated')">Outdated</button>
       <button class="chip" data-flt="ok" onclick="setFilterStatus('ok')">OK</button>
+      <span class="sp" style="flex:1"></span>
+      <select id="fltSort" class="sortsel" onchange="setSortSel(this.value)" title="Sort plugins">
+        <option value="severity">Sort: Status</option>
+        <option value="name">Sort: Name</option>
+        <option value="change">Sort: Last change</option>
+        <option value="summary">Sort: Summary</option>
+      </select>
       <span class="muted small" id="fltCount" style="margin-left:6px"></span>
     </div>
-    <table id="tbl">
-      <thead><tr>
-        <th class="srt" data-sort="name" onclick="setSort('name')">Name</th>
-        <th>Repo</th><th>Type</th><th>Format</th>
-        <th class="srt" data-sort="severity" onclick="setSort('severity')">Status</th>
-        <th class="srt" data-sort="libs" onclick="setSort('libs')">Libraries</th>
-        <th class="srt" data-sort="change" onclick="setSort('change')">Last change</th>
-        <th class="srt" data-sort="summary" onclick="setSort('summary')">Summary</th>
-        <th></th>
-      </tr></thead>
-      <tbody id="rows"></tbody>
-    </table>
+    <div id="cards" class="cardgrid"></div>
     <div id="empty" class="empty" style="display:none">No plugins yet — add the first one with “+ Plugin”.</div>
   </div>
 
@@ -451,37 +461,44 @@ function renderOverview(){
     <div class="ov-stat"><b style="font-size:.92rem">${lr}${run}</b><span>Last auto-run</span></div>`;
 }
 function renderTable(){
-  const rows=$('rows'); if(!rows) return;
-  rows.innerHTML='';
+  const wrap=$('cards'); if(!wrap) return;
+  wrap.innerHTML='';
   $('empty').style.display = ALL.length ? 'none' : 'block';
   const view = ALL.filter(matchesFilter).slice().sort(cmpRow);
   const fc=$('fltCount'); if(fc) fc.textContent = view.length===ALL.length? `${ALL.length} shown` : `${view.length} of ${ALL.length} shown`;
-  // Filter-Chips: aktiven markieren
   document.querySelectorAll('.chip[data-flt]').forEach(b=>b.classList.toggle('active', b.getAttribute('data-flt')===filterStatus));
-  // Sortier-Pfeile in den Spaltenköpfen
-  document.querySelectorAll('th.srt').forEach(th=>{ const k=th.getAttribute('data-sort'); const base=th.textContent.replace(/[▲▼]\s*$/,'').trim(); th.innerHTML = base + (k===sortKey?` <span class="arr">${sortDir==='asc'?'▲':'▼'}</span>`:''); });
+  const ss=$('fltSort'); if(ss && ss.value!==sortKey) ss.value=sortKey;
   for(const c of view){
-    const tr = document.createElement('tr'); tr.className='row';
-    const dot = (c.libWarning&&c.libWarning.vulnerable) ? 'err' : (c.status==='ok'||c.status==='getestet') ? 'ok' : c.status==='neu' ? '' : 'warn';
-    const badgeCls = c.formatBadge==='APEX-SQL-Export'?'export':'';
-    const typeBadge = c.type==='template_component'?'<span class="badge tc">Template Component</span>':'<span class="badge">Plugin</span>';
-    tr.innerHTML = `
-      <td><span class="spin" data-cid="${c.id}"${rowBusy(c.id)?'':' hidden'}></span><b>${esc(c.name)}</b>${libWarnBadge(c.libWarning)}${libActionBadge(c)}${rebuiltBadge(c)}${notRepairableBadge(c)}${mockBadge(c)}<span class="runlbl muted small" data-cid="${c.id}"${rowBusy(c.id)?'':' hidden'}> · running…</span></td>
-      <td class="small muted">${esc(c.repo||'—')}</td>
-      <td>${typeBadge}</td>
-      <td><span class="badge ${badgeCls}">${esc(c.formatBadge)}</span></td>
-      <td><span class="dot ${dot}"></span>${esc(statusLabel(c.status))}</td>
-      <td class="small muted">${(c.libs||[]).slice(0,4).map(l=>`<span class="badge" style="${l.status==='verwundbar'?'color:var(--red);border-color:#f8514966':(l.status==='nicht gepflegt'||l.status==='veraltet')?'color:var(--yellow);border-color:#d2992266':l.status==='unbekannt'?'color:var(--muted)':''}" title="${esc((libStatusLabel(l.status)||l.status||'')+(l.action&&l.action!=='ok'?' → '+l.action+(l.actionPath?' ('+l.actionPath+')':''):'')+(l.security&&l.security.scanned?' · 🛡 '+l.security.reason:''))}">${esc(l.name)}@${esc(l.version)}</span>${l.status==='veraltet'?secMark(l):''}`).join(' ')||'—'}${(c.libs||[]).length>4?` <span class="muted">+${c.libs.length-4}</span>`:''}</td>
-      <td class="small muted">${fmtDate(c.lastChange&&c.lastChange.at)}</td>
-      <td class="small">${esc(c.changeSummary)}</td>
-      <td style="text-align:right;color:var(--muted);font-size:18px;width:24px" title="Open details">›</td>`;
-    // Actions leben jetzt im Drawer (bessere UX): die ganze Zeile öffnet das Detail.
-    tr.style.cursor = 'pointer';
-    tr.onclick = ()=> openDetail(c.id);
-    rows.appendChild(tr);
+    // Alle „Handlungsbedarf"-Signale zu EINEM Issue-Zähler bündeln (Details stehen im Drawer).
+    const lw=c.libWarning||{};
+    const issues=(lw.vulnerable||0)+(lw.unmaintained||0)+(lw.outdated||0)+(lw.unknown||0);
+    const okState = !issues && (c.status==='ok'||c.status==='getestet');
+    const sev = lw.vulnerable ? 'err' : (issues||['ok','getestet','neu'].indexOf(c.status)<0) ? 'warn' : '';
+    const chip = okState
+      ? `<span class="ic ic-ok">✓ OK</span>`
+      : issues
+        ? `<span class="ic ${lw.vulnerable?'ic-err':'ic-warn'}" title="${esc([lw.vulnerable?lw.vulnerable+' vulnerable':'',lw.unmaintained?lw.unmaintained+' unmaintained':'',lw.outdated?lw.outdated+' outdated':'',lw.unknown?lw.unknown+' unknown':''].filter(Boolean).join(', '))}">⚠ ${issues} issue${issues>1?'s':''}</span>`
+        : `<span class="ic ic-warn">${esc(statusLabel(c.status))}</span>`;
+    const libs=(c.libs||[]).length;
+    const el=document.createElement('div');
+    el.className='pcard'+(sev==='err'?' sev-err':sev==='warn'?' sev-warn':'');
+    el.style.cursor='pointer';
+    el.innerHTML=`
+      <div class="pcard-top">
+        <span class="spin" data-cid="${c.id}"${rowBusy(c.id)?'':' hidden'}></span>
+        <b class="pcard-name">${esc(c.name)}</b>
+        ${chip}${notRepairableBadge(c)}${rebuiltBadge(c)}${mockBadge(c)}
+        <span class="runlbl muted small" data-cid="${c.id}"${rowBusy(c.id)?'':' hidden'}>running…</span>
+      </div>
+      <div class="pcard-meta small muted">${esc(c.repo||'no repo')} · <span class="badge ${c.formatBadge==='APEX-SQL-Export'?'export':''}">${esc(c.formatBadge)}</span> · ${c.type==='template_component'?'Template Component':'Plugin'}</div>
+      <div class="pcard-sum small">${esc(c.changeSummary)||'—'}</div>
+      <div class="pcard-foot small muted"><span>${libs?`${libs} lib${libs>1?'s':''}${lw.vulnerable?` · ${lw.vulnerable} vuln`:''}`:'no libs'}</span><span>${fmtDate(c.lastChange&&c.lastChange.at)}</span></div>`;
+    el.onclick=()=>openDetail(c.id);
+    wrap.appendChild(el);
   }
   renderOverview();
 }
+function setSortSel(v){ sortKey=v; sortDir = (v==='name'||v==='summary') ? 'asc' : 'desc'; renderTable(); }
 function setSort(key){ if(sortKey===key){ sortDir = sortDir==='asc'?'desc':'asc'; } else { sortKey=key; sortDir = key==='name'||key==='summary' ? 'asc' : 'desc'; } renderTable(); }
 function setFilterStatus(s){ filterStatus=s; renderTable(); }
 function setFilterText(t){ filterText=t; renderTable(); }
