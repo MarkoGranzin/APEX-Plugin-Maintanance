@@ -521,40 +521,44 @@ async function openDetail(id){
         <span class="badge">${c.type==='template_component'?'Template Component':'Plugin'}</span>
         <span class="badge ${c.formatBadge==='APEX-SQL-Export'?'export':''}">${esc(c.formatBadge)}</span>
       </div>
-      <!-- Aktionen (UX-Rework): Primär prominent, Häufige gleich daneben, Erweitertes/Git eingeklappt, Löschen in der Danger-Zone. -->
-      <div class="inline" style="margin-top:10px;gap:6px;flex-wrap:wrap">
+      <!-- Schlanker Kopf: nur Primäraktionen sichtbar; alles Weitere (inkl. der frueheren Zeilen-Aktionen)
+           ordentlich unter „More actions" gruppiert — der Kopf bleibt ruhig. -->
+      <div class="inline" style="margin-top:10px;gap:6px">
         <button class="primary" onclick="runMaintain()" title="Full cycle: check → web lib check → apply SAFE lib updates → auto-fix → re-test. Writes files in the workspace. Pushes only if “allow push” is ON.">🧰 Full maintenance now</button>
         <button onclick="runOne()" title="Read-only analysis (status, libraries, protocol). With auto-repair ON this runs Full maintenance instead.">▶ Check</button>
-        ${c.mockUrl?`<button onclick="window.open(current.mockUrl,'_blank','noopener')" title="Open the rendered mock in a new tab${c.mockMode==='ai'?' (AI-written)':c.mockMode?' (static fallback)':''}">🧪 Open mock</button>`:''}
-        ${c.mockSelfCheck?`<button onclick="exportRequirements(current)" title="Export the acceptance requirements (works-as-before) as a Gherkin .feature — devhub-ready">⤓ Requirements</button>`:''}
-        <button onclick="openEdit(current)" title="Edit the plugin name / repo path.">✏ Edit</button>
-      </div>
-      <details class="moreact" style="margin-top:8px"><summary>⋯ More actions</summary>
-        <div class="small muted" style="margin-top:8px">Read-only / local</div>
-        <div class="inline" style="margin-top:4px;gap:6px;flex-wrap:wrap">
-          <button onclick="openAssign()" title="Connect/clone the Git repo so check, tests and library detection work.">🔗 Assign repo</button>
-          <button onclick="openGit()" title="Open the repo URL in the browser. No changes.">🌐 Open Git</button>
-          <button onclick="openDir()" title="Open the local working copy in the OS file manager. No changes.">📂 Open locally</button>
-          <button onclick="runReview()" title="Security + quality gate. Read-only — reports findings, changes nothing.">🔍 Manual review</button>
-          <button onclick="rebuildRequirements()" title="Re-derive the acceptance requirements (works-as-before contract incl. the exact APEX parameter/JSON interface) freshly from the mock self-test. Writes only .maintenance/acceptance.json.">🔄 Rebuild requirements</button>
-          <button onclick="apexSetup()" title="Erzeugt aus der Plugin-Analyse das Setup-JSON („Rezept" zum Einrichten einer Testseite: Region-Typ, benötigtes Page-Item + AJAX, Datenquelle/Beispielquery, Attribute mit Defaults, JS/CSS-File-URLs) und lädt es herunter. Schreibt .maintenance/apex-setup.json. Read-only.">🧩 Setup-JSON</button>
-          ${(c.libActions&&c.libActions.redevelop)?`<button onclick="redevelopDeadLib(current)" title="Dead library without successor → slice-wise re-development against the acceptance contract (license-gated)">🧬 Re-develop</button>`:''}
-        </div>
-        <div class="small muted" style="margin-top:10px">Writes files / Git <span class="muted">— fixes &amp; AI review live inside “🧰 Full maintenance now”</span></div>
-        <div class="inline" style="margin-top:4px;gap:6px;flex-wrap:wrap">
-          <button onclick="runUpdate()" title="Update libraries to the latest version. Safe updates are applied directly; for breaking ones you get a force option (you verify) or use the verified migration in the Tests tab.">⬆ Update libs to latest</button>
-          <button onclick="runUpload()" title="Commit current changes on a NEW branch and push it + show the PR link (asks for confirmation). Never touches your current branch.">📤 Upload (branch + PR)</button>
-          <button onclick="apexLive()" title="Spielt das Plugin in die konfigurierte APEX-Ziel-App ein (Shared Components → Plug-ins → Import), setzt die File URLs to Load, legt eine analyse-getriebene Testseite an (Page-Item/AJAX/ConfigJSON) und macht einen headless Render-Smoke-Test. Braucht die APEX-Verbindung in den Settings. Test-App verwenden!">🚀 In APEX einspielen &amp; live testen</button>
-        </div>
-        <details class="moreact" style="margin-top:12px">
-          <summary style="color:var(--red)">⚠ Danger zone</summary>
-          <div class="inline" style="margin-top:8px;gap:6px;flex-wrap:wrap">
-            <button class="ghost small danger" onclick="delComponent(current)" title="Remove from this tool's list only. The APEX app and the files on disk are kept.">Remove from list</button>
-            <button class="ghost small danger" onclick="purgeComponent()" title="Löscht das Plugin überall: Tool-Registry, APEX-Testseite + Plug-in, und die auf der Platte gespeicherten Daten (Klon, Mock, Logs, Tests). Fragt zur Sicherheit den exakten Namen ab.">🗑 Delete everywhere…</button>
+        <details class="moreact"><summary>⋯ More actions</summary>
+          <div class="small muted" style="margin-top:8px">This plugin</div>
+          <div class="inline" style="margin-top:4px;gap:6px;flex-wrap:wrap">
+            ${c.mockUrl?`<button onclick="window.open(current.mockUrl,'_blank','noopener')" title="Open the rendered mock in a new tab${c.mockMode==='ai'?' (AI-written)':c.mockMode?' (static fallback)':''}">🧪 Open mock</button>`:''}
+            ${c.mockSelfCheck?`<button onclick="exportRequirements(current)" title="Export the acceptance requirements (works-as-before) as a Gherkin .feature — devhub-ready">⤓ Requirements</button>`:''}
+            <button onclick="openEdit(current)" title="Edit the plugin name / repo path.">✏ Edit</button>
           </div>
-          <div class="small muted" style="margin-top:6px">“Remove from list” only unregisters it here. “Delete everywhere” also removes the APEX test page + plug-in and the data on disk (clone, mock, logs, tests) — cannot be undone.</div>
+          <div class="small muted" style="margin-top:10px">Read-only / local</div>
+          <div class="inline" style="margin-top:4px;gap:6px;flex-wrap:wrap">
+            <button onclick="openAssign()" title="Connect/clone the Git repo so check, tests and library detection work.">🔗 Assign repo</button>
+            <button onclick="openGit()" title="Open the repo URL in the browser. No changes.">🌐 Open Git</button>
+            <button onclick="openDir()" title="Open the local working copy in the OS file manager. No changes.">📂 Open locally</button>
+            <button onclick="runReview()" title="Security + quality gate. Read-only — reports findings, changes nothing.">🔍 Manual review</button>
+            <button onclick="rebuildRequirements()" title="Re-derive the acceptance requirements (works-as-before contract incl. the exact APEX parameter/JSON interface) freshly from the mock self-test. Writes only .maintenance/acceptance.json.">🔄 Rebuild requirements</button>
+            <button onclick="apexSetup()" title="Erzeugt aus der Plugin-Analyse das Setup-JSON („Rezept" zum Einrichten einer Testseite: Region-Typ, benötigtes Page-Item + AJAX, Datenquelle/Beispielquery, Attribute mit Defaults, JS/CSS-File-URLs) und lädt es herunter. Schreibt .maintenance/apex-setup.json. Read-only.">🧩 Setup-JSON</button>
+            ${(c.libActions&&c.libActions.redevelop)?`<button onclick="redevelopDeadLib(current)" title="Dead library without successor → slice-wise re-development against the acceptance contract (license-gated)">🧬 Re-develop</button>`:''}
+          </div>
+          <div class="small muted" style="margin-top:10px">Writes files / Git <span class="muted">— fixes &amp; AI review live inside “🧰 Full maintenance now”</span></div>
+          <div class="inline" style="margin-top:4px;gap:6px;flex-wrap:wrap">
+            <button onclick="runUpdate()" title="Update libraries to the latest version. Safe updates are applied directly; for breaking ones you get a force option (you verify) or use the verified migration in the Tests tab.">⬆ Update libs to latest</button>
+            <button onclick="runUpload()" title="Commit current changes on a NEW branch and push it + show the PR link (asks for confirmation). Never touches your current branch.">📤 Upload (branch + PR)</button>
+            <button onclick="apexLive()" title="Spielt das Plugin in die konfigurierte APEX-Ziel-App ein (Shared Components → Plug-ins → Import), setzt die File URLs to Load, legt eine analyse-getriebene Testseite an (Page-Item/AJAX/ConfigJSON) und macht einen headless Render-Smoke-Test. Braucht die APEX-Verbindung in den Settings. Test-App verwenden!">🚀 In APEX einspielen &amp; live testen</button>
+          </div>
+          <details class="moreact" style="margin-top:12px">
+            <summary style="color:var(--red)">⚠ Danger zone</summary>
+            <div class="inline" style="margin-top:8px;gap:6px;flex-wrap:wrap">
+              <button class="ghost small danger" onclick="delComponent(current)" title="Remove from this tool's list only. The APEX app and the files on disk are kept.">Remove from list</button>
+              <button class="ghost small danger" onclick="purgeComponent()" title="Löscht das Plugin überall: Tool-Registry, APEX-Testseite + Plug-in, und die auf der Platte gespeicherten Daten (Klon, Mock, Logs, Tests). Fragt zur Sicherheit den exakten Namen ab.">🗑 Delete everywhere…</button>
+            </div>
+            <div class="small muted" style="margin-top:6px">“Remove from list” only unregisters it here. “Delete everywhere” also removes the APEX test page + plug-in and the data on disk (clone, mock, logs, tests) — cannot be undone.</div>
+          </details>
         </details>
-      </details>
+      </div>
       ${c.reviewUrl?`<div class="finding low" style="margin-top:8px">📤 Open review: <a href="${esc(c.reviewUrl)}" target="_blank" rel="noopener" style="color:var(--accent)">branch ${esc(c.reviewBranch||'')} → open PR ↗</a></div>`:''}
       <div id="reviewOut" style="margin-top:8px"></div>
     </div>
