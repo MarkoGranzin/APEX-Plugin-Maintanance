@@ -174,10 +174,14 @@ async function pdMouseDrag(page, sb, tx, ty) {
  */
 export async function uiDeletePage(page, o = {}) {
   const appTile = page.locator(`a[href*="fb_flow_id=${o.appId}"]`);
-  if (await appTile.count()) { await appTile.first().click(); await page.waitForLoadState('networkidle').catch(() => {}); await page.waitForTimeout(1200); }
+  // Landing ist der „Pages"-Report (IRR) — genug Zeit lassen, bis er geladen ist (B-32: 1200ms war zu kurz).
+  if (await appTile.count()) { await appTile.first().click(); await page.waitForLoadState('networkidle').catch(() => {}); await page.waitForTimeout(2800); }
   const link = page.getByRole('link', { name: new RegExp(`\\b${o.pageId}\\b`) });
   if (!(await link.count())) return { ok: true, deleted: false, note: 'Seite existiert nicht.' };
-  await link.first().click(); await page.waitForLoadState('networkidle').catch(() => {}); await page.waitForTimeout(3000);
+  // Force-Klick: die IRR-Toolbar überlagert die Zelle und fängt normale Klicks ab (pointer-events intercept).
+  await link.first().scrollIntoViewIfNeeded().catch(() => {});
+  await link.first().click({ force: true }).catch(async () => { await link.first().evaluate((a) => a.click()).catch(() => {}); });
+  await page.waitForLoadState('networkidle').catch(() => {}); await page.waitForTimeout(3000);
   if (!new RegExp(`${o.appId}:${o.pageId}\\b`).test(await page.title().catch(() => ''))) return { ok: false, error: 'Page Designer nicht geöffnet.' };
   await page.locator('#pdUtilities, button[aria-label*="Utilities" i], button[title*="Utilities" i]').first().click().catch(() => {});
   await page.waitForTimeout(1000);
