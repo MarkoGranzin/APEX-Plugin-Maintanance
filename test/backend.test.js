@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { createBackend, findBundledClaude } from '../src/ai/backend.js';
+import { createBackend, findBundledClaude, resolveCliCommand, highestClaudeExe } from '../src/ai/backend.js';
 import fs from 'node:fs'; import os from 'node:os'; import path from 'node:path';
 
 describe('T-11 CLI-Backend', () => {
@@ -100,3 +100,18 @@ describe('B-33 cliBackend: handlungsfaehige Meldung bei nicht auffindbarer CLI',
   });
 });
 
+describe('resolveCliCommand: stabiler Ordner statt fixer .exe (kein Pinnen)', () => {
+  it('Ordner mit Versions-Unterordnern -> hoechste claude.exe', () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'cc-'));
+    for (const v of ['2.1.99', '2.1.197', '2.0.5']) { fs.mkdirSync(path.join(root, v), { recursive: true }); fs.writeFileSync(path.join(root, v, 'claude.exe'), 'x'); }
+    expect(highestClaudeExe(root)).toBe(path.join(root, '2.1.197', 'claude.exe'));
+    expect(resolveCliCommand(root)).toBe(path.join(root, '2.1.197', 'claude.exe'));
+    fs.rmSync(root, { recursive: true, force: true });
+  });
+  it('voller .exe-Pfad wird direkt genutzt', () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'cc2-'));
+    const exe = path.join(root, 'claude.exe'); fs.writeFileSync(exe, 'x');
+    expect(resolveCliCommand(exe)).toBe(exe);
+    fs.rmSync(root, { recursive: true, force: true });
+  });
+});

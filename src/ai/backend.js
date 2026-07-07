@@ -125,8 +125,34 @@ export function findBundledClaude(env = process.env) {
 }
 
 /** Löst den CLI-Befehl auf: absoluter Pfad → direkt; bares `claude` (win32) → gebündelte Desktop-Binary, falls vorhanden. */
+/** Höchst-versionierte claude.exe in einem Verzeichnis: entweder direkt <dir>\claude.exe, oder <dir> als
+ *  claude-code-Wurzel mit Versions-Unterordnern (…\<x.y.z>\claude.exe → höchste Version). Für den stabilen,
+ *  NICHT versions-gepinnten Settings-Eintrag (Ordner statt fixer .exe). */
+export function highestClaudeExe(dir) {
+  try {
+    const direct = path.join(dir, 'claude.exe');
+    if (fs.statSync(direct).isFile()) return direct;
+  } catch { /* weiter */ }
+  const cmp = (a, b) => { for (let i = 0; i < Math.max(a.length, b.length); i++) { const d = (a[i] || 0) - (b[i] || 0); if (d) return d; } return 0; };
+  let best = null, bestV = null;
+  try {
+    for (const d of fs.readdirSync(dir)) {
+      const exe = path.join(dir, d, 'claude.exe');
+      try { if (!fs.statSync(exe).isFile()) continue; } catch { continue; }
+      const v = d.split('.').map((n) => parseInt(n, 10) || 0);
+      if (!bestV || cmp(v, bestV) > 0) { best = exe; bestV = v; }
+    }
+  } catch { /* egal */ }
+  return best;
+}
+
 export function resolveCliCommand(command, env = process.env) {
-  try { if (path.isAbsolute(command) && fs.existsSync(command)) return command; } catch { /* egal */ }
+  // Voller .exe-Pfad ODER stabiler Ordner (…\Claude\claude-code) → daraus die aktuelle Version wählen.
+  try {
+    const st = command && fs.statSync(command);
+    if (st && st.isFile()) return command;
+    if (st && st.isDirectory()) return highestClaudeExe(command) ?? command;
+  } catch { /* egal */ }
   const base = String(command || '').replace(/\\/g, '/').split('/').pop().replace(/\.(cmd|exe|bat|ps1)$/i, '');
   if (/^claude$/i.test(base)) return findBundledClaude(env) ?? command; // sonst PATH-Auflösung via shell:true
   return command;
