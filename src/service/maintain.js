@@ -41,7 +41,7 @@ export async function maintainComponent(store, comp, deps = {}) {
 
   // 2) Bibliotheken aus dem Web prüfen (Aktualität/Quelle) — stellt sicher, dass Updates erkannt werden
   try {
-    const enriched = await checkLibrariesOnline(cur().libs ?? [], { fetchInfo: deps.fetchInfo, fetch: deps.fetch, now });
+    const enriched = await checkLibrariesOnline(cur().libs ?? [], { fetchInfo: deps.fetchInfo, fetch: deps.fetch, now, ai: deps.ai });
     store.update(comp.id, { libs: enriched, libsCheckedAt: now() });
     steps.push({ step: 'lib-check', count: enriched.length, outdated: enriched.filter((l) => l.outdated || l.vulnerable).length });
   } catch (e) {

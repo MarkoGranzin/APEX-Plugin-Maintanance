@@ -13,6 +13,7 @@ import fs from 'node:fs';
 import { listFiles } from '../inventory/inventory.js';
 import { isLibraryFile } from '../inventory/format.js';
 import { fetchNpmInfo, versionAtDate } from '../sbom/registry.js';
+import { resolveVersionWithAi } from './ai-version-resolve.js';
 import { classifyLicense } from '../sbom/licenses.js';
 
 const DAY = 86400000;
@@ -103,6 +104,22 @@ export async function checkLibrariesOnline(libs, deps = {}) {
       e.installedReleasedAt = instTime ?? e.installedReleasedAt;
       e.installedAgeDays = instTime ? Math.max(0, Math.floor((now() - Date.parse(instTime)) / DAY)) : e.installedAgeDays;
       e.outdated = !!(e.latest && e.latest !== v);
+      e.webStatus = e.outdated ? 'veraltet' : (e.latest ? 'aktuell' : 'unbekannt');
+      e.status = libStatus(e);
+    }
+  }
+  // T-146 (Schicht 3) — KI-Fallback für weiterhin unbekannte Versionen: nur wenn ein echtes Backend
+  // konfiguriert ist (deps.ai, kein Stub). Der KI-Vorschlag wird gegen die Registry VALIDIERT übernommen.
+  if (deps.ai && deps.ai.kind && deps.ai.kind !== 'stub') {
+    for (const e of out) {
+      if (e.version && e.version !== 'unbekannt') continue;
+      if (!e.evidenceHead) continue;
+      const r = await resolveVersionWithAi(e, { ai: deps.ai, fetchInfo, fetch: deps.fetch });
+      if (!r) continue;
+      e.version = r.version;
+      e.detectedBy = r.detectedBy; // 'ai-validated'
+      e.versionAiResolved = true;
+      e.outdated = !!(e.latest && e.latest !== r.version);
       e.webStatus = e.outdated ? 'veraltet' : (e.latest ? 'aktuell' : 'unbekannt');
       e.status = libStatus(e);
     }

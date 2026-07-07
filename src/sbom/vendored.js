@@ -118,13 +118,15 @@ export function detectVendoredLibraries(dir, opts = {}) {
     const name = nameFromFile(f);
     if (!name) continue;
     let version = versionFromName(f);
+    let evidenceHead = null;
     if (!version) {
       const content = readFile(f);
       // Spezielle Nicht-Semver-Marker zuerst (three REVISION, mxClient.VERSION), dann generisch (T-146).
       if (ANCHOR[name]) version = ANCHOR[name](content);
       if (!version) version = versionFromContent(content, name);
+      if (!version) evidenceHead = content.slice(0, 1500); // Kopf für den KI-Fallback (T-146), nur wenn unbekannt
     }
-    const cand = { name, version: version ?? 'unbekannt', detectedBy: 'vendored', evidence: f };
+    const cand = { name, version: version ?? 'unbekannt', detectedBy: 'vendored', evidence: f, ...(evidenceHead ? { evidenceHead } : {}) };
     const prev = byName.get(name);
     // bevorzuge konkrete Version + nicht-minifizierte Evidenz
     if (!prev || (prev.version === 'unbekannt' && cand.version !== 'unbekannt') || (!/\.min\./.test(f) && /\.min\./.test(prev.evidence))) {
