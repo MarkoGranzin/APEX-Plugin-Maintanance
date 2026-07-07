@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { libraryFiles, checkLibrariesOnline } from '../src/service/lib-check.js';
-import { npmPackageName, normalizeRepoUrl, versionAtDate } from '../src/sbom/registry.js';
+import { npmPackageName, normalizeRepoUrl, versionAtDate, npmNameCandidates } from '../src/sbom/registry.js';
 
 describe('T-59 Bibliotheks-Erkennung + Web-Lookup', () => {
   let dir;
@@ -91,5 +91,14 @@ describe('T-59 Bibliotheks-Erkennung + Web-Lookup', () => {
     expect(pell.version).toBe('1.0.4');
     expect(pell.versionInferred).toBe(true);
     expect(pell.detectedBy).toBe('inferred-by-date');
+  });
+
+  it('T-146 npm-Namens-Zuordnung: Buendel-Dateinamen -> echtes Paket (generisch + Alias)', () => {
+    expect(npmPackageName('masonry.pkgd')).toBe('masonry-layout'); // .pkgd-Suffix generisch weg + Alias
+    expect(npmPackageName('nbillboard')).toBe('billboard.js');
+    expect(npmPackageName('maptopojson')).toBe('topojson');
+    expect(npmPackageName('purify')).toBe('dompurify');
+    expect(npmPackageName('foo.bundle.min')).toBe('foo'); // rein generische Normalisierung
+    expect(npmNameCandidates('nbillboard')).toContain('billboard'); // Praefix-Fallback als Kandidat
   });
 });
