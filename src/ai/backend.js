@@ -90,11 +90,15 @@ export function findBundledClaude(env = process.env) {
   if (!home) { try { home = os.homedir(); } catch { /* egal */ } }
   const bases = new Set();
   for (const b of [env.APPDATA, env.LOCALAPPDATA, home && path.join(home, 'AppData', 'Roaming'), home && path.join(home, 'AppData', 'Local')].filter(Boolean)) bases.add(b);
-  // Fallback: alle Profile durchsuchen (C:\Users\<user>\AppData\{Roaming,Local})
-  try {
-    const usersRoot = home ? path.dirname(home) : (env.SystemDrive ? env.SystemDrive + '\\Users' : 'C:\\Users');
-    for (const u of fs.readdirSync(usersRoot)) { bases.add(path.join(usersRoot, u, 'AppData', 'Roaming')); bases.add(path.join(usersRoot, u, 'AppData', 'Local')); }
-  } catch { /* egal */ }
+  // Fallback: ALLE Profile durchsuchen (C:\Users\<user>\AppData\{Roaming,Local}) — unabhängig davon, welches
+  // USERPROFILE der Server-Prozess hat (Dienst-/Startkontext kann auf ein anderes Profil zeigen, in dem kein
+  // Claude liegt). Darum immer auch <SystemDrive>\Users UND C:\Users mitscannen, nicht nur dirname(home).
+  const usersRoots = new Set();
+  if (home) usersRoots.add(path.dirname(home));
+  usersRoots.add((env.SystemDrive || 'C:') + '\\Users');
+  for (const usersRoot of usersRoots) {
+    try { for (const u of fs.readdirSync(usersRoot)) { bases.add(path.join(usersRoot, u, 'AppData', 'Roaming')); bases.add(path.join(usersRoot, u, 'AppData', 'Local')); } } catch { /* egal */ }
+  }
   const roots = [...new Set([...bases].map((b) => path.join(b, 'Claude', 'claude-code')))];
   const cmp = (a, b) => { for (let i = 0; i < Math.max(a.length, b.length); i++) { const d = (a[i] || 0) - (b[i] || 0); if (d) return d; } return 0; };
   let best = null, bestV = null;

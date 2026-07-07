@@ -85,7 +85,7 @@ describe('findBundledClaude: robuste Auflösung (kein Pinnen)', () => {
     const roaming = path.join(root, 'Roaming');
     fs.mkdirSync(path.join(roaming, 'npm'), { recursive: true });
     fs.writeFileSync(path.join(roaming, 'npm', 'claude.cmd'), '@echo claude');
-    const env = { APPDATA: roaming, LOCALAPPDATA: path.join(root, 'Local'), USERPROFILE: root };
+    const env = { APPDATA: roaming, LOCALAPPDATA: path.join(root, 'Local'), USERPROFILE: root, SystemDrive: root };
     const found = findBundledClaude(env);
     expect(found).toBe(path.join(roaming, 'npm', 'claude.cmd'));
     fs.rmSync(root, { recursive: true, force: true });
