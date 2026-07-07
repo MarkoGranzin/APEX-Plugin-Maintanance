@@ -108,6 +108,15 @@ export function findBundledClaude(env = process.env) {
       if (!bestV || cmp(v, bestV) > 0) { best = exe; bestV = v; }
     }
   }
+  // Fallback (kein Pinnen — Datei-Existenz zur Laufzeit): npm-Global-Bin (claude.cmd/.exe) und der native
+  // Installer (…\Programs\claude\claude.exe). Deckt Setups ab, in denen die Desktop-App fehlt UND der
+  // Server-PATH `claude` nicht kennt (genau der „mock failed: claude nicht gefunden"-Fall).
+  if (!best) {
+    const extra = [];
+    for (const b of bases) for (const f of ['claude.cmd', 'claude.exe']) extra.push(path.join(b, 'npm', f));
+    for (const b of bases) extra.push(path.join(b, 'Programs', 'claude', 'claude.exe')); // LocalAppData\Programs
+    for (const f of extra) { try { if (fs.statSync(f).isFile()) { best = f; break; } } catch { /* weiter */ } }
+  }
   return best;
 }
 
@@ -130,8 +139,17 @@ export function cliBackend(config, deps = {}) {
     requiresApiKey: false,
     resolvedCommand: cmd,
     async complete(prompt, opts = {}) {
-      const { stdout } = await run(cmd, args, { input: prompt });
-      return String(stdout).trim();
+      try {
+        const { stdout } = await run(cmd, args, { input: prompt });
+        return String(stdout).trim();
+      } catch (err) {
+        const msg = String(err?.message ?? err);
+        // „claude nicht gefunden"-Klasse handlungsfähig melden (statt roher Shell-Text) → landet in mockNote/Badge.
+        if (/ENOENT|not recognized|nicht gefunden|not found|falsch geschrieben|konnte nicht gefunden/i.test(msg)) {
+          throw new Error(`AI CLI "${cmd}" nicht aufrufbar — den Dienst aus einer Umgebung starten, in der „claude" läuft (oder den vollen Pfad in den Einstellungen setzen); danach den Mock neu bauen.`);
+        }
+        throw err;
+      }
     },
     async testConnection() {
       try {

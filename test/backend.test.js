@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
-import { createBackend } from '../src/ai/backend.js';
+import { createBackend, findBundledClaude } from '../src/ai/backend.js';
+import fs from 'node:fs'; import os from 'node:os'; import path from 'node:path';
 
 describe('T-11 CLI-Backend', () => {
   it('nutzt die CLI und braucht keinen API-Key', async () => {
@@ -76,3 +77,18 @@ describe('T-11 Umschalten', () => {
     expect(() => createBackend({ kind: 'unbekannt' })).toThrow(/Unbekanntes KI-Backend/);
   });
 });
+
+describe('findBundledClaude: robuste Auflösung (kein Pinnen)', () => {
+  it('findet claude im npm-Global-Bin, wenn keine Desktop-App vorhanden (win32)', () => {
+    if (process.platform !== 'win32') return; // Pfadlogik ist win32-spezifisch
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'claude-npm-'));
+    const roaming = path.join(root, 'Roaming');
+    fs.mkdirSync(path.join(roaming, 'npm'), { recursive: true });
+    fs.writeFileSync(path.join(roaming, 'npm', 'claude.cmd'), '@echo claude');
+    const env = { APPDATA: roaming, LOCALAPPDATA: path.join(root, 'Local'), USERPROFILE: root };
+    const found = findBundledClaude(env);
+    expect(found).toBe(path.join(roaming, 'npm', 'claude.cmd'));
+    fs.rmSync(root, { recursive: true, force: true });
+  });
+});
+
