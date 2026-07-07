@@ -92,3 +92,11 @@ describe('findBundledClaude: robuste Auflösung (kein Pinnen)', () => {
   });
 });
 
+describe('B-33 cliBackend: handlungsfaehige Meldung bei nicht auffindbarer CLI', () => {
+  it('wirft eine klare Meldung statt rohem Shell-Text (ENOENT/nicht gefunden)', async () => {
+    const spawn = async () => { throw new Error('Der Befehl "claude" ist entweder falsch geschrieben oder konnte nicht gefunden werden.'); };
+    const be = createBackend({ kind: 'cli', command: 'nixgibtsda' }, { spawn, resolveCommand: (c) => c });
+    await expect(be.complete('hi')).rejects.toThrow(/nicht aufrufbar|Umgebung/i);
+  });
+});
+
