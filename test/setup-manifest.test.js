@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { setupFromManifest } from '../mcp-apex-deploy/lib/setup.js';
-import { buildSetupManifest } from '../mcp-apex-deploy/lib/apex.js';
+import { buildSetupManifest, stripAsyncBlocks } from '../mcp-apex-deploy/lib/apex.js';
 
 const connection = { baseUrl: 'https://host/ords', workspace: 'WS', user: 'u', pass: 'p', appId: 100, alias: 'test' };
 
@@ -165,6 +165,14 @@ wwv_flow_api.create_plugin_file(
     const deps = fakeDeps({ uiSetPluginFileUrls: async (_p, a) => { cleared = a; return { ok: true, js: { cleared: true } }; } });
     await setupFromManifest({ ...man, plugin: { ...man.plugin, kind: 'region' }, testPage: { ...man.testPage, source: { sql: 'select 1 from dual' } } }, connection, {}, deps);
     expect(cleared.clear).toBe(true); // faelschlich gesetzte URLs werden entfernt
+  });
+
+  it('stripAsyncBlocks: ASYNC-markierte UNION-Bloecke fliegen aus der Testseiten-SQL', () => {
+    const sql = ['SELECT 1 itemType FROM dual', 'UNION ALL', ' /*item is loaded ASYNC*/ SELECT 2 FROM dual', 'UNION ALL', 'SELECT 3 itemType FROM dual'].join('\n');
+    const out = stripAsyncBlocks(sql);
+    expect(out).not.toMatch(/ASYNC/i);
+    expect(out.split(/union all/i)).toHaveLength(2); // 2 von 3 Bloecken bleiben
+    expect(stripAsyncBlocks('SELECT 1 FROM dual')).toBe('SELECT 1 FROM dual'); // ohne UNION unveraendert
   });
 
   it('buildSetupManifest + setupFromManifest zusammen (rundlauf ohne Browser)', async () => {

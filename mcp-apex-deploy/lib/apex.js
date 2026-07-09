@@ -157,6 +157,18 @@ export function analyzePlugin(sqlText) {
  * @param {string} sqlText  Plugin-Export-SQL
  * @param {{pageId?:number, sourceSql?:string}} [opts]
  */
+/** Entfernt UNION-ALL-Blöcke, die sich per Autor-Kommentar als ASYNC deklarieren (z.B. „item is loaded
+ *  ASYNC") aus einer Beispiel-Query: die nackte Testseite hat keinen AJAX-Prozess — solche Items würden
+ *  dort zwangsläufig als Fehler-Kachel rendern. Nur angewandt, wenn mindestens ein Block übrig bleibt. */
+export function stripAsyncBlocks(sql) {
+  const s = String(sql || '');
+  const parts = s.split(/\bunion\s+all\b/i);
+  if (parts.length < 2) return s;
+  const keep = parts.filter((b) => !/\/\*[^*]*\basync\b[^*]*\*\//i.test(b));
+  if (!keep.length || keep.length === parts.length) return s;
+  return keep.join('\nUNION ALL\n');
+}
+
 export function buildSetupManifest(sqlText, opts = {}) {
   const a = analyzePlugin(sqlText);
   const { jsUrls, cssUrls } = pluginLoadFiles(sqlText);
@@ -200,8 +212,9 @@ export function buildSetupManifest(sqlText, opts = {}) {
       } : null,
       // Page-Item, das die Region über „Items to Submit" referenziert (Pflicht bei AJAX_ITEMS_TO_SUBMIT).
       pageItem: ajaxItem ? { name: ajaxItem, type: 'Hidden', ajaxItemsToSubmit: true } : null,
-      // Datenquelle: eigene SQL des Aufrufers, sonst die plugin-eigene Beispielquery.
-      source: a.hasSourceSql ? { type: 'SQL Query', sql: opts.sourceSql || a.defaultSourceSql || null } : null,
+      // Datenquelle: eigene SQL des Aufrufers, sonst die plugin-eigene Beispielquery (ohne ASYNC-Blöcke,
+      // die auf der Testseite mangels AJAX-Prozess nur Fehler-Kacheln erzeugen würden).
+      source: a.hasSourceSql ? { type: 'SQL Query', sql: opts.sourceSql || stripAsyncBlocks(a.defaultSourceSql) || null } : null,
     },
     // Region-Attribute (ConfigJSON etc.) — im Page Designer je Prompt-Label zu setzen.
     attributes: (a.customAttributes || []).map((x) => ({ key: x.key, prompt: x.prompt, required: !!x.required, default: clean(x.default) })),
