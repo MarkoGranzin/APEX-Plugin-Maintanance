@@ -293,7 +293,12 @@ async function pdSetRegionSqlModel(page, sql) {
       const regions = model.getComponents(model.COMP_TYPE.REGION) || [];
       const withSql = regions.map((r) => { try { return { r, p: r.getProperty(model.PROP.REGION_SQL) }; } catch (e) { return { r, p: null }; } }).filter((x) => x.p);
       if (!withSql.length) return 'no-sql-region';
+      // WICHTIG: setValue MUSS in einer Modell-Transaction laufen — sonst gilt die Änderung nicht als
+      // dirty und der Save persistiert sie nicht (empirisch verifiziert: ohne Transaction bleibt die
+      // alte SQL, mit Transaction + Save überlebt sie den Reload).
+      const t = model.transaction && model.transaction.start ? model.transaction.start('aisp', 'set region sql') : null;
       withSql[0].p.setValue(sql);
+      if (t && model.transaction.end) model.transaction.end(t);
       return 'ok';
     } catch (e) { return 'err:' + String(e?.message ?? e).slice(0, 80); }
   }, { sql });
