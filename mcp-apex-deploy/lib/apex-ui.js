@@ -273,6 +273,16 @@ async function pdOpenOrCreatePage(page, o) {
   return { ok: true, mode };
 }
 
+/** Setzt die Template-Position der aktuell selektierten Region auf „Body" — der Gallery-Drag lässt
+ *  Regionen sonst in der zuerst getroffenen Position (z.B. Banner/Header) landen, was optisch falsch
+ *  sitzt (T-148/Nutzer-Feedback). Property heißt je nach APEX-Version „Position" oder „Slot". */
+async function pdSetRegionBody(page) {
+  let r = await pdSetProp(page, 'Position', 'Body');
+  if (r !== 'ok') r = await pdSetProp(page, 'Slot', 'Body');
+  await page.waitForTimeout(500);
+  return r;
+}
+
 /** Seite öffentlich machen + speichern (gemeinsamer Abschluss für Region-/Item-/DA-Testseiten).
  *  Zuerst auf den Rendering-Tab schalten — nur dort führt der Page-Root-Knoten zuverlässig die
  *  Page-Attribute inkl. „Authentication" (aus dem DA-/Processing-Tab fehlt das Feld → Seite bliebe privat). */
@@ -317,6 +327,7 @@ export async function uiCreateItemTestPage(page, o = {}) {
     await page.waitForTimeout(500);
   }
   await page.getByText(new RegExp(`^${rxEsc(hostName)}$`)).first().click().catch(() => {}); await page.waitForTimeout(800);
+  await pdSetRegionBody(page); // Host-Region in den BODY (nicht Banner/Header)
 
   // Host-Region-Position im LAYOUT (Grid) ermitteln — bewusst NUR im Layout-Panel suchen (nicht im
   // Rendering-Tree), damit das Item-Drop-Ziel die echte Region-Fläche trifft. Drop-Ziel für das Item.
@@ -441,6 +452,8 @@ export async function uiCreateTemplateComponentTestPage(page, o = {}) {
     await pdSetProp(page, 'Name', o.regionName);
   }
   await reselect();
+  await pdSetRegionBody(page); // TC-Region in den BODY (nicht Banner/Header)
+  await reselect();
 
   // 2) Datenquelle: Source-„Type" = SQL Query (per Option, nicht Label — „Type" ist mehrdeutig) + SQL.
   const srcType = await pdSetSelectByOption(page, 'SQL Query');
@@ -539,6 +552,7 @@ export async function uiCreateTestPage(page, o = {}) {
   const rName = await pdSetProp(page, 'Name', o.regionName);
   await page.getByText(new RegExp(`^${rxEsc(o.regionName)}$`)).first().click().catch(() => {});
   await page.waitForTimeout(900);
+  const rPos = await pdSetRegionBody(page); // Region gehört in den BODY, nicht in die Drop-Zufallsposition
   const rSql = o.sourceSql ? await pdSetProp(page, 'SQL Query', o.sourceSql) : 'skip';
   const attrs = [];
   for (const a of (o.attributes || [])) { if (a && a.prompt && a.value != null && a.value !== '') attrs.push({ prompt: a.prompt, r: await pdSetProp(page, a.prompt, a.value) }); }
@@ -553,7 +567,7 @@ export async function uiCreateTestPage(page, o = {}) {
   await settle(2500);
   const body = (await page.locator('body').innerText().catch(() => '')).replace(/\s+/g, ' ');
   const saveError = (body.match(/ORA-\d+[^.]{0,100}|could not be saved|processing failed/i) || [])[0] || null;
-  return { ok: rName === 'ok' && (rSql === 'ok' || rSql === 'skip') && !saveError, mode, region: { name: rName, sql: rSql }, attributes: attrs, auth, saveError };
+  return { ok: rName === 'ok' && (rSql === 'ok' || rSql === 'skip') && !saveError, mode, region: { name: rName, sql: rSql, position: rPos }, attributes: attrs, auth, saveError };
 }
 
 /**
