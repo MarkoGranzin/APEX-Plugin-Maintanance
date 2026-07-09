@@ -340,7 +340,9 @@ export function collectMock(dir) {
  * Spec-Version der Mock-/Analyse-LOGIK. HOCHZÄHLEN, wenn sich Analyse-Stufe, Prompt oder Mock-Aufbau
  * fachlich ändern → bekannte Plugins werden einmalig neu untersucht, gleicher Stand bleibt gecacht.
  */
-export const MOCK_SPEC_VERSION = '2026-06-27.48';
+// B-37: Spec-Anforderung verschärft (sichtbare Error-Kacheln/Konsole-Fehler/404 = Probleme) →
+// Version gebumpt, damit gecachte Mocks neu untersucht und von der Refine-Schleife korrigiert werden.
+export const MOCK_SPEC_VERSION = '2026-07-09.49';
 
 /**
  * Fingerprint der EINGABEN, die den Mock bestimmen: Plugin-Code + deklarierter Vertrag (Options-Surface)
