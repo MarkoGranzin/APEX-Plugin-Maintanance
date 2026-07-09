@@ -24,6 +24,7 @@ import { deployAndTest, findPluginExport } from './src/service/apex-live.js';
 import { loadChromium, uiLogin, uiDeletePage, uiDeletePlugin } from './mcp-apex-deploy/lib/apex-ui.js';
 import { purgeComponent } from './src/service/purge-component.js';
 import { importFromFiles } from './src/service/import-file.js';
+import { saveFeedback, createFeedbackTest } from './src/service/feedback.js';
 import { buildSetupManifest } from './mcp-apex-deploy/lib/apex.js';
 import { createComponentStore } from './src/gui/store.js';
 import { apiHandler, metaApiHandler } from './src/gui/api.js';
@@ -73,7 +74,7 @@ try {
 } catch { /* egal */ }
 // Build-Marker: muss mit APP_BUILD in public/app.html übereinstimmen. Bei Backend-Änderungen erhöhen.
 // Das Frontend vergleicht beide und warnt, wenn der laufende Dienst veraltet ist (Neustart nötig).
-const BUILD = '2026-07-09.81';
+const BUILD = '2026-07-09.82';
 const C = { reset: '\x1b[0m', bold: '\x1b[1m', dim: '\x1b[2m', green: '\x1b[32m', yellow: '\x1b[33m', red: '\x1b[31m', cyan: '\x1b[36m' };
 const c = (col, s) => `${C[col]}${s}${C.reset}`;
 
@@ -648,6 +649,31 @@ function cmdServe(portArg) {
       const hasPlaywright = fs.existsSync(path.join(__dirname, 'node_modules', '@playwright', 'test'));
       const r = await runUiTests(store.get(id), { pluginUrl: url, specsDir: path.join(DATA_DIR, 'ui-tests', slugify(c.name)), hasPlaywright });
       return json(res, r);
+    });
+
+    // T-147 — Fehler-Report (Text + Screenshots) → KI-Analyse → DAUERHAFTER Regressionstest → Rework.
+    // Der Test läuft ab jetzt bei jedem UI-Test-/Pflege-Lauf mit (codedTests) und bleibt nach dem Fix
+    // als Regressionsschutz. rework=false unterdrückt den automatischen Pflegelauf (nur Test anlegen).
+    if (p.startsWith('/api/components/') && p.endsWith('/feedback') && req.method === 'POST') return withComponentRunning(async (c, id) => {
+      const body = await readBody(req);
+      if (!c.path || !fs.existsSync(c.path)) return json(res, { ok: false, error: 'Kein Repo zugeordnet — erst „Assign repo".' }, 200);
+      const fb = saveFeedback(c.path, body || {});
+      if (fb.error) return json(res, { ok: false, error: fb.error }, 400);
+      const ai = resolveAiBackend(settings, secretStore);
+      setStep(id, 'Feedback: Problem analysieren & Regressionstest ableiten…');
+      const mockUrl = c.uiTestUrl || `http://localhost:${port}/mock/${slugify(c.name)}/index.html`;
+      const t = await createFeedbackTest(store, c, fb, { ai, mockUrl });
+      if (t.error) return json(res, { ok: false, error: t.error, feedback: fb.dir }, 200);
+      // Reproduktion: Suite einmal ausführen — rot = Fehler im Mock nachgestellt; grün = dort nicht reproduzierbar.
+      setStep(id, 'Feedback: Test ausführen (Reproduktion)…');
+      const hasPlaywright = fs.existsSync(path.join(__dirname, 'node_modules', '@playwright', 'test'));
+      const run = await runUiTests(store.get(id), { pluginUrl: mockUrl, specsDir: path.join(DATA_DIR, 'ui-tests', slugify(c.name)), hasPlaywright });
+      const reproduced = run.ran ? !run.ok : null;
+      writeLog(c, `[feedback] Report ${fb.dir} → Regressionstest ${t.spec.name} — ${run.ran ? (reproduced ? 'Fehler reproduziert (rot)' : 'im Mock aktuell grün') : run.reason}`);
+      // Rework anstoßen (voller Pflegezyklus, läuft asynchron weiter; Fortschritt wie gewohnt in der GUI).
+      let reworkStarted = false;
+      if (body?.rework !== false) { fullMaintain(store.get(id), {}).catch(() => {}); reworkStarted = true; }
+      return json(res, { ok: true, feedback: fb.dir, spec: t.spec.name, run: { ran: run.ran, ok: run.ok, passed: run.passed, failed: run.failed, reason: run.reason }, reproduced, reworkStarted });
     });
 
     // Charakterisierungs-Baseline aufnehmen (F-28/T-92): Ist-Verhalten als Spec festnageln → async

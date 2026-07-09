@@ -112,9 +112,13 @@ export function runComponentOnce(store, component, opts = {}) {
   // Testplan-Baseline: einmal erzeugt „in Stein" — nur bei explizitem regenerateTestPlan neu
   const regen = !cur?.testPlan || opts.regenerateTestPlan;
   const testPlan = regen ? (result.testPlan ?? null) : cur.testPlan;
-  // Coverage + Coded-Tests folgen der Testplan-Baseline (gemeinsam „in Stein", bis neu erzeugt)
+  // Coverage + Coded-Tests folgen der Testplan-Baseline (gemeinsam „in Stein", bis neu erzeugt).
+  // T-147: aus Fehler-Reports abgeleitete Regressionstests (feedback-*) bleiben AUCH beim Neu-Erzeugen
+  // erhalten — sie sind dauerhafter Regressionsschutz, keine generierte Baseline.
   const coverage = regen ? (result.coverage ?? null) : (cur.coverage ?? null);
-  const codedTests = regen ? (result.codedTests ?? []) : (cur.codedTests ?? []);
+  const codedTests = regen
+    ? [...(result.codedTests ?? []), ...((cur?.codedTests ?? []).filter((t) => /^feedback-/i.test(t.name) && !(result.codedTests ?? []).some((r) => r.name === t.name)))]
+    : (cur.codedTests ?? []);
   store.setLastChange(component.id, summary);
   const patch = { status, lastLog, libs: mergedLibs, testPlan, coverage, codedTests, libWarning };
   // Typ/Format automatisch erkannt → zurückschreiben (nur wenn erkannt, sonst alten Wert behalten)

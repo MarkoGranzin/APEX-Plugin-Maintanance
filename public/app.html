@@ -202,6 +202,23 @@
   </div>
 </div>
 
+<!-- Fehler-Report-Modal (T-147): Text + Screenshots → KI-Analyse → dauerhafter Regressionstest → Rework -->
+<div class="modal-bg" id="feedbackBg" onclick="if(event.target===this)this.classList.remove('open')">
+  <div class="modal">
+    <h2>🐞 Report issue</h2>
+    <p class="muted small" style="margin-top:0">Describe a problem the automated tests did not catch. The AI analyzes it, creates a <b>permanent regression test</b> (runs with every future check) and starts a rework until it passes.</p>
+    <label>What is wrong? <span class="muted small">(expected vs. actual behavior)</span></label>
+    <textarea id="fbText" rows="5" placeholder="z.B. Nach dem Update werden die Karten im Kanban nicht mehr per Drag&Drop verschoben — erwartet: Karte wandert in die Zielspalte; tatsächlich: springt zurück."></textarea>
+    <label>Screenshots <span class="muted small">(optional · PNG/JPG · max 8 MB je Bild)</span></label>
+    <input id="fbFiles" type="file" multiple accept=".png,.jpg,.jpeg,.gif,.webp">
+    <label class="chk" style="margin-top:8px"><input type="checkbox" id="fbRework" checked> start rework right away (full maintenance)</label>
+    <div class="foot">
+      <button class="ghost" onclick="closeFeedback()">Cancel</button>
+      <button class="primary" onclick="sendFeedback()">Analyze &amp; create test</button>
+    </div>
+  </div>
+</div>
+
 <!-- Repo-zuordnen-Modal (F-21) -->
 <div class="modal-bg" id="assignBg" onclick="if(event.target===this)this.classList.remove('open')">
   <div class="modal">
@@ -508,6 +525,7 @@ async function openDetail(id){
       <div class="inline" style="margin-top:10px;gap:6px">
         <button class="primary" onclick="runMaintain()" title="Full cycle: check → web lib check → apply SAFE lib updates → auto-fix → re-test. Writes files in the workspace. Pushes only if “allow push” is ON.">🧰 Full maintenance now</button>
         <button onclick="runOne()" title="Read-only analysis (status, libraries, protocol). With auto-repair ON this runs Full maintenance instead.">▶ Check</button>
+        <button onclick="openFeedback()" title="Einen Fehler melden, den die Tests nicht gefangen haben: Beschreibung + Screenshots. Die KI analysiert das Problem, legt einen DAUERHAFTEN Regressionstest an (läuft ab dann immer mit) und startet den Rework.">🐞 Report issue…</button>
         <details class="moreact"><summary>⋯ More actions</summary>
           <div class="small muted" style="margin-top:8px">This plugin</div>
           <div class="inline" style="margin-top:4px;gap:6px;flex-wrap:wrap">
@@ -1066,6 +1084,29 @@ async function delComponent(c){
   if(!(await uiConfirm(`Really delete component “${c.name}”? This removes it from the list.`, 'Delete'))) return;
   await api('DELETE','/api/components/'+c.id); await load(); toast('Deleted'); // await → Header/Kennzahlen sofort aktualisiert
 }
+// T-147: Fehler-Report (Text + Screenshots) → KI legt dauerhaften Regressionstest an → Rework.
+function openFeedback(){ if(!current) return; $('fbText').value=''; $('fbFiles').value=''; $('fbRework').checked=true; $('feedbackBg').classList.add('open'); }
+function closeFeedback(){ $('feedbackBg').classList.remove('open'); }
+async function sendFeedback(){
+  const c = current; if(!c) return;
+  const text = $('fbText').value.trim();
+  if(!text) return toast('Please describe the problem');
+  const files = [...($('fbFiles').files||[])];
+  const tooBig = files.find(f=>f.size>8_000_000);
+  if(tooBig) return toast(`Screenshot too large (max 8 MB): ${tooBig.name}`);
+  closeFeedback(); toast('Analyzing report & creating regression test…'); setBusy(c.id,true); applySpin(c.id);
+  try{
+    const images = await Promise.all(files.map(f => new Promise((res,rej)=>{ const r=new FileReader(); r.onload=()=>res({name:f.name, data:String(r.result).split(',')[1]}); r.onerror=rej; r.readAsDataURL(f); })));
+    const r = await api('POST','/api/components/'+c.id+'/feedback',{ text, images, rework: $('fbRework')?.checked!==false });
+    await load();
+    if(!r.ok) return toast('Error: '+(r.error||'?'));
+    const rep = r.reproduced===true ? 'reproduced (test red)' : r.reproduced===false ? 'not reproducible in the mock (test green)' : (r.run&&r.run.reason)||'';
+    toast(`Regression test ${r.spec} created — ${rep}${r.reworkStarted?' · rework started':''}`);
+    if(current&&current.id===c.id) openDetail(c.id); // Notiz/Tests im Drawer auffrischen
+  }catch(e){ toast('Error: '+(e.message||e)); }
+  finally{ setBusy(c.id,false); await load(); }
+}
+
 // T-143: Plugin ÜBERALL löschen (Tool + APEX-Testseite/Plug-in + Platten-Daten). Bewusst versteckt
 // (Danger zone) + Tipp-Bestätigung (exakter Name), weil destruktiv und nicht umkehrbar.
 async function purgeComponent(){
@@ -1291,7 +1332,7 @@ async function loadLibraries(){
 }
 
 // Build-Marker: muss mit BUILD in start.js übereinstimmen. Erkennt einen veralteten Backend-Prozess.
-const APP_BUILD = '2026-07-09.81';
+const APP_BUILD = '2026-07-09.82';
 async function checkBackend(){
   const b = $('staleBanner');
   try{
