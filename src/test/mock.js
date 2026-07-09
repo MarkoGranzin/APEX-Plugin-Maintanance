@@ -615,7 +615,7 @@ export async function runMockSelfTests(url, deps = {}) {
     // B-37: sichtbare Fehler-Kacheln („Error occured"), Konsole-Fehler und 404-Ressourcen sind Probleme,
     // auch wenn alle Checks grün melden — sie gehen als Korrektur-Auftrag in die Refine-Schleife.
     const errorTiles = !instrumented ? 0 : await page.evaluate(() => [...document.querySelectorAll('*')]
-      .filter((e) => e.children.length === 0 && /\berror occurr?ed\b/i.test(e.textContent || '')).length).catch(() => 0);
+      .filter((e) => e.children.length === 0 && !/^(SCRIPT|STYLE)$/.test(e.tagName) && /\berror occurr?ed\b/i.test(e.textContent || '')).length).catch(() => 0);
     if (errorTiles) problems.push({ view: 'global', feature: `${errorTiles} visible error tile(s) ("Error occured") — the plugin renders an error state; fix the mock config/data/feature activation so the REAL content appears instead`, detail: `${errorTiles} error tile(s) in the DOM` });
     const consoleBroken = [...new Set(consoleErrs)].filter((e) => !/favicon/i.test(e));
     if (consoleBroken.length) problems.push({ view: 'global', feature: 'console errors during render — resolve them in the mock (missing feature activation, wrong config, missing library)', detail: consoleBroken.slice(0, 3).join(' | ') });

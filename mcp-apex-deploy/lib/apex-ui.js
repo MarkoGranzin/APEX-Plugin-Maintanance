@@ -281,6 +281,24 @@ async function pdOpenOrCreatePage(page, o) {
   return { ok: true, mode };
 }
 
+/** Setzt die SQL-Quelle einer Region über das Page-Designer-MODELL (window.pe). Nötig, weil der
+ *  Property-Editor bei BESTEHENDEN Regionen (Reuse) das Textarea-setValue nicht ins Modell übernimmt —
+ *  pdSetProp meldet „ok", aber der Save persistiert die alte SQL (live am BI-Dashboard beobachtet).
+ *  Nimmt die (einzige) Region mit SQL-Quelle der Testseite. */
+async function pdSetRegionSqlModel(page, sql) {
+  return page.evaluate(({ sql }) => {
+    try {
+      const model = window.pe;
+      if (!model || !model.getComponents || !model.PROP) return 'no-pe';
+      const regions = model.getComponents(model.COMP_TYPE.REGION) || [];
+      const withSql = regions.map((r) => { try { return { r, p: r.getProperty(model.PROP.REGION_SQL) }; } catch (e) { return { r, p: null }; } }).filter((x) => x.p);
+      if (!withSql.length) return 'no-sql-region';
+      withSql[0].p.setValue(sql);
+      return 'ok';
+    } catch (e) { return 'err:' + String(e?.message ?? e).slice(0, 80); }
+  }, { sql });
+}
+
 /** Setzt die Template-Position der aktuell selektierten Region auf „Body" — der Gallery-Drag lässt
  *  Regionen sonst in der zuerst getroffenen Position (z.B. Banner/Header) landen, was optisch falsch
  *  sitzt (T-148/Nutzer-Feedback). Property heißt je nach APEX-Version „Position" oder „Slot". */
@@ -466,7 +484,8 @@ export async function uiCreateTemplateComponentTestPage(page, o = {}) {
   // 2) Datenquelle: Source-„Type" = SQL Query (per Option, nicht Label — „Type" ist mehrdeutig) + SQL.
   const srcType = await pdSetSelectByOption(page, 'SQL Query');
   await page.waitForTimeout(900);
-  const sql = o.sourceSql ? await pdSetProp(page, 'SQL Query', o.sourceSql) : 'skip';
+  let sql = o.sourceSql ? await pdSetProp(page, 'SQL Query', o.sourceSql) : 'skip';
+  if (o.sourceSql) { const m = await pdSetRegionSqlModel(page, o.sourceSql); if (m === 'ok') sql = 'ok'; } // Reuse-fest (Modell)
   await page.waitForTimeout(1000);
   await reselect();
 
@@ -561,7 +580,9 @@ export async function uiCreateTestPage(page, o = {}) {
   await page.getByText(new RegExp(`^${rxEsc(o.regionName)}$`)).first().click().catch(() => {});
   await page.waitForTimeout(900);
   const rPos = await pdSetRegionBody(page); // Region gehört in den BODY, nicht in die Drop-Zufallsposition
-  const rSql = o.sourceSql ? await pdSetProp(page, 'SQL Query', o.sourceSql) : 'skip';
+  let rSql = o.sourceSql ? await pdSetProp(page, 'SQL Query', o.sourceSql) : 'skip';
+  // Modell-Set obendrauf: bei Reuse übernimmt der Property-Editor das Textarea-setValue NICHT ins Modell.
+  if (o.sourceSql) { const m = await pdSetRegionSqlModel(page, o.sourceSql); if (m === 'ok') rSql = 'ok'; }
   const attrs = [];
   for (const a of (o.attributes || [])) { if (a && a.prompt && a.value != null && a.value !== '') attrs.push({ prompt: a.prompt, r: await pdSetProp(page, a.prompt, a.value) }); }
 
