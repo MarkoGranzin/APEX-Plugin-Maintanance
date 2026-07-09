@@ -160,6 +160,10 @@ export function analyzePlugin(sqlText) {
 export function buildSetupManifest(sqlText, opts = {}) {
   const a = analyzePlugin(sqlText);
   const { jsUrls, cssUrls } = pluginLoadFiles(sqlText);
+  // B-38: Lädt das Plugin seine Dateien SELBST (PL/SQL-Render mit APEX_JAVASCRIPT.ADD_LIBRARY/APEX_CSS),
+  // dürfen KEINE „File URLs to Load" gesetzt werden — sonst wird jedes File doppelt geladen
+  // („Identifier … has already been declared"). Evidenz-basiert aus dem Export erkannt, generisch.
+  const selfLoadsFiles = /\bAPEX_JAVASCRIPT\s*\.\s*ADD_LIBRARY\b|\bAPEX_CSS\s*\.\s*ADD(_FILE|_3RD_PARTY_LIBRARY_FILE)?\b/i.test(String(sqlText || ''));
   const pageId = Number(opts.pageId ?? 20000); // Default-Basis 20000 (nie reservierte App-Seiten)
   const ajaxItem = a.usesAjaxItemsToSubmit ? `P${pageId}_AJAX` : null;
   const clean = (v) => (v != null ? String(v).replace(/[\x00-\x1f]+/g, ' ').trim() : null);
@@ -173,6 +177,7 @@ export function buildSetupManifest(sqlText, opts = {}) {
       kind: a.kind, // normalisiert: region | item | dynamic-action | template-component | other
       regionSourceType: a.internalName ? `${a.sourceTypePrefix}${a.internalName}` : null,
       hasAjaxCallback: a.hasAjaxCallback,
+      selfLoadsFiles, // lädt seine JS/CSS selbst im Render → keine File URLs setzen (B-38)
     },
     standardAttributes: a.standardAttributes,
     testPage: {
@@ -201,7 +206,8 @@ export function buildSetupManifest(sqlText, opts = {}) {
     // Region-Attribute (ConfigJSON etc.) — im Page Designer je Prompt-Label zu setzen.
     attributes: (a.customAttributes || []).map((x) => ({ key: x.key, prompt: x.prompt, required: !!x.required, default: clean(x.default) })),
     // File URLs to Load am Plugin (Shared Components → Plug-ins), #PLUGIN_FILES#-Referenzen.
-    fileUrls: { js: jsUrls, css: cssUrls },
+    // Bei selbst-ladenden Plugins bewusst LEER (B-38) — setupFromManifest räumt dort ggf. Altbestand weg.
+    fileUrls: selfLoadsFiles ? { js: [], css: [] } : { js: jsUrls, css: cssUrls },
   };
 }
 

@@ -581,6 +581,17 @@ export async function runMockSelfTests(url, deps = {}) {
   try {
     browser = await launch();
     const page = await browser.newPage({ viewport: { width: 1000, height: 700 } });
+    // B-37: Probleme, die der Harness selbst nicht misst, direkt am Browser einsammeln — Konsole-Fehler,
+    // uncaught Exceptions und fehlgeschlagene Ressourcen (404) sind ECHTE Mock-Probleme, auch wenn alle
+    // Checks grün sind (sonst „0 failed", obwohl die Seite sichtbar Fehler zeigt → nie korrigiert).
+    const consoleErrs = [];
+    const badResponses = [];
+    const instrumented = typeof page.on === 'function'; // Test-Fakes ohne Event-API überspringen die Zusatz-Checks
+    if (instrumented) {
+      page.on('pageerror', (e) => consoleErrs.push('pageerror: ' + String(e?.message ?? e).slice(0, 200)));
+      page.on('console', (m) => { if (m.type() === 'error') consoleErrs.push(m.text().slice(0, 200)); });
+      page.on('response', (r) => { try { if (r.status() >= 400) badResponses.push(`${r.status()} ${r.url().slice(-80)}`); } catch { /* egal */ } });
+    }
     await page.goto(url, { waitUntil: 'load' });
     // auf die Selbst-Charakterisierung warten (async-Render/selftest), dann lesen
     await page.waitForFunction(() => window.__selftested === true || window.__ok === true, null, { timeout: deps.timeoutMs ?? 12000 }).catch(() => {});
@@ -601,7 +612,16 @@ export async function runMockSelfTests(url, deps = {}) {
     const errBroken = (data.errors || []).filter((e) => /is not defined|is not a function|cannot read/i.test(e));
     const problems = [...failed, ...falseGreen];
     if (errBroken.length) problems.push({ view: 'global', feature: 'uncaught dependency error — a required library/global is missing, load it', detail: errBroken.slice(0, 3).join(' | ') });
-    return { ran: true, ok: data.ok, rendered: data.rendered, views: data.views, total: feats.length, features: feats, failed, errors: data.errors, falseGreen, problems };
+    // B-37: sichtbare Fehler-Kacheln („Error occured"), Konsole-Fehler und 404-Ressourcen sind Probleme,
+    // auch wenn alle Checks grün melden — sie gehen als Korrektur-Auftrag in die Refine-Schleife.
+    const errorTiles = !instrumented ? 0 : await page.evaluate(() => [...document.querySelectorAll('*')]
+      .filter((e) => e.children.length === 0 && /\berror occurr?ed\b/i.test(e.textContent || '')).length).catch(() => 0);
+    if (errorTiles) problems.push({ view: 'global', feature: `${errorTiles} visible error tile(s) ("Error occured") — the plugin renders an error state; fix the mock config/data/feature activation so the REAL content appears instead`, detail: `${errorTiles} error tile(s) in the DOM` });
+    const consoleBroken = [...new Set(consoleErrs)].filter((e) => !/favicon/i.test(e));
+    if (consoleBroken.length) problems.push({ view: 'global', feature: 'console errors during render — resolve them in the mock (missing feature activation, wrong config, missing library)', detail: consoleBroken.slice(0, 3).join(' | ') });
+    const badRes = [...new Set(badResponses)].filter((e) => !/favicon/i.test(e));
+    if (badRes.length) problems.push({ view: 'global', feature: 'failed resource loads (HTTP >= 400) — fix the paths or inline the resources in the mock', detail: badRes.slice(0, 3).join(' | ') });
+    return { ran: true, ok: data.ok, rendered: data.rendered, views: data.views, total: feats.length, features: feats, failed, errors: data.errors, falseGreen, consoleErrors: consoleBroken, badResponses: badRes, errorTiles, problems };
   } catch (e) {
     return { ran: false, reason: String(e?.message ?? e) };
   } finally {

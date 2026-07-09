@@ -51,9 +51,14 @@ export async function setupFromManifest(manifest, connection, o = {}, deps = {})
     // 1) Optional: Plugin installieren (app-interner Plug-in-Import) — nötig, damit der Region-Typ existiert.
     if (o.install) result.install = await d.uiImportFile(page, o.install, { appId: c.appId, viaPlugins: true });
 
-    // 2) File URLs to Load (JS+CSS) aus dem Manifest setzen.
+    // 2) File URLs to Load (JS+CSS) aus dem Manifest setzen. B-38: lädt das Plugin seine Files SELBST
+    //    (selfLoadsFiles), werden KEINE URLs gesetzt und fälschlich vorhandene GELEERT (Doppel-Ladung
+    //    „Identifier … has already been declared" beheben).
     const js = m.fileUrls?.js || [], css = m.fileUrls?.css || [];
-    if (o.setFileUrls !== false && (js.length || css.length)) {
+    if (o.setFileUrls !== false && m.plugin?.selfLoadsFiles) {
+      result.fileUrls = await d.uiSetPluginFileUrls(page, { appId: c.appId, displayName, jsUrls: [], cssUrls: [], clear: true });
+      result.fileUrls.note = 'Plugin lädt seine Files selbst (ADD_LIBRARY) — File URLs geleert statt gesetzt.';
+    } else if (o.setFileUrls !== false && (js.length || css.length)) {
       result.fileUrls = await d.uiSetPluginFileUrls(page, { appId: c.appId, displayName, jsUrls: js, cssUrls: css });
     }
 

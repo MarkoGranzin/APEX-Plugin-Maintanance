@@ -106,14 +106,22 @@ export async function uiSetPluginFileUrls(page, o = {}) {
   if (!opened) return { ok: false, error: `Plugin „${o.displayName || '?'}" in der Liste nicht gefunden.` };
   await page.waitForTimeout(800);
   const setField = async (id, urls) => {
-    if (!urls?.length) return { field: id, skipped: 'keine Dateien' };
-    return page.evaluate(({ id, val, overwrite }) => {
+    // clear=true → Feld LEEREN (B-38: bei selbst-ladenden Plugins fälschlich gesetzte URLs entfernen,
+    // sonst lädt jedes File doppelt). Sonst: nur setzen, wenn Dateien da sind und Feld leer/overwrite.
+    if (!urls?.length && !o.clear) return { field: id, skipped: 'keine Dateien' };
+    return page.evaluate(({ id, val, overwrite, clear }) => {
       const t = document.getElementById(id); if (!t) return { field: id, error: 'Feld fehlt' };
+      if (clear) {
+        if (!t.value || !t.value.trim()) return { field: id, skipped: 'schon leer' };
+        t.value = ''; t.dispatchEvent(new Event('input', { bubbles: true })); t.dispatchEvent(new Event('change', { bubbles: true }));
+        try { if (window.apex && apex.item) apex.item(id).setValue(''); } catch (e) { /* egal */ }
+        return { field: id, cleared: true, set: true };
+      }
       if (t.value && t.value.trim() && !overwrite) return { field: id, skipped: 'bereits gesetzt' };
       t.value = val; t.dispatchEvent(new Event('input', { bubbles: true })); t.dispatchEvent(new Event('change', { bubbles: true }));
       try { if (window.apex && apex.item) apex.item(id).setValue(val); } catch (e) { /* egal */ }
       return { field: id, set: true, count: val.split('\n').filter(Boolean).length };
-    }, { id, val: urls.join('\n'), overwrite: !!o.overwrite });
+    }, { id, val: (urls || []).join('\n'), overwrite: !!o.overwrite, clear: !!o.clear });
   };
   const jsRes = await setField('P4410_JAVASCRIPT_FILE_URLS', o.jsUrls);
   const cssRes = await setField('P4410_CSS_FILE_URLS', o.cssUrls);

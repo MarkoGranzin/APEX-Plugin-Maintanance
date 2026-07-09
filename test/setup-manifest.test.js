@@ -146,6 +146,27 @@ describe('T-138 setupFromManifest: JSON → APEX (standalone/wiederverwendbar)',
     expect(r.render.rendered).toBe(false);
   });
 
+  it('B-38: selbst-ladendes Plugin (ADD_LIBRARY) -> keine File-URLs, Altbestand wird geleert', async () => {
+    const exp = `wwv_flow_api.create_plugin(
+ p_name=>'SL.1'
+,p_plugin_type=>'REGION TYPE'
+,p_api_version=>1
+,p_render_function=>'render'
+);
+-- render: APEX_JAVASCRIPT.ADD_LIBRARY(p_name=>'bida.pkgd.min');
+APEX_JAVASCRIPT.ADD_LIBRARY
+wwv_flow_api.create_plugin_file(
+ p_file_name=>'bida.pkgd.min.js'
+);`;
+    const man = buildSetupManifest(exp, { pageId: 20000 });
+    expect(man.plugin.selfLoadsFiles).toBe(true);
+    expect(man.fileUrls.js).toEqual([]); // KEINE URLs -> keine Doppel-Ladung
+    let cleared = null;
+    const deps = fakeDeps({ uiSetPluginFileUrls: async (_p, a) => { cleared = a; return { ok: true, js: { cleared: true } }; } });
+    await setupFromManifest({ ...man, plugin: { ...man.plugin, kind: 'region' }, testPage: { ...man.testPage, source: { sql: 'select 1 from dual' } } }, connection, {}, deps);
+    expect(cleared.clear).toBe(true); // faelschlich gesetzte URLs werden entfernt
+  });
+
   it('buildSetupManifest + setupFromManifest zusammen (rundlauf ohne Browser)', async () => {
     const exp = `wwv_flow_api.create_plugin(\n p_name=>'X.Y'\n,p_plugin_type=>'REGION TYPE'\n,p_display_name=>'XY'\n,p_api_version=>1\n,p_standard_attributes=>'SOURCE_SQL'\n);\nwwv_flow_api.create_plugin_std_attribute(\n p_name=>'SOURCE_SQL'\n,p_default_value=>'select 9 v from dual'\n);`;
     const man = buildSetupManifest(exp, { pageId: 20000 });
