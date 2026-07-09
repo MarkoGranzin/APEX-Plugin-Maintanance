@@ -23,6 +23,20 @@ describe('T-38 summarize & runComponentOnce', () => {
     expect(s.status).toBe('handlungsbedarf');
     expect(s.summary).toMatch(/unknown version/i);
   });
+  it('B-35: zeit-inferierte Version ueberlebt den Re-Scan (Merge per Name bei unbekannter Frisch-Version)', () => {
+    const store = mkStore();
+    const c = store.add({ name: 'P', path: '/repo' });
+    // Stand aus dem Web-Check: pell wurde inferiert (T-146)
+    store.update(c.id, { libs: [{ name: 'pell', version: '1.0.6', versionInferred: true, versionInferredFrom: '2023-09-21', detectedBy: 'inferred-by-date', latest: '1.0.6', webStatus: 'aktuell', status: 'aktuell' }] });
+    // frischer Scan erkennt pell wieder als unbekannt
+    const scan = () => ({ artifacts: [{ status: 'ok' }], outdated: [], risks: [], failures: [], libs: [{ name: 'pell', version: 'unbekannt', detectedBy: 'vendored' }] });
+    const r = runComponentOnce(store, store.get(c.id), { scan, now: () => 't1' });
+    const pell = store.get(c.id).libs.find((l) => l.name === 'pell');
+    expect(pell.version).toBe('1.0.6');            // Inferenz uebernommen, nicht verworfen
+    expect(pell.versionInferred).toBe(true);
+    expect(r.summary).not.toMatch(/unknown version/i); // Summary zaehlt kein falsches unknown mehr
+  });
+
   it('Lint-Fehler → zu klären', () => {
     expect(summarize(scanLint()).status).toBe('zu klären');
   });

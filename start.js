@@ -62,9 +62,18 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 // Datenverzeichnis (Komponenten/Settings/Secrets/Logs/Testpläne). Per AISPP_DATA_DIR umlenkbar,
 // damit QA/Tests NIE die echte Nutzer-Konfiguration unter <root>/data berühren (T-58).
 const DATA_DIR = process.env.AISPP_DATA_DIR || path.join(__dirname, 'data');
+// B-34: Playwright-Browser aus einem Ordner NEBEN dem Projekt nutzen, falls vorhanden (…\pw-browsers).
+// Grund: der Standard-Cache (LOCALAPPDATA\ms-playwright) kann auf dem System fehlen/unsichtbar sein —
+// ein real sichtbarer, projekt-naher Ordner ist robust. Opt-in rein über Ordner-Existenz (kein Hardcoding);
+// eine bereits gesetzte PLAYWRIGHT_BROWSERS_PATH-Variable hat Vorrang. Muss VOR jedem Playwright-Import
+// gesetzt sein (Playwright wird überall nur dynamisch geladen; Kind-Prozesse erben die Variable).
+try {
+  const pwBrowsers = path.join(__dirname, '..', 'pw-browsers');
+  if (!process.env.PLAYWRIGHT_BROWSERS_PATH && fs.existsSync(pwBrowsers)) process.env.PLAYWRIGHT_BROWSERS_PATH = pwBrowsers;
+} catch { /* egal */ }
 // Build-Marker: muss mit APP_BUILD in public/app.html übereinstimmen. Bei Backend-Änderungen erhöhen.
 // Das Frontend vergleicht beide und warnt, wenn der laufende Dienst veraltet ist (Neustart nötig).
-const BUILD = '2026-07-07.80';
+const BUILD = '2026-07-09.81';
 const C = { reset: '\x1b[0m', bold: '\x1b[1m', dim: '\x1b[2m', green: '\x1b[32m', yellow: '\x1b[33m', red: '\x1b[31m', cyan: '\x1b[36m' };
 const c = (col, s) => `${C[col]}${s}${C.reset}`;
 

@@ -81,8 +81,19 @@ export function runComponentOnce(store, component, opts = {}) {
 
   // Web-Anreicherung (latest/Alter/Quelle aus T-59) je name@version über den Scan hinweg erhalten
   const prevByKey = new Map((cur?.libs ?? []).map((l) => [`${l.name}@${l.version}`, l]));
+  const prevByName = new Map((cur?.libs ?? []).map((l) => [l.name, l]));
   const mergedLibs = (result.libs ?? []).map((l) => {
-    const prev = prevByKey.get(`${l.name}@${l.version}`);
+    let prev = prevByKey.get(`${l.name}@${l.version}`);
+    // B-35 (T-146): frisch erkannte Version ist 'unbekannt', aber ein früherer Lauf hat sie zeitlich
+    // inferiert bzw. KI-validiert → Inferenz ÜBERNEHMEN statt verwerfen (Match per NAME — der
+    // name@version-Key kann hier nie treffen, weil die frische Seite 'unbekannt' trägt).
+    if (!prev && (!l.version || l.version === 'unbekannt')) {
+      const p = prevByName.get(l.name);
+      if (p && p.version && p.version !== 'unbekannt' && (p.versionInferred || p.detectedBy === 'inferred-by-date' || p.detectedBy === 'ai-validated')) {
+        prev = p;
+        l = { ...l, version: p.version, versionInferred: p.versionInferred, versionInferredFrom: p.versionInferredFrom, detectedBy: p.detectedBy };
+      }
+    }
     if (!prev) return l;
     const { latest, releasedAt, ageDays, installedReleasedAt, installedAgeDays, outdated, webStatus, source, homepage, npm } = prev;
     const merged = { ...l, latest, releasedAt, ageDays, installedReleasedAt, installedAgeDays, outdated, webStatus, source, homepage, npm };
