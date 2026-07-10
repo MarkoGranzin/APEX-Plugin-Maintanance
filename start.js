@@ -75,7 +75,7 @@ try {
 } catch { /* egal */ }
 // Build-Marker: muss mit APP_BUILD in public/app.html übereinstimmen. Bei Backend-Änderungen erhöhen.
 // Das Frontend vergleicht beide und warnt, wenn der laufende Dienst veraltet ist (Neustart nötig).
-const BUILD = '2026-07-10.85';
+const BUILD = '2026-07-10.86';
 const C = { reset: '\x1b[0m', bold: '\x1b[1m', dim: '\x1b[2m', green: '\x1b[32m', yellow: '\x1b[33m', red: '\x1b[31m', cyan: '\x1b[36m' };
 const c = (col, s) => `${C[col]}${s}${C.reset}`;
 
@@ -349,7 +349,7 @@ function cmdServe(portArg) {
         if (token) {
           const remotes = await git.getRemotes(true).catch(() => []);
           const originUrl = remotes.find((r) => r.name === 'origin')?.refs?.push || remotes[0]?.refs?.push;
-          const authUrl = authenticatedPushUrl(originUrl, token);
+          const authUrl = authenticatedPushUrl(originUrl, token, settings.gitUser);
           if (authUrl) {
             try { await git.push([authUrl, b]); return; }
             catch (e) { throw new Error(redactToken(String(e?.message ?? e), token)); }
@@ -540,14 +540,16 @@ function cmdServe(portArg) {
       return json(res, { ok: true, aiBackend: aiBackendView(settings) });
     }
 
-    // T-148 — Git Personal Access Token verschlüsselt hinterlegen/entfernen (für Push in den Fork).
-    // Der Token wird NIE zurückgegeben; nur „gesetzt/nicht gesetzt" ist sichtbar. { clear:true } löscht ihn.
+    // T-148 — Git Personal Access Token verschlüsselt hinterlegen/entfernen (hoster-unabhängig: GitHub,
+    // GitLab, Bitbucket, Azure, Gitea/self-hosted). Der Token wird NIE zurückgegeben; nur „gesetzt/nicht
+    // gesetzt" ist sichtbar. Optionaler, NICHT geheimer Benutzername (settings.gitUser) für Hoster, die
+    // user:token brauchen. { clear:true } löscht Token (und Benutzernamen).
     if (p === '/api/git/token' && req.method === 'POST') {
       const body = await readBody(req);
-      if (body?.clear) { secretStore.delete('git-token'); saveSecrets(); return json(res, { ok: true, gitTokenSet: false }); }
-      if (!body?.token) return json(res, { error: 'token fehlt' }, 400);
-      secretStore.set('git-token', String(body.token).trim()); saveSecrets();
-      return json(res, { ok: true, gitTokenSet: true });
+      if (body?.clear) { secretStore.delete('git-token'); saveSecrets(); settings.gitUser = undefined; saveSettings(); return json(res, { ok: true, gitTokenSet: false, gitUser: null }); }
+      if (body?.user != null) { settings.gitUser = String(body.user).trim() || undefined; saveSettings(); }
+      if (body?.token) { secretStore.set('git-token', String(body.token).trim()); saveSecrets(); }
+      return json(res, { ok: true, gitTokenSet: secretStore.has('git-token'), gitUser: settings.gitUser ?? null });
     }
 
     // SMTP-Passwort verschlüsselt hinterlegen
@@ -972,7 +974,7 @@ function cmdServe(portArg) {
         const { status, body: out } = await metaApiHandler(req.method, p, body, metaCtx);
         if (req.method !== 'GET' && (p === '/api/settings' || p.startsWith('/api/repos'))) saveSettings();
         // T-134: ob das APEX-Passwort verschlüsselt hinterlegt ist (nie das Passwort selbst) → GUI-Anzeige „(stored)".
-        if (p === '/api/settings' && req.method === 'GET' && out && typeof out === 'object') { let ps = false; try { ps = !!secretStore.get('apex-pass'); } catch {} out.apexPassSet = ps; out.gitTokenSet = secretStore.has('git-token'); }
+        if (p === '/api/settings' && req.method === 'GET' && out && typeof out === 'object') { let ps = false; try { ps = !!secretStore.get('apex-pass'); } catch {} out.apexPassSet = ps; out.gitTokenSet = secretStore.has('git-token'); out.gitUser = settings.gitUser ?? null; }
         return json(res, out, status);
       } catch (err) {
         return json(res, { error: String(err?.message ?? err) }, 500);

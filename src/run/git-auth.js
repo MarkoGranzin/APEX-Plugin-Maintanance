@@ -17,20 +17,36 @@
 import { repoWebUrl } from './pr-url.js';
 
 /**
- * Baut aus einer Remote-URL + Token eine authentifizierte HTTPS-Push-URL.
- * GitHub akzeptiert `x-access-token:<PAT>` (classic UND fine-grained); für andere Hoster `oauth2:<token>`.
+ * Pseudo-Benutzername für die Token-Auth je Git-Hoster (wenn der Nutzer keinen expliziten Namen setzt).
+ * Die gängigen Hoster erwarten unterschiedliche „Benutzer" vor dem Token in der HTTPS-URL:
+ *   GitHub → x-access-token · GitLab → oauth2 · Bitbucket Cloud → x-token-auth ·
+ *   Azure DevOps → pat · sonst (Gitea/Forgejo/Gogs/self-hosted) → der Token selbst als Benutzer.
+ * Rein hostbasiert (Substring), damit es auch für self-hosted GitLab/Gitea greift.
+ */
+export function defaultTokenUser(host, token) {
+  const h = String(host || '').toLowerCase();
+  if (/github\./.test(h)) return 'x-access-token';
+  if (/gitlab\./.test(h)) return 'oauth2';
+  if (/bitbucket\./.test(h)) return 'x-token-auth';
+  if (/dev\.azure\.com|visualstudio\.com/.test(h)) return 'pat';
+  return token; // universeller Fallback: Token als Benutzer (funktioniert bei GitHub, Gitea, vielen self-hosted)
+}
+
+/**
+ * Baut aus einer Remote-URL + Token eine authentifizierte HTTPS-Push-URL — hoster-unabhängig.
+ * Optionaler `user` überschreibt den hostbasierten Default (z.B. Bitbucket-App-Passwörter, Azure).
  * @returns {string|null} authentifizierte URL oder null (kein Token / keine brauchbare https-URL)
  */
-export function authenticatedPushUrl(remoteUrl, token) {
+export function authenticatedPushUrl(remoteUrl, token, user) {
   if (!token || !remoteUrl) return null;
-  const web = repoWebUrl(remoteUrl); // normalisiert git@/ssh/git:// → https://host/owner/repo (ohne .git)
+  const web = repoWebUrl(remoteUrl); // normalisiert git@/ssh/git:// → https://host/pfad (ohne .git)
   if (!web) return null;
   const m = web.match(/^https:\/\/([^/]+)\/(.+)$/i);
   if (!m) return null;
   const host = m[1];
   const repoPath = m[2].replace(/\/$/, '');
-  const user = /github\.com/i.test(host) ? 'x-access-token' : 'oauth2';
-  return `https://${user}:${encodeURIComponent(token)}@${host}/${repoPath}.git`;
+  const u = (user && String(user).trim()) || defaultTokenUser(host, token);
+  return `https://${encodeURIComponent(u)}:${encodeURIComponent(token)}@${host}/${repoPath}.git`;
 }
 
 /** Entfernt den Token (roh UND URL-encodiert) aus einem String — für sichere Logs/Fehlertexte. */

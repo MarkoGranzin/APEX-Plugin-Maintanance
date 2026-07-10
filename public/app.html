@@ -100,6 +100,11 @@
   .modal{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:22px;width:min(480px,94vw)}
   .modal h2{margin:0 0 6px;font-size:1.15rem}
   .modal .foot{display:flex;justify-content:flex-end;gap:8px;margin-top:18px}
+  .modal.wide{width:min(780px,96vw)}
+  .stabs{display:flex;gap:2px;border-bottom:1px solid var(--line);margin:12px 0 16px;overflow-x:auto}
+  .stabs button{background:none;border:none;color:var(--muted);padding:9px 14px;border-bottom:2px solid transparent;white-space:nowrap;border-radius:0}
+  .stabs button.active{color:var(--ink);border-bottom-color:var(--accent)}
+  .spanel{display:none} .spanel.active{display:block} .spanel h3{margin:2px 0 10px;font-size:1rem}
   .toast{position:fixed;bottom:20px;left:50%;transform:translateX(-50%);background:var(--panel2);border:1px solid var(--line);padding:10px 16px;border-radius:10px;display:none;z-index:50}
   .overlay{position:fixed;inset:0;background:rgba(0,0,0,.5);display:flex;align-items:center;justify-content:center;z-index:60}
   .overlay[hidden]{display:none}
@@ -241,54 +246,76 @@
 
 <!-- Einstellungen-Modal -->
 <div class="modal-bg" id="settingsBg" onclick="if(event.target===this)this.classList.remove('open')">
-  <div class="modal" style="max-width:560px">
+  <div class="modal wide">
     <h2>Settings</h2>
-    <label>Working directory (each repo gets its own subdirectory here)</label>
-    <input id="workDir" placeholder="./workspace">
-
-    <h3 style="margin:18px 0 4px;font-size:1rem">AI backend (for reviews, fixes, test generation)</h3>
-    <label>Backend</label>
-    <select id="aiKind" onchange="toggleAi()">
-      <option value="stub">— none (stub, tests only) —</option>
-      <option value="cli">Local CLI</option>
-      <option value="provider">Provider + API key</option>
-    </select>
-    <div id="aiCli" style="display:none"><label>CLI command</label><input id="aiCommand" placeholder="e.g. claude"></div>
-    <div id="aiProvider" style="display:none">
-      <div class="row2"><div><label>Endpoint</label><input id="aiEndpoint" placeholder="https://api.anthropic.com/v1/messages"></div><div><label>Model</label><input id="aiModel" placeholder="claude-opus-4-8"></div></div>
-      <label>API key <span id="aiKeyState" class="muted small"></span></label><input id="aiKey" type="password" placeholder="stored encrypted">
+    <div class="stabs" id="settingsTabs">
+      <button type="button" class="active" onclick="showSettingsTab('general',this)">General</button>
+      <button type="button" onclick="showSettingsTab('ai',this)">AI backend</button>
+      <button type="button" onclick="showSettingsTab('git',this)">Git push</button>
+      <button type="button" onclick="showSettingsTab('schedule',this)">Schedule</button>
+      <button type="button" onclick="showSettingsTab('email',this)">Email</button>
+      <button type="button" onclick="showSettingsTab('apex',this)">APEX target</button>
     </div>
-    <div class="inline" style="margin-top:8px"><button onclick="testAi()">🔌 Test connection</button><span id="aiTestOut" class="muted small"></span></div>
 
-    <div class="muted small" style="margin:14px 0 4px">Auto-repair (check → full maintenance) and push to remote are always on. Outward-facing pushes still ask for a confirmation when you click Upload.</div>
+    <div class="spanel active" data-tab="general">
+      <label>Working directory (each repo gets its own subdirectory here)</label>
+      <input id="workDir" placeholder="./workspace">
+      <div class="muted small" style="margin-top:12px">Auto-repair (check → full maintenance) and push to remote are always on. Outward-facing pushes still ask for a confirmation when you click Upload.</div>
+    </div>
 
-    <h3 style="margin:18px 0 4px;font-size:1rem">Git push (fix → branch → push)</h3>
-    <div class="muted small" style="margin-bottom:6px">Upload legt einen neuen Branch <code>aisp/pflege-…</code> an, committet den Fix und pusht ihn ins Remote (dein Fork) → PR-Link. Auth: entweder der <b>Git Credential Manager</b> des Rechners (kein Token nötig) <b>oder</b> ein <b>Personal Access Token</b> hier (verschlüsselt gespeichert, nie geloggt, nur zur Push-Zeit genutzt). Token-Rechte: <code>repo</code> bzw. fine-grained „Contents: read/write" für deinen Fork.</div>
-    <label>Personal Access Token <span id="gitTokenState" class="muted small"></span></label>
-    <input id="gitToken" type="password" placeholder="ghp_… / github_pat_… (stored encrypted)">
-    <div class="inline" style="margin-top:8px"><button onclick="saveGitToken()">🔑 Save token</button><button class="ghost" onclick="clearGitToken()">Remove token</button><span id="gitTokenOut" class="muted small"></span></div>
+    <div class="spanel" data-tab="ai">
+      <h3>AI backend <span class="muted small">— for reviews, fixes, test generation</span></h3>
+      <label>Backend</label>
+      <select id="aiKind" onchange="toggleAi()">
+        <option value="stub">— none (stub, tests only) —</option>
+        <option value="cli">Local CLI</option>
+        <option value="provider">Provider + API key</option>
+      </select>
+      <div id="aiCli" style="display:none"><label>CLI command</label><input id="aiCommand" placeholder="e.g. claude"></div>
+      <div id="aiProvider" style="display:none">
+        <div class="row2"><div><label>Endpoint</label><input id="aiEndpoint" placeholder="https://api.anthropic.com/v1/messages"></div><div><label>Model</label><input id="aiModel" placeholder="claude-opus-4-8"></div></div>
+        <label>API key <span id="aiKeyState" class="muted small"></span></label><input id="aiKey" type="password" placeholder="stored encrypted">
+      </div>
+      <div class="inline" style="margin-top:8px"><button onclick="testAi()">🔌 Test connection</button><span id="aiTestOut" class="muted small"></span></div>
+    </div>
 
-    <h3 style="margin:18px 0 4px;font-size:1rem">Automatic check (schedule)</h3>
-    <div class="chk"><input type="checkbox" id="schedEnabled"><span>enable automatic check</span></div>
-    <label>Cron expression (min hour day month weekday) <span class="muted small" id="schedHint"></span></label>
-    <input id="schedule" placeholder="0 3 * * 1" oninput="updateSchedHint()">
+    <div class="spanel" data-tab="git">
+      <h3>Git push <span class="muted small">— fix → branch → push → PR/MR</span></h3>
+      <div class="muted small" style="margin-bottom:8px">Upload creates a new branch <code>aisp/pflege-…</code>, commits the fix and pushes it to the repo's <code>origin</code> → PR/MR link. Works with <b>any Git host</b> (GitHub, GitLab, Bitbucket, Azure DevOps, Gitea/self-hosted). Auth: either the machine's <b>Git Credential Manager</b> (no token needed) <b>or</b> a <b>Personal Access Token</b> below — stored encrypted, never logged, only injected into a one-time push URL. Token scope: write/push access to the target repo.</div>
+      <label>Personal Access Token <span id="gitTokenState" class="muted small"></span></label>
+      <input id="gitToken" type="password" placeholder="token (stored encrypted)">
+      <label>Username <span class="muted small">(optional — only for hosts that need user:token, e.g. Bitbucket app passwords / Azure DevOps)</span></label>
+      <input id="gitUser" placeholder="leave empty for GitHub / GitLab / Gitea">
+      <div class="inline" style="margin-top:8px"><button onclick="saveGitToken()">🔑 Save token</button><button class="ghost" onclick="clearGitToken()">Remove token</button><span id="gitTokenOut" class="muted small"></span></div>
+    </div>
 
-    <h3 style="margin:18px 0 4px;font-size:1rem">Email report (SMTP)</h3>
-    <div class="row2"><div><label>SMTP host</label><input id="smtpHost" placeholder="smtp.company.com"></div><div><label>Port</label><input id="smtpPort" placeholder="587"></div></div>
-    <div class="chk"><input type="checkbox" id="smtpSecure"><span>TLS (secure)</span></div>
-    <div class="row2"><div><label>User</label><input id="smtpUser" placeholder="user@company.com"></div><div><label>Sender (From)</label><input id="smtpFrom" placeholder="maintenance@company.com"></div></div>
-    <label>Password <span id="smtpPassState" class="muted small"></span></label><input id="smtpPass" type="password" placeholder="stored encrypted">
-    <label>Recipients (comma-separated)</label><input id="recipients" placeholder="a@company.com, b@company.com">
-    <div class="inline" style="margin-top:8px"><button onclick="sendReport()">✉ Send report now</button><span id="reportOut" class="muted small"></span></div>
+    <div class="spanel" data-tab="schedule">
+      <h3>Automatic check <span class="muted small">— scheduled maintenance run</span></h3>
+      <div class="chk"><input type="checkbox" id="schedEnabled"><span>enable automatic check</span></div>
+      <label>Cron expression (min hour day month weekday) <span class="muted small" id="schedHint"></span></label>
+      <input id="schedule" placeholder="0 3 * * 1" oninput="updateSchedHint()">
+    </div>
 
-    <h3 style="margin:18px 0 4px;font-size:1rem">APEX target (live deploy &amp; test)</h3>
-    <div class="muted small" style="margin-bottom:6px">Zum Einspielen in eine echte APEX-App + Render-Smoke-Test. Nur Test-App/-Instanz verwenden. Passwort wird verschlüsselt gespeichert, nie geloggt.</div>
-    <label>Base URL (ORDS)</label><input id="apxBaseUrl" placeholder="https://host/ords">
-    <div class="row2"><div><label>Workspace</label><input id="apxWorkspace" placeholder="MEETUP"></div><div><label>App-ID</label><input id="apxAppId" placeholder="200000"></div></div>
-    <div class="row2"><div><label>App-Alias (Friendly-URL)</label><input id="apxAlias" placeholder="test"></div><div><label>Login-User (DB-User)</label><input id="apxUser" placeholder="Meetup"></div></div>
-    <label>Password <span id="apxPassState" class="muted small"></span></label><input id="apxPass" type="password" placeholder="stored encrypted">
-    <div class="row2"><div><label>Workspace-ID</label><input id="apxWsId" placeholder="aus App-Export"></div><div><label>Parsing-Schema (owner)</label><input id="apxOwner" placeholder="WKSP_MEETUP"></div></div>
-    <div class="inline" style="margin-top:8px"><button onclick="testApexConn()">🔌 Verbindung testen</button><span id="apxConnOut" class="muted small"></span></div>
+    <div class="spanel" data-tab="email">
+      <h3>Email report (SMTP)</h3>
+      <div class="row2"><div><label>SMTP host</label><input id="smtpHost" placeholder="smtp.company.com"></div><div><label>Port</label><input id="smtpPort" placeholder="587"></div></div>
+      <div class="chk"><input type="checkbox" id="smtpSecure"><span>TLS (secure)</span></div>
+      <div class="row2"><div><label>User</label><input id="smtpUser" placeholder="user@company.com"></div><div><label>Sender (From)</label><input id="smtpFrom" placeholder="maintenance@company.com"></div></div>
+      <label>Password <span id="smtpPassState" class="muted small"></span></label><input id="smtpPass" type="password" placeholder="stored encrypted">
+      <label>Recipients (comma-separated)</label><input id="recipients" placeholder="a@company.com, b@company.com">
+      <div class="inline" style="margin-top:8px"><button onclick="sendReport()">✉ Send report now</button><span id="reportOut" class="muted small"></span></div>
+    </div>
+
+    <div class="spanel" data-tab="apex">
+      <h3>APEX target <span class="muted small">— live deploy &amp; test</span></h3>
+      <div class="muted small" style="margin-bottom:8px">Zum Einspielen in eine echte APEX-App + Render-Smoke-Test. Nur Test-App/-Instanz verwenden. Passwort wird verschlüsselt gespeichert, nie geloggt.</div>
+      <label>Base URL (ORDS)</label><input id="apxBaseUrl" placeholder="https://host/ords">
+      <div class="row2"><div><label>Workspace</label><input id="apxWorkspace" placeholder="MEETUP"></div><div><label>App-ID</label><input id="apxAppId" placeholder="200000"></div></div>
+      <div class="row2"><div><label>App-Alias (Friendly-URL)</label><input id="apxAlias" placeholder="test"></div><div><label>Login-User (DB-User)</label><input id="apxUser" placeholder="Meetup"></div></div>
+      <label>Password <span id="apxPassState" class="muted small"></span></label><input id="apxPass" type="password" placeholder="stored encrypted">
+      <div class="row2"><div><label>Workspace-ID</label><input id="apxWsId" placeholder="aus App-Export"></div><div><label>Parsing-Schema (owner)</label><input id="apxOwner" placeholder="WKSP_MEETUP"></div></div>
+      <div class="inline" style="margin-top:8px"><button onclick="testApexConn()">🔌 Verbindung testen</button><span id="apxConnOut" class="muted small"></span></div>
+    </div>
 
     <div class="foot">
       <button class="ghost" onclick="closeSettings()">Close</button>
@@ -1179,10 +1206,16 @@ function openSettings(){
   const ax = s.apexTarget||{};
   $('apxBaseUrl').value=ax.baseUrl||''; $('apxWorkspace').value=ax.workspace||''; $('apxAppId').value=ax.appId||''; $('apxAlias').value=ax.alias||'';
   $('apxUser').value=ax.loginUser||''; $('apxWsId').value=ax.workspaceId||''; $('apxOwner').value=ax.owner||''; $('apxPass').value=''; $('apxPassState').textContent=s.apexPassSet?'(stored)':''; $('apxConnOut').textContent='';
-  $('gitToken').value=''; $('gitTokenState').textContent=s.gitTokenSet?'(stored — Credential Manager wird sonst genutzt)':'(leer — Push nutzt den Git Credential Manager)'; $('gitTokenOut').textContent='';
-  toggleAi(); $('settingsBg').classList.add('open');
+  $('gitToken').value=''; $('gitTokenState').textContent=s.gitTokenSet?'(stored — Credential Manager wird sonst genutzt)':'(leer — Push nutzt den Git Credential Manager)'; $('gitTokenOut').textContent=''; $('gitUser').value=s.gitUser||'';
+  showSettingsTab('general'); toggleAi(); $('settingsBg').classList.add('open');
 }
 function closeSettings(){ $('settingsBg').classList.remove('open'); }
+function showSettingsTab(name, btn){
+  document.querySelectorAll('#settingsBg .spanel').forEach(el=>el.classList.toggle('active', el.dataset.tab===name));
+  const tabs=[...document.querySelectorAll('#settingsTabs button')];
+  tabs.forEach(b=>b.classList.remove('active'));
+  (btn || tabs.find(b=>b.getAttribute('onclick')?.includes("'"+name+"'")) )?.classList.add('active');
+}
 function toggleAi(){ const k=$('aiKind').value; $('aiCli').style.display=k==='cli'?'block':'none'; $('aiProvider').style.display=k==='provider'?'block':'none'; }
 function updateSchedHint(){ const m={'0 3 * * 1':'weekly Mon 03:00','0 3 * * *':'daily 03:00','0 * * * *':'hourly','*/15 * * * *':'every 15 minutes'}; $('schedHint').textContent=m[$('schedule').value.trim()]?('· '+m[$('schedule').value.trim()]):''; }
 async function testAi(){
@@ -1197,15 +1230,15 @@ async function sendReport(){
 }
 // T-148: Git-PAT verschlüsselt hinterlegen/entfernen (für Push in den Fork). Token verlässt den Browser nur beim Speichern.
 async function saveGitToken(){
-  const token=$('gitToken').value.trim();
+  const token=$('gitToken').value.trim(); const user=$('gitUser').value.trim();
   if(!token) return toast('Enter a token or use Remove');
-  try{ const r=await api('POST','/api/git/token',{token}); if(!r.ok) return toast('Error: '+(r.error||'?'));
-    $('gitToken').value=''; $('gitTokenState').textContent='(stored — Credential Manager wird sonst genutzt)'; $('gitTokenOut').textContent='✅ token stored'; settingsCache.gitTokenSet=true;
+  try{ const r=await api('POST','/api/git/token',{token, user}); if(!r.ok) return toast('Error: '+(r.error||'?'));
+    $('gitToken').value=''; $('gitTokenState').textContent='(stored — Credential Manager wird sonst genutzt)'; $('gitTokenOut').textContent='✅ token stored'; settingsCache.gitTokenSet=true; settingsCache.gitUser=user||null;
   }catch(e){ toast('Error: '+e.message); }
 }
 async function clearGitToken(){
   try{ const r=await api('POST','/api/git/token',{clear:true}); if(!r.ok) return toast('Error: '+(r.error||'?'));
-    $('gitToken').value=''; $('gitTokenState').textContent='(leer — Push nutzt den Git Credential Manager)'; $('gitTokenOut').textContent='🗑 token removed'; settingsCache.gitTokenSet=false;
+    $('gitToken').value=''; $('gitUser').value=''; $('gitTokenState').textContent='(leer — Push nutzt den Git Credential Manager)'; $('gitTokenOut').textContent='🗑 token removed'; settingsCache.gitTokenSet=false; settingsCache.gitUser=null;
   }catch(e){ toast('Error: '+e.message); }
 }
 async function saveSettingsAll(){
@@ -1353,7 +1386,7 @@ async function loadLibraries(){
 }
 
 // Build-Marker: muss mit BUILD in start.js übereinstimmen. Erkennt einen veralteten Backend-Prozess.
-const APP_BUILD = '2026-07-10.85';
+const APP_BUILD = '2026-07-10.86';
 async function checkBackend(){
   const b = $('staleBanner');
   try{

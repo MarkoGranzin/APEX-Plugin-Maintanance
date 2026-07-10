@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { authenticatedPushUrl, redactToken } from '../src/run/git-auth.js';
+import { authenticatedPushUrl, redactToken, defaultTokenUser } from '../src/run/git-auth.js';
 import { SecretStore } from '../src/config/secrets.js';
 
 describe('T-148 Push-Auth per Personal Access Token', () => {
@@ -14,8 +14,19 @@ describe('T-148 Push-Auth per Personal Access Token', () => {
     expect(authenticatedPushUrl('git@github.com:maras/repo.git', TOK)).toBe(`https://x-access-token:${TOK}@github.com/maras/repo.git`);
   });
 
-  it('nicht-GitHub-Hoster → oauth2-User', () => {
+  it('hoster-unabhängig: GitLab/Bitbucket/Azure/self-hosted-Gitea bekommen den passenden Pseudo-User', () => {
     expect(authenticatedPushUrl('https://gitlab.com/g/p', TOK)).toBe(`https://oauth2:${TOK}@gitlab.com/g/p.git`);
+    expect(authenticatedPushUrl('https://gitlab.mycorp.internal/g/p', TOK)).toBe(`https://oauth2:${TOK}@gitlab.mycorp.internal/g/p.git`); // self-hosted GitLab
+    expect(authenticatedPushUrl('https://bitbucket.org/g/p', TOK)).toBe(`https://x-token-auth:${TOK}@bitbucket.org/g/p.git`);
+    expect(authenticatedPushUrl('https://dev.azure.com/org/proj/_git/repo', TOK)).toBe(`https://pat:${TOK}@dev.azure.com/org/proj/_git/repo.git`);
+    // unbekannter/self-hosted Hoster (z.B. Gitea) → Token selbst als User
+    expect(authenticatedPushUrl('https://git.example.com/g/p', TOK)).toBe(`https://${TOK}:${TOK}@git.example.com/g/p.git`);
+  });
+
+  it('expliziter Benutzername überschreibt den Host-Default (Bitbucket-App-Passwort/Azure)', () => {
+    expect(authenticatedPushUrl('https://bitbucket.org/g/p', TOK, 'maras')).toBe(`https://maras:${TOK}@bitbucket.org/g/p.git`);
+    expect(defaultTokenUser('github.com', TOK)).toBe('x-access-token');
+    expect(defaultTokenUser('git.self.host', TOK)).toBe(TOK);
   });
 
   it('Sonderzeichen im Token werden URL-encodiert', () => {
