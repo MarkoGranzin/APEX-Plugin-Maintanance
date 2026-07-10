@@ -368,7 +368,8 @@ function mockBadge(c){
     const sc=c.mockSelfCheck;
     if(sc && typeof sc.total==='number'){
       const pass=sc.total-(sc.failed||0);
-      return ` <span class="badge" title="AI mock self-tests${sc.views?` · ${sc.views} views`:''}${sc.failed?` · ${sc.failed} red`:''}" style="color:${sc.failed?'#d29922':'#3fb950'};border-color:${sc.failed?'#d2992266':'#3fb95066'}">🧪 ${pass}/${sc.total}</span>`;
+      // B-37: rote Self-Checks sind HANDLUNGSBEDARF, kein „ok" — rot zeigen; die nächste Pflege korrigiert weiter (kein Cache für rote Mocks).
+      return ` <span class="badge" title="AI mock self-tests${sc.views?` · ${sc.views} views`:''}${sc.failed?` · ${sc.failed} red — die nächste Pflege untersucht/korrigiert den Mock erneut`:''}" style="color:${sc.failed?'#f85149':'#3fb950'};border-color:${sc.failed?'#f8514966':'#3fb95066'}">🧪 ${pass}/${sc.total}</span>`;
     }
     return ''; // KI-Mock ohne Self-Test-Bilanz → kein separates „AI"-Badge (Bilanz erscheint nach Rebuild)
   }

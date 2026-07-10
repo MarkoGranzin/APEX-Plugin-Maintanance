@@ -213,7 +213,10 @@ function cmdServe(portArg) {
       const fp = mockInputFingerprint(component.path);
       let fpFile = null;
       try { fpFile = JSON.parse(fs.readFileSync(fpPath, 'utf8')); } catch { fpFile = null; }
-      let known = exists && fp && fpFile?.fp === fp && fpFile?.mode === 'ai'; // nur ECHTE KI-Mocks gelten als bekannt; static-Fallbacks immer neu versuchen
+      // Nur ECHTE KI-Mocks gelten als bekannt; static-Fallbacks immer neu versuchen. B-37: ein Mock mit
+      // ROTEN Self-Checks (failed>0) wird NICHT gecacht — sonst wäre der rote Zustand terminal und die
+      // Refine-Schleife bekäme nie wieder die Chance zu korrigieren (jede Pflege versucht es erneut).
+      let known = exists && fp && fpFile?.fp === fp && fpFile?.mode === 'ai' && (fpFile?.failed ?? 0) === 0;
       // B-27: dem Fingerprint NICHT blind vertrauen — der eingecheckte Mock muss den Self-Test-Harness wirklich
       // enthalten. Ein degradierter/statischer Mock (z.B. nach Rollback ohne KI) gilt sonst fälschlich als grün.
       if (known) { try { const html = fs.readFileSync(path.join(mockDir, 'index.html'), 'utf8'); if (!/__views|__selftested|__features/.test(html)) { known = false; try { fs.rmSync(fpPath, { force: true }); } catch { /* egal */ } } } catch { known = false; } }
