@@ -262,6 +262,12 @@
 
     <div class="muted small" style="margin:14px 0 4px">Auto-repair (check → full maintenance) and push to remote are always on. Outward-facing pushes still ask for a confirmation when you click Upload.</div>
 
+    <h3 style="margin:18px 0 4px;font-size:1rem">Git push (fix → branch → push)</h3>
+    <div class="muted small" style="margin-bottom:6px">Upload legt einen neuen Branch <code>aisp/pflege-…</code> an, committet den Fix und pusht ihn ins Remote (dein Fork) → PR-Link. Auth: entweder der <b>Git Credential Manager</b> des Rechners (kein Token nötig) <b>oder</b> ein <b>Personal Access Token</b> hier (verschlüsselt gespeichert, nie geloggt, nur zur Push-Zeit genutzt). Token-Rechte: <code>repo</code> bzw. fine-grained „Contents: read/write" für deinen Fork.</div>
+    <label>Personal Access Token <span id="gitTokenState" class="muted small"></span></label>
+    <input id="gitToken" type="password" placeholder="ghp_… / github_pat_… (stored encrypted)">
+    <div class="inline" style="margin-top:8px"><button onclick="saveGitToken()">🔑 Save token</button><button class="ghost" onclick="clearGitToken()">Remove token</button><span id="gitTokenOut" class="muted small"></span></div>
+
     <h3 style="margin:18px 0 4px;font-size:1rem">Automatic check (schedule)</h3>
     <div class="chk"><input type="checkbox" id="schedEnabled"><span>enable automatic check</span></div>
     <label>Cron expression (min hour day month weekday) <span class="muted small" id="schedHint"></span></label>
@@ -1173,6 +1179,7 @@ function openSettings(){
   const ax = s.apexTarget||{};
   $('apxBaseUrl').value=ax.baseUrl||''; $('apxWorkspace').value=ax.workspace||''; $('apxAppId').value=ax.appId||''; $('apxAlias').value=ax.alias||'';
   $('apxUser').value=ax.loginUser||''; $('apxWsId').value=ax.workspaceId||''; $('apxOwner').value=ax.owner||''; $('apxPass').value=''; $('apxPassState').textContent=s.apexPassSet?'(stored)':''; $('apxConnOut').textContent='';
+  $('gitToken').value=''; $('gitTokenState').textContent=s.gitTokenSet?'(stored — Credential Manager wird sonst genutzt)':'(leer — Push nutzt den Git Credential Manager)'; $('gitTokenOut').textContent='';
   toggleAi(); $('settingsBg').classList.add('open');
 }
 function closeSettings(){ $('settingsBg').classList.remove('open'); }
@@ -1187,6 +1194,19 @@ async function sendReport(){
   $('reportOut').textContent='sending…';
   try{ const r=await api('POST','/api/report/send',{}); $('reportOut').textContent = r.ok?('✅ sent to '+(r.sent||[]).join(', ')):('⛔ '+(r.error||'Error')); }
   catch(e){ $('reportOut').textContent='Error: '+e.message; }
+}
+// T-148: Git-PAT verschlüsselt hinterlegen/entfernen (für Push in den Fork). Token verlässt den Browser nur beim Speichern.
+async function saveGitToken(){
+  const token=$('gitToken').value.trim();
+  if(!token) return toast('Enter a token or use Remove');
+  try{ const r=await api('POST','/api/git/token',{token}); if(!r.ok) return toast('Error: '+(r.error||'?'));
+    $('gitToken').value=''; $('gitTokenState').textContent='(stored — Credential Manager wird sonst genutzt)'; $('gitTokenOut').textContent='✅ token stored'; settingsCache.gitTokenSet=true;
+  }catch(e){ toast('Error: '+e.message); }
+}
+async function clearGitToken(){
+  try{ const r=await api('POST','/api/git/token',{clear:true}); if(!r.ok) return toast('Error: '+(r.error||'?'));
+    $('gitToken').value=''; $('gitTokenState').textContent='(leer — Push nutzt den Git Credential Manager)'; $('gitTokenOut').textContent='🗑 token removed'; settingsCache.gitTokenSet=false;
+  }catch(e){ toast('Error: '+e.message); }
 }
 async function saveSettingsAll(){
   try{
@@ -1333,7 +1353,7 @@ async function loadLibraries(){
 }
 
 // Build-Marker: muss mit BUILD in start.js übereinstimmen. Erkennt einen veralteten Backend-Prozess.
-const APP_BUILD = '2026-07-09.83';
+const APP_BUILD = '2026-07-09.84';
 async function checkBackend(){
   const b = $('staleBanner');
   try{

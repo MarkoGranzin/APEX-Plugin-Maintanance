@@ -48,6 +48,7 @@ import { redevelopDeadLib, buildSliceRebuildPrompt } from './src/service/redev-s
 import { inspectAssets, parseOk } from './src/extract/assets.js';
 import { reinjectAsset } from './src/extract/reinject.js';
 import { uploadFix } from './src/service/upload.js';
+import { authenticatedPushUrl, redactToken } from './src/run/git-auth.js';
 import { slug as slugify } from './src/util/slug.js';
 import { resolveAiBackend, aiBackendView } from './src/ai/configure.js';
 import { createPrRegistry } from './src/run/dedup.js';
@@ -74,7 +75,7 @@ try {
 } catch { /* egal */ }
 // Build-Marker: muss mit APP_BUILD in public/app.html übereinstimmen. Bei Backend-Änderungen erhöhen.
 // Das Frontend vergleicht beide und warnt, wenn der laufende Dienst veraltet ist (Neustart nötig).
-const BUILD = '2026-07-09.83';
+const BUILD = '2026-07-09.84';
 const C = { reset: '\x1b[0m', bold: '\x1b[1m', dim: '\x1b[2m', green: '\x1b[32m', yellow: '\x1b[33m', red: '\x1b[31m', cyan: '\x1b[36m' };
 const c = (col, s) => `${C[col]}${s}${C.reset}`;
 
@@ -339,7 +340,23 @@ function cmdServe(portArg) {
         try { await git.checkoutLocalBranch(b); } catch { try { await git.checkout(b); } catch {} }
         await git.add('.'); await git.commit(m);
       },
-      push: async (b) => { await git.push(['-u', 'origin', b]); }, // braucht Remote + Token; sonst Fehler → pushed:false
+      // Push des Fix-Branches ans Remote (origin = Fork des Nutzers). T-148: zwei Auth-Wege.
+      // 1) PAT hinterlegt ('git-token') → Token NUR jetzt in eine Einmal-URL einsetzen (landet nie in
+      //    .git/config); Fehlertexte werden token-redigiert. 2) Kein Token → an 'origin' (Git Credential
+      //    Manager liefert die Credentials). Ohne beides scheitert der Push → uploadFix meldet pushed:false.
+      push: async (b) => {
+        let token = null; try { token = secretStore.get('git-token'); } catch { /* kein Token */ }
+        if (token) {
+          const remotes = await git.getRemotes(true).catch(() => []);
+          const originUrl = remotes.find((r) => r.name === 'origin')?.refs?.push || remotes[0]?.refs?.push;
+          const authUrl = authenticatedPushUrl(originUrl, token);
+          if (authUrl) {
+            try { await git.push([authUrl, b]); return; }
+            catch (e) { throw new Error(redactToken(String(e?.message ?? e), token)); }
+          }
+        }
+        await git.push(['-u', 'origin', b]);
+      },
     };
   };
   const stampNow = () => new Date().toISOString().replace(/[-:T.]/g, '').slice(0, 14);
@@ -521,6 +538,16 @@ function cmdServe(portArg) {
       settings.aiBackend = { ...(settings.aiBackend ?? { kind: 'provider' }), secretRef: 'ai-key' };
       saveSecrets(); saveSettings();
       return json(res, { ok: true, aiBackend: aiBackendView(settings) });
+    }
+
+    // T-148 — Git Personal Access Token verschlüsselt hinterlegen/entfernen (für Push in den Fork).
+    // Der Token wird NIE zurückgegeben; nur „gesetzt/nicht gesetzt" ist sichtbar. { clear:true } löscht ihn.
+    if (p === '/api/git/token' && req.method === 'POST') {
+      const body = await readBody(req);
+      if (body?.clear) { secretStore.delete('git-token'); saveSecrets(); return json(res, { ok: true, gitTokenSet: false }); }
+      if (!body?.token) return json(res, { error: 'token fehlt' }, 400);
+      secretStore.set('git-token', String(body.token).trim()); saveSecrets();
+      return json(res, { ok: true, gitTokenSet: true });
     }
 
     // SMTP-Passwort verschlüsselt hinterlegen
@@ -945,7 +972,7 @@ function cmdServe(portArg) {
         const { status, body: out } = await metaApiHandler(req.method, p, body, metaCtx);
         if (req.method !== 'GET' && (p === '/api/settings' || p.startsWith('/api/repos'))) saveSettings();
         // T-134: ob das APEX-Passwort verschlüsselt hinterlegt ist (nie das Passwort selbst) → GUI-Anzeige „(stored)".
-        if (p === '/api/settings' && req.method === 'GET' && out && typeof out === 'object') { let ps = false; try { ps = !!secretStore.get('apex-pass'); } catch {} out.apexPassSet = ps; }
+        if (p === '/api/settings' && req.method === 'GET' && out && typeof out === 'object') { let ps = false; try { ps = !!secretStore.get('apex-pass'); } catch {} out.apexPassSet = ps; out.gitTokenSet = secretStore.has('git-token'); }
         return json(res, out, status);
       } catch (err) {
         return json(res, { error: String(err?.message ?? err) }, 500);

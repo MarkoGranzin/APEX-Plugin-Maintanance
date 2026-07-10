@@ -69,6 +69,17 @@ export class SecretStore {
     return decryptSecret(this.blobs[name], this._pass);
   }
 
+  /** Entfernt ein Secret (z.B. Git-Token „vergessen"). Idempotent. */
+  delete(name) {
+    delete this.blobs[name];
+    return this;
+  }
+
+  /** Ist ein Secret hinterlegt? (ohne es zu entschlüsseln/auszugeben) */
+  has(name) {
+    return name in this.blobs;
+  }
+
   /** Maskierte Anzeige aller Secrets — niemals Klartext. */
   display() {
     const out = {};
