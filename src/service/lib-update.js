@@ -14,6 +14,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { detectVendoredLibraries } from '../sbom/vendored.js';
 import { npmPackageName } from '../sbom/registry.js';
+import { rebuildEmbeddedBundles } from './plugin-bundle.js';
+import { findPluginExport } from './apex-live.js';
 import { cmpSemver as cmp } from '../util/version.js';
 import { listFiles } from '../inventory/inventory.js';
 
@@ -128,7 +130,34 @@ export async function applyVendoredUpdates(dir, libs, deps = {}) {
       results.push({ name: lib.name, from: lib.version, to: lib.latest, applied: false, reason: 'download/write failed: ' + (e?.message ?? e) });
     }
   }
+  // B-40: Die aktualisierten Quell-Libs müssen in die AUSGELIEFERTEN Artefakte — sonst erreicht das Update
+  // das deployte Plugin nie: viele Plugins laden gebündelte (gulp-concat) Dateien, die als HEX-Blob in der
+  // Plugin-.sql eingebettet sind und genau so in APEX installiert werden. Nach jedem angewandten Quell-Update
+  // die Bundles neu bauen und in die .sql re-embedden (mit Rollback-Backup der .sql).
+  if (results.some((r) => r.applied)) {
+    try { const re = reembedBundles(dir, backups, deps); if (re) results.push(re); }
+    catch (e) { results.push({ step: 'reembed', ok: false, reason: String(e?.message ?? e) }); }
+  }
   return { results, backups };
+}
+
+/** B-40: gebündelte, in die Plugin-.sql eingebettete Dateien aus den aktualisierten Quellen neu bauen und
+ *  re-embedden. Nur wenn ein Build (gulpfile) UND eine eingebettete Export-.sql existieren. Backup für Rollback. */
+export function reembedBundles(dir, backups, deps = {}) {
+  const exists = deps.exists ?? ((f) => fs.existsSync(f));
+  const read = deps.readText ?? ((f) => fs.readFileSync(f, 'utf8'));
+  const write = deps.writeText ?? ((f, c) => fs.writeFileSync(f, c));
+  const gulpPath = path.join(dir, 'gulpfile.js');
+  if (!exists(gulpPath)) return null; // kein bekannter Build → nichts zu re-embedden (direktes Embed: eigener Fall)
+  const exportPath = (deps.findExport ?? findPluginExport)(dir, deps);
+  if (!exportPath || !exists(exportPath)) return null;
+  const exportSql = read(exportPath);
+  const gulpSrc = read(gulpPath);
+  const r = rebuildEmbeddedBundles({ repoDir: dir, exportSql, gulpSrc }, deps);
+  if (!r.updated.length) return { step: 'reembed', ok: false, updated: [], skipped: r.skipped };
+  if (backups && !backups.has(exportPath)) backups.set(exportPath, exportSql); // Rollback der .sql
+  write(exportPath, r.sql);
+  return { step: 'reembed', ok: true, file: path.basename(exportPath), updated: r.updated.map((u) => u.bundle), bytes: r.updated.reduce((a, u) => a + u.bytes, 0) };
 }
 
 /** Setzt eingespielte Updates zurück (bei Regression). null-Inhalt = die (neu angelegte) Datei löschen. */
