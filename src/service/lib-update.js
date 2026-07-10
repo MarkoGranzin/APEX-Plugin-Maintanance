@@ -14,7 +14,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { detectVendoredLibraries } from '../sbom/vendored.js';
 import { npmPackageName } from '../sbom/registry.js';
-import { rebuildEmbeddedBundles } from './plugin-bundle.js';
+import { detectEmbeddedAssets, reembedFromAssets } from '../../mcp-apex-deploy/lib/plugin-assets.js';
 import { findPluginExport } from './apex-live.js';
 import { cmpSemver as cmp } from '../util/version.js';
 import { listFiles } from '../inventory/inventory.js';
@@ -141,23 +141,22 @@ export async function applyVendoredUpdates(dir, libs, deps = {}) {
   return { results, backups };
 }
 
-/** B-40: gebündelte, in die Plugin-.sql eingebettete Dateien aus den aktualisierten Quellen neu bauen und
- *  re-embedden. Nur wenn ein Build (gulpfile) UND eine eingebettete Export-.sql existieren. Backup für Rollback. */
+/** B-40 (generisch): die in die Plugin-.sql eingebetteten Laufzeit-Assets aus den aktualisierten Quellen
+ *  neu erzeugen (bundle=gulp-concat, copy=Repo-Datei) und re-einbetten — nur bei realer Inhaltsänderung.
+ *  Kind-agnostisch (region/item/DA/Template-Component). Backup der .sql für Rollback. */
 export function reembedBundles(dir, backups, deps = {}) {
   const exists = deps.exists ?? ((f) => fs.existsSync(f));
   const read = deps.readText ?? ((f) => fs.readFileSync(f, 'utf8'));
   const write = deps.writeText ?? ((f, c) => fs.writeFileSync(f, c));
-  const gulpPath = path.join(dir, 'gulpfile.js');
-  if (!exists(gulpPath)) return null; // kein bekannter Build → nichts zu re-embedden (direktes Embed: eigener Fall)
   const exportPath = (deps.findExport ?? findPluginExport)(dir, deps);
   if (!exportPath || !exists(exportPath)) return null;
   const exportSql = read(exportPath);
-  const gulpSrc = read(gulpPath);
-  const r = rebuildEmbeddedBundles({ repoDir: dir, exportSql, gulpSrc }, deps);
+  const assets = detectEmbeddedAssets(exportSql, dir, deps);
+  const r = reembedFromAssets(exportSql, assets, dir, deps);
   if (!r.updated.length) return { step: 'reembed', ok: false, updated: [], skipped: r.skipped };
   if (backups && !backups.has(exportPath)) backups.set(exportPath, exportSql); // Rollback der .sql
   write(exportPath, r.sql);
-  return { step: 'reembed', ok: true, file: path.basename(exportPath), updated: r.updated.map((u) => u.bundle), bytes: r.updated.reduce((a, u) => a + u.bytes, 0) };
+  return { step: 'reembed', ok: true, file: path.basename(exportPath), updated: r.updated.map((u) => u.file), bytes: r.updated.reduce((a, u) => a + u.bytes, 0) };
 }
 
 /** Setzt eingespielte Updates zurück (bei Regression). null-Inhalt = die (neu angelegte) Datei löschen. */

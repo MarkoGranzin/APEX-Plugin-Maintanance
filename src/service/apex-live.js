@@ -63,7 +63,7 @@ export async function deployAndTest(o = {}, deps = {}) {
   // Analyse → Setup-Manifest („Rezept"). Die Einrichtung läuft AUSSCHLIESSLICH über setupFromManifest —
   // dieselbe Quelle, die auch der standalone apex-deploy-MCP (Tool apex_setup) nutzt. So wird nichts doppelt
   // „gedacht": das JSON beschreibt die Verwendung, der Runner richtet nur noch daraus ein.
-  const manifest = d.buildSetupManifest(exportSql, { pageId, sourceSql: o.sourceSql });
+  const manifest = d.buildSetupManifest(exportSql, { pageId, sourceSql: o.sourceSql, repoDir: path.dirname(o.exportFile) });
   const connection = { baseUrl: t.baseUrl, workspace: t.workspace, user: t.user, pass: t.pass, appId, alias: t.alias };
   const r = await d.setupFromManifest(manifest, connection, { pageId, sourceSql: o.sourceSql, install: o.exportFile, setFileUrls: o.setFileUrls }, deps);
   return {

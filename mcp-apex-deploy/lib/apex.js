@@ -9,6 +9,8 @@
  * Resultat: mcp-apex-deploy/lib/apex.js
  */
 
+import { detectEmbeddedAssets } from './plugin-assets.js';
+
 /** Passwort im Connect-String maskieren — Secrets erscheinen NIE in Ausgaben/Logs. */
 export function maskConn(conn) {
   if (!conn) return '(not set)';
@@ -248,6 +250,10 @@ export function buildSetupManifest(sqlText, opts = {}) {
     // File URLs to Load am Plugin (Shared Components → Plug-ins), #PLUGIN_FILES#-Referenzen.
     // Bei selbst-ladenden Plugins bewusst LEER (B-38) — setupFromManifest räumt dort ggf. Altbestand weg.
     fileUrls: selfLoadsFiles ? { js: [], css: [] } : { js: jsUrls, css: cssUrls },
+    // B-40 (generisch): Herkunft der in die .sql eingebetteten Laufzeit-Assets (bundle/copy/unknown) —
+    // von der Analyse festgestellt und ins Manifest überführt, damit Update/Import die Assets aus den
+    // (aktualisierten) Quellen neu erzeugen und re-einbetten kann. Nur wenn ein Repo-Verzeichnis vorliegt.
+    assets: opts.repoDir ? detectEmbeddedAssets(sqlText, opts.repoDir, opts.assetDeps) : undefined,
   };
 }
 

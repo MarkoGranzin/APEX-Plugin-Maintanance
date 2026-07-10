@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { parseGulpBundles, buildContentBlock, reembedFile, embeddedFileNames, rebuildEmbeddedBundles, resolveSources } from '../src/service/plugin-bundle.js';
+import { parseGulpBundles, buildContentBlock, reembedFile, embeddedFileNames, rebuildEmbeddedBundles, resolveSources, detectEmbeddedAssets, reembedFromAssets } from '../src/service/plugin-bundle.js';
 import { reembedBundles } from '../src/service/lib-update.js';
 
 // Minimaler APEX-Export mit EINER eingebetteten Datei (414243 = "ABC").
@@ -73,16 +73,41 @@ describe('B-40 plugin-bundle: gulp-Bundles neu bauen + in die .sql re-embedden',
                   gulp.src(['./js/lib/c.js']).pipe(concat('nicht-eingebettet.js'));`;
     const deps = {
       exists: () => true,
+      readText: () => gulp,
       readBuf: (f) => Buffer.from(f.endsWith('a.js') ? 'AA' : f.endsWith('b.js') ? 'BB' : 'CC'),
     };
-    const r = rebuildEmbeddedBundles({ repoDir: '/repo', exportSql: EXPORT, gulpSrc: gulp }, deps);
+    const r = rebuildEmbeddedBundles({ repoDir: '/repo', exportSql: EXPORT }, deps);
+    // Nur die EINGEBETTETE Datei (bundle.js) ist relevant; 'nicht-eingebettet.js' taucht nicht auf.
     expect(r.updated.map((u) => u.bundle)).toEqual(['bundle.js']);
-    expect(r.skipped.map((s) => s.bundle)).toEqual(['nicht-eingebettet.js']);
     expect(decode(r.sql, 'bundle.js')).toBe('AA\nBB'); // concat mit \n
   });
 
-  it('reembedBundles (lib-update): kein gulpfile → null (kein Re-Embed erzwungen)', () => {
-    const r = reembedBundles('/repo', new Map(), { exists: (f) => false });
+  it('detectEmbeddedAssets: bundle (gulp) vs copy (Repo-Datei) vs unknown', () => {
+    const gulp = `gulp.src(['./js/lib/a.js']).pipe(concat('bundle.js'));`;
+    // EXPORT bettet nur 'bundle.js' ein → als bundle erkannt (gulpfile vorhanden)
+    const a1 = detectEmbeddedAssets(EXPORT, '/repo', { exists: (f) => f.endsWith('gulpfile.js'), readText: () => gulp });
+    expect(a1).toEqual([{ file: 'bundle.js', build: 'bundle', sources: ['./js/lib/a.js'] }]);
+    // ohne gulpfile, aber Repo-Datei gleichen Namens → copy
+    const a2 = detectEmbeddedAssets(EXPORT, '/repo', { exists: (f) => f.endsWith('bundle.js'), readText: () => '' });
+    expect(a2).toEqual([{ file: 'bundle.js', build: 'copy', sources: ['bundle.js'] }]);
+    // weder Bundle noch Repo-Datei → unknown
+    const a3 = detectEmbeddedAssets(EXPORT, '/repo', { exists: () => false, readText: () => '', walk: () => [] });
+    expect(a3).toEqual([{ file: 'bundle.js', build: 'unknown', sources: [] }]);
+  });
+
+  it('reembedFromAssets: nur bei realer Inhaltsänderung ersetzen (content-diff)', () => {
+    // copy, Repo-Inhalt = eingebettet ("ABC") → skip 'unverändert'
+    const same = reembedFromAssets(EXPORT, [{ file: 'bundle.js', build: 'copy', sources: ['bundle.js'] }], '/repo', { readBuf: () => Buffer.from('ABC') });
+    expect(same.updated).toEqual([]);
+    expect(same.skipped[0].reason).toBe('unverändert');
+    // geänderter Inhalt → ersetzt
+    const diff = reembedFromAssets(EXPORT, [{ file: 'bundle.js', build: 'copy', sources: ['bundle.js'] }], '/repo', { readBuf: () => Buffer.from('NEU') });
+    expect(diff.updated).toEqual([{ file: 'bundle.js', bytes: 3 }]);
+    expect(decode(diff.sql, 'bundle.js')).toBe('NEU');
+  });
+
+  it('reembedBundles (lib-update): keine Export-.sql → null (kein Re-Embed erzwungen)', () => {
+    const r = reembedBundles('/repo', new Map(), { exists: () => false, findExport: () => null });
     expect(r).toBeNull();
   });
 
