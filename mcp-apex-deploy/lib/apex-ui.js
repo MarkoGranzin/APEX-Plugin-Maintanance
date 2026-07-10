@@ -281,26 +281,56 @@ async function pdOpenOrCreatePage(page, o) {
   return { ok: true, mode };
 }
 
+/** T-149 — Ermittelt, welche der benötigten Hidden-Page-Items auf der Seite bereits existieren, über das
+ *  Page-Designer-Modell (window.pe). SICHER & read-only: KEINE Modell-Transaction, keine Anlage (ein blinder
+ *  Modell-Add über eine unbestätigte API ließ eine Transaction hängen und brach die Seite — daher bewusst
+ *  nur Bestandsaufnahme). Fehlende Items werden ehrlich gemeldet; das physische Anlegen im Page Designer
+ *  ist ein separater, noch nicht automatisierter Schritt. */
+async function pdCreatePageItems(page, items) {
+  const names = (items || []).map((i) => (typeof i === 'string' ? i : i?.name)).filter(Boolean);
+  if (!names.length) return { created: 0, existing: [], missing: [], note: 'keine Page-Items nötig' };
+  return page.evaluate(({ names }) => {
+    try {
+      const m = window.pe;
+      if (!m || !m.getComponents || !m.COMP_TYPE) return { created: 0, existing: [], missing: names, note: 'kein pe/Modell' };
+      const have = new Set();
+      for (const c of (m.getComponents(m.COMP_TYPE.PAGE_ITEM) || [])) {
+        try { const v = c.getProperty(m.PROP.ITEM_NAME)?.getValue(); if (v) have.add(String(v).toUpperCase()); } catch { /* egal */ }
+      }
+      const upper = names.map((n) => String(n).toUpperCase());
+      const existing = upper.filter((n) => have.has(n));
+      const missing = upper.filter((n) => !have.has(n));
+      return { created: 0, existing, missing, note: missing.length ? 'Anlage im Page Designer noch nicht automatisiert' : 'alle vorhanden' };
+    } catch (e) { return { created: 0, existing: [], missing: names, note: String(e && e.message || e).slice(0, 80) }; }
+  }, { names });
+}
+
 /** Setzt die SQL-Quelle einer Region über das Page-Designer-MODELL (window.pe). Nötig, weil der
  *  Property-Editor bei BESTEHENDEN Regionen (Reuse) das Textarea-setValue nicht ins Modell übernimmt —
  *  pdSetProp meldet „ok", aber der Save persistiert die alte SQL (live am BI-Dashboard beobachtet).
  *  Nimmt die (einzige) Region mit SQL-Quelle der Testseite. */
 async function pdSetRegionSqlModel(page, sql) {
   return page.evaluate(({ sql }) => {
+    const model = window.pe;
+    if (!model || !model.getComponents || !model.PROP) return 'no-pe';
+    let t = null;
     try {
-      const model = window.pe;
-      if (!model || !model.getComponents || !model.PROP) return 'no-pe';
       const regions = model.getComponents(model.COMP_TYPE.REGION) || [];
       const withSql = regions.map((r) => { try { return { r, p: r.getProperty(model.PROP.REGION_SQL) }; } catch (e) { return { r, p: null }; } }).filter((x) => x.p);
       if (!withSql.length) return 'no-sql-region';
       // WICHTIG: setValue MUSS in einer Modell-Transaction laufen — sonst gilt die Änderung nicht als
-      // dirty und der Save persistiert sie nicht (empirisch verifiziert: ohne Transaction bleibt die
-      // alte SQL, mit Transaction + Save überlebt sie den Reload).
-      const t = model.transaction && model.transaction.start ? model.transaction.start('aisp', 'set region sql') : null;
+      // dirty und der Save persistiert sie nicht (empirisch verifiziert). Die Transaction wird IMMER
+      // beendet (finally) — sonst blockiert eine hängende Transaction alle folgenden Schritte („Finish
+      // pending Transaction first!", live beobachtet an Seite 20004).
+      t = model.transaction && model.transaction.start ? model.transaction.start('aisp', 'set region sql') : null;
       withSql[0].p.setValue(sql);
-      if (t && model.transaction.end) model.transaction.end(t);
       return 'ok';
     } catch (e) { return 'err:' + String(e?.message ?? e).slice(0, 80); }
+    // Das von start() zurückgegebene HANDLE ist ein Undo/Redo-COMMAND (Methoden: execute/cancel/undo/redo);
+    // model.transaction selbst hat KEIN end(). Der Abschluss/Commit ist t.execute() — ohne ihn bleibt die
+    // Transaction offen und blockiert ALLE folgenden Property-Änderungen („Finish pending Transaction first!",
+    // live an Seite 20004 diagnostiziert). execute zuerst, dann tolerante Fallbacks.
+    finally { try { for (const fn of ['execute', 'done', 'commit', 'apply', 'end', 'close']) { if (t && typeof t[fn] === 'function') { t[fn](); break; } } } catch { /* egal */ } }
   }, { sql });
 }
 
@@ -587,9 +617,17 @@ export async function uiCreateTestPage(page, o = {}) {
   const rPos = await pdSetRegionBody(page); // Region gehört in den BODY, nicht in die Drop-Zufallsposition
   let rSql = o.sourceSql ? await pdSetProp(page, 'SQL Query', o.sourceSql) : 'skip';
   // Modell-Set obendrauf: bei Reuse übernimmt der Property-Editor das Textarea-setValue NICHT ins Modell.
-  if (o.sourceSql) { const m = await pdSetRegionSqlModel(page, o.sourceSql); if (m === 'ok') rSql = 'ok'; }
+  let __mSql = 'skip'; if (o.sourceSql) { __mSql = await pdSetRegionSqlModel(page, o.sourceSql); if (__mSql === 'ok') rSql = 'ok'; }
   const attrs = [];
   for (const a of (o.attributes || [])) { if (a && a.prompt && a.value != null && a.value !== '') attrs.push({ prompt: a.prompt, r: await pdSetProp(page, a.prompt, a.value) }); }
+
+  // T-149: Bestandsaufnahme der benötigten Hidden-Page-Items (sicher, read-only) — nur zur Meldung.
+  // Das physische Anlegen im Page Designer + „Items to Submit"-Verdrahtung ist bewusst NOCH NICHT
+  // automatisiert (ein blinder Modell-Add über eine unbestätigte API ließ eine Transaction hängen und
+  // brach die Testseite). Die benötigten Items stehen vollständig im Manifest (pageItems/itemsToSubmit)
+  // für den standalone-MCP/künftige Automatisierung; hier wird nur berichtet, was fehlt.
+  let pageItems = null;
+  if (o.pageItems && o.pageItems.length) pageItems = await pdCreatePageItems(page, o.pageItems);
 
   // Seite öffentlich machen (Page-Root selektieren → „Authentication" = Page Is Public).
   await page.locator('.a-TreeView-label').filter({ hasText: rxi(`Page ${o.pageId}`) }).first().click().catch(() => {}); await page.waitForTimeout(700);
@@ -601,7 +639,7 @@ export async function uiCreateTestPage(page, o = {}) {
   await settle(2500);
   const body = (await page.locator('body').innerText().catch(() => '')).replace(/\s+/g, ' ');
   const saveError = (body.match(/ORA-\d+[^.]{0,100}|could not be saved|processing failed/i) || [])[0] || null;
-  return { ok: rName === 'ok' && (rSql === 'ok' || rSql === 'skip') && !saveError, mode, region: { name: rName, sql: rSql, position: rPos }, attributes: attrs, auth, saveError };
+  return { ok: rName === 'ok' && (rSql === 'ok' || rSql === 'skip') && !saveError, mode, region: { name: rName, sql: rSql, position: rPos, model: __mSql }, attributes: attrs, pageItems, auth, saveError };
 }
 
 /**

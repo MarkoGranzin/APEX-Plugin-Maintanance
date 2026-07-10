@@ -88,7 +88,11 @@ export async function setupFromManifest(manifest, connection, o = {}, deps = {})
       const tc = m.testPage?.templateComponent || {};
       result.testPage = await d.uiCreateTemplateComponentTestPage(pdPage, { appId: c.appId, pageId, pageName, pluginDisplayName: displayName, regionName: tc.region?.name || regionName, sourceSql: tc.source?.sql || sourceSql, columnMap: tc.columnMap, attributes });
     } else {
-      result.testPage = await d.uiCreateTestPage(pdPage, { appId: c.appId, pageId, pageName, pluginDisplayName: displayName, regionName, sourceSql, attributes });
+      // T-149: benötigte Page-Items (Mehrzahl) + „Items to Submit" durchreichen; rückwärtskompatibel zu
+      // altem Einzel-pageItem (→ als einelementige Liste behandeln).
+      const pageItems = m.testPage?.pageItems || (m.testPage?.pageItem ? [m.testPage.pageItem] : []);
+      const itemsToSubmit = m.testPage?.itemsToSubmit || pageItems.filter((i) => i?.ajaxItemsToSubmit).map((i) => i.name);
+      result.testPage = await d.uiCreateTestPage(pdPage, { appId: c.appId, pageId, pageName, pluginDisplayName: displayName, regionName, sourceSql, attributes, pageItems, itemsToSubmit });
     }
     await pdPage.close().catch(() => {});
 

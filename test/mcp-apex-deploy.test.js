@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { spawn } from 'node:child_process';
 import path from 'node:path';
-import { buildInstallScript, buildTestPageSql, parsePluginName, maskConn, pluginLoadFiles, analyzePlugin, buildSetupManifest } from '../mcp-apex-deploy/lib/apex.js';
+import { buildInstallScript, buildTestPageSql, parsePluginName, maskConn, pluginLoadFiles, analyzePlugin, buildSetupManifest, detectPageItems } from '../mcp-apex-deploy/lib/apex.js';
 import * as apexUi from '../mcp-apex-deploy/lib/apex-ui.js';
 
 describe('F-31 T-128 apex-deploy: Install-Skript & Sicherheit', () => {
@@ -183,6 +183,45 @@ describe('F-31 T-129 apex-deploy: generische Testseite (APEX 24.x-Format)', () =
     expect(man.testPage.source).toMatchObject({ type: 'SQL Query', sql: 'select 1 v from dual' }); // Fallback = Beispielquery
     expect(man.attributes[0]).toMatchObject({ key: 'attribute_01', prompt: 'ConfigJSON', default: '{"a":1}' });
     expect(Array.isArray(man.fileUrls.js)).toBe(true);
+  });
+
+  it('T-149: MEHRERE Page-Items generisch erkennen (Items-to-Submit-Liste + :P<n>_-Binds, interne Binds ignoriert)', () => {
+    const exp = [
+      `wwv_flow_api.create_plugin(`,
+      ` p_name=>'MULTI.1'`,
+      `,p_display_name=>'Multi'`,
+      `,p_api_version=>1`,
+      `,p_standard_attributes=>'SOURCE_SQL:AJAX_ITEMS_TO_SUBMIT'`,
+      `);`,
+      `wwv_flow_api.create_plugin_attribute(`,
+      ` p_attribute_sequence=>1`,
+      `,p_prompt=>'Items to Submit'`,
+      `,p_default_value=>'P1_A,P1_B:P1_C'`,
+      `);`,
+      `wwv_flow_api.create_plugin_attribute(`,
+      ` p_attribute_sequence=>2`,
+      `,p_prompt=>'PLSQL Block'`,
+      `,p_default_value=>'v := NVL(:P1_COL_NAME, x); y := :PK; z := :ITEM_ID;'`,
+      `);`,
+      `wwv_flow_api.create_plugin_std_attribute(`,
+      ` p_name=>'SOURCE_SQL'`,
+      `,p_default_value=>'select :P1_X from dual'`,
+      `);`,
+    ].join('\n');
+    const man = buildSetupManifest(exp, { pageId: 20000 });
+    const names = man.testPage.pageItems.map((i) => i.name).sort();
+    // A/B/C aus der Liste, COL_NAME + X aus Binds; alle auf die Testseite gemappt; PK/ITEM_ID NICHT dabei
+    expect(names).toEqual(['P20000_A', 'P20000_B', 'P20000_C', 'P20000_COL_NAME', 'P20000_X']);
+    expect(man.testPage.itemsToSubmit.sort()).toEqual(['P20000_A', 'P20000_B', 'P20000_C']); // nur die submit-Items
+    expect(man.testPage.pageItem.name).toBe(man.testPage.pageItems[0].name); // rückwärtskompatibel = erstes
+    expect(man.testPage.pageItems.every((i) => i.type === 'Hidden')).toBe(true);
+  });
+
+  it('T-149: detectPageItems direkt — ohne AJAX-Attr & ohne Binds → leer (kein synthetisches Item)', () => {
+    expect(detectPageItems({ customAttributes: [], usesAjaxItemsToSubmit: false }, 20000)).toEqual([]);
+    // nur AJAX_ITEMS_TO_SUBMIT deklariert, sonst nichts → EIN synthetisches Submit-Item (Rückwärtskompat.)
+    const only = detectPageItems({ customAttributes: [], usesAjaxItemsToSubmit: true }, 20000);
+    expect(only).toEqual([{ name: 'P20000_AJAX', type: 'Hidden', ajaxItemsToSubmit: true }]);
   });
 
   it('analyzePlugin: api_version 2 → NATIVE_PLUGIN_; ohne AJAX_ITEMS_TO_SUBMIT → false', () => {

@@ -157,6 +157,40 @@ export function analyzePlugin(sqlText) {
  * @param {string} sqlText  Plugin-Export-SQL
  * @param {{pageId?:number, sourceSql?:string}} [opts]
  */
+/** APEX-Item-Liste („P1_A, P1_B:P1_C") in Namen zerlegen — Trenner Komma/Doppelpunkt/Whitespace. */
+function splitItemList(v) {
+  return String(v || '').split(/[,:\s]+/).map((s) => s.trim()).filter(Boolean);
+}
+
+/**
+ * T-149 — die Page-Items, die eine Testseite für DIESES Plugin braucht, generisch ableiten (dedupliziert,
+ * auf die Testseiten-ID gemappt). Quellen:
+ *   (a) Custom-Attribut „Items to Submit"/„Items2Submit" → dessen Wert ist eine Item-LISTE (Mehrzahl!),
+ *   (b) :P<n>_NAME-Binds in der Region-Beispiel-SQL UND in den PL/SQL-Attribut-Defaults (async/save/download),
+ *   Fallback: synthetisches P<id>_AJAX, wenn das Plugin AJAX_ITEMS_TO_SUBMIT deklariert, aber nichts erkannt wurde.
+ * Interne Binds OHNE P<n>_-Muster (:PK/:ITEM_ID/:CLOB/:RESULT…) sind KEINE Page-Items (setzt das Plugin-JS) → ignoriert.
+ * `submit`=true kennzeichnet Items, die in die Region-Eigenschaft „Items to Submit" gehören.
+ * @returns {Array<{name:string, type:'Hidden', ajaxItemsToSubmit:boolean}>}
+ */
+export function detectPageItems(a, pageId) {
+  const items = new Map(); // gemappter NAME → {name, submit}
+  const add = (raw, submit) => {
+    const n = String(raw || '').trim().toUpperCase();
+    if (!/^P\d+_[A-Z0-9_]+$/.test(n)) return; // nur echte Page-Item-Namen (P<seite>_NAME)
+    const mapped = n.replace(/^P\d+_/, `P${pageId}_`); // Beispiel-Seite (P1_…) → Testseite (P<id>_…)
+    const cur = items.get(mapped) || { name: mapped, submit: false };
+    cur.submit = cur.submit || !!submit;
+    items.set(mapped, cur);
+  };
+  for (const at of a.customAttributes || []) {
+    if (/items?\s*2?\s*(to\s*)?submit/i.test(at.prompt || '')) for (const n of splitItemList(at.default)) add(n, true);
+  }
+  const haystack = [a.defaultSourceSql || '', ...(a.customAttributes || []).map((x) => x.default || '')].join('\n');
+  for (const m of haystack.matchAll(/:(P\d+_[A-Z0-9_]+)/gi)) add(m[1], false);
+  if (a.usesAjaxItemsToSubmit && ![...items.values()].some((i) => i.submit)) add(`P${pageId}_AJAX`, true);
+  return [...items.values()].map((i) => ({ name: i.name, type: 'Hidden', ajaxItemsToSubmit: i.submit }));
+}
+
 export function buildSetupManifest(sqlText, opts = {}) {
   const a = analyzePlugin(sqlText);
   const { jsUrls, cssUrls } = pluginLoadFiles(sqlText);
@@ -165,7 +199,7 @@ export function buildSetupManifest(sqlText, opts = {}) {
   // („Identifier … has already been declared"). Evidenz-basiert aus dem Export erkannt, generisch.
   const selfLoadsFiles = /\bAPEX_JAVASCRIPT\s*\.\s*ADD_LIBRARY\b|\bAPEX_CSS\s*\.\s*ADD(_FILE|_3RD_PARTY_LIBRARY_FILE)?\b/i.test(String(sqlText || ''));
   const pageId = Number(opts.pageId ?? 20000); // Default-Basis 20000 (nie reservierte App-Seiten)
-  const ajaxItem = a.usesAjaxItemsToSubmit ? `P${pageId}_AJAX` : null;
+  const pageItems = detectPageItems(a, pageId); // T-149: ALLE benötigten Page-Items (Mehrzahl), nicht ein synthetisches
   const clean = (v) => (v != null ? String(v).replace(/[\x00-\x1f]+/g, ' ').trim() : null);
   return {
     manifestVersion: 1,
@@ -198,8 +232,11 @@ export function buildSetupManifest(sqlText, opts = {}) {
         source: { type: 'SQL Query', sql: opts.sourceSql || "select level as id, 'Card '||level as title, 'Backside '||level as subtitle from dual connect by level<=4" },
         columnMap: { Title: '&TITLE.', Subtitle: '&SUBTITLE.' },
       } : null,
-      // Page-Item, das die Region über „Items to Submit" referenziert (Pflicht bei AJAX_ITEMS_TO_SUBMIT).
-      pageItem: ajaxItem ? { name: ajaxItem, type: 'Hidden', ajaxItemsToSubmit: true } : null,
+      // T-149: ALLE benötigten Page-Items (Hidden) + „Items to Submit"-Liste der Region. pageItem (Einzel)
+      // bleibt rückwärtskompatibel = das erste Item; itemsToSubmit = die als submit markierten Namen.
+      pageItems,
+      pageItem: pageItems[0] || null,
+      itemsToSubmit: pageItems.filter((i) => i.ajaxItemsToSubmit).map((i) => i.name),
       // Datenquelle: eigene SQL des Aufrufers, sonst die plugin-eigene Beispielquery UNVERÄNDERT.
       // (Bewusst KEIN Heraus-Filtern von ASYNC-Blöcken: die Beispiel-SQL des Autors ist als Ganzes
       // lauffähig; ein chirurgischer Umbau brach live den getData-PL/SQL-Abruf. Async-Items ohne
