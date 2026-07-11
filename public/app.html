@@ -521,7 +521,7 @@ function renderTable(){
       <td>${typeBadge}</td>
       <td><span class="badge ${badgeCls}">${esc(c.formatBadge)}</span></td>
       <td><span class="dot ${dot}"></span>${esc(statusLabel(c.status))}</td>
-      <td class="small muted">${(c.libs||[]).slice(0,4).map(l=>`<span class="badge" style="${l.status==='verwundbar'?'color:var(--red);border-color:#f8514966':(l.status==='nicht gepflegt'||l.status==='veraltet')?'color:var(--yellow);border-color:#d2992266':l.status==='unbekannt'?'color:var(--muted)':''}" title="${esc((libStatusLabel(l.status)||l.status||'')+(l.action&&l.action!=='ok'?' → '+l.action+(l.actionPath?' ('+l.actionPath+')':''):'')+(l.security&&l.security.scanned?' · 🛡 '+l.security.reason:''))}">${esc(l.name)}@${esc(l.version)}</span>${l.status==='veraltet'?secMark(l):''}`).join(' ')||'—'}${(c.libs||[]).length>4?` <span class="muted">+${c.libs.length-4}</span>`:''}</td>
+      <td class="small muted">${(c.libs||[]).slice(0,4).map(l=>`<span class="badge" style="${l.status==='verwundbar'?'color:var(--red);border-color:#f8514966':(l.status==='nicht gepflegt'||l.status==='veraltet')?'color:var(--yellow);border-color:#d2992266':l.status==='unbekannt'?'color:var(--muted)':''}" title="${esc((libStatusLabel(l.status)||l.status||'')+(l.action&&l.action!=='ok'?' → '+l.action+(l.actionPath?' ('+l.actionPath+')':''):'')+(l.security&&l.security.scanned?' · 🛡 '+l.security.reason:''))}">${esc(l.name)}@${esc(l.version)}</span>${l.status==='veraltet'?secMark(l):''}`).join(' ')||'—'}${(c.libs||[]).length>4?` <span class="muted">+${c.libs.length-4}</span>`:''}${sbomBar(c.libs,{compact:true,status:c.status})}</td>
       <td class="small muted">${fmtDate(c.lastChange&&c.lastChange.at)}</td>
       <td class="small">${esc(c.changeSummary)}</td>
       <td style="text-align:right;color:var(--muted);font-size:18px;width:24px" title="Open details">›</td>`;
@@ -814,20 +814,42 @@ function licenseChangeBadge(l){
   const col = ch.riskier ? '#f85149' : '#d29922';
   return ` <span class="badge" title="License change ${esc(ch.from)} (${esc(ch.fromClass)}) → ${esc(ch.to)} (${esc(ch.toClass)})${ch.riskier?' — riskier, legally review!':''}" style="color:${col};border-color:${col}66">⚖⇄ ${esc(ch.from)}→${esc(ch.to)}${ch.riskier?' ⛔':''}</span>`;
 }
-// SBOM-Visualisierung: Zähler + gestapelter Balken nach Status
-function sbomViz(libs){
-  libs = libs||[];
-  if(!libs.length) return '';
-  // Jede Lib in genau EINE Kategorie (konsistent zum Backend-libStatus). Unbekannte Version ist NICHT „current".
+// Jede Lib in genau EINE Kategorie zählen (konsistent zum Backend-libStatus). Unbekannte Version ist NICHT „current".
+function libCounts(libs){
   const cat = l => l.status==='verwundbar' ? 'vuln'
     : l.status==='nicht gepflegt' ? 'unmaint'
     : (l.outdated||l.status==='veraltet') ? 'outdated'
     : (!l.version||l.version==='unbekannt'||l.status==='unbekannt') ? 'unknown'
     : 'current';
   const n={vuln:0,unmaint:0,outdated:0,unknown:0,current:0};
-  for(const l of libs) n[cat(l)]++;
+  for(const l of libs||[]) n[cat(l)]++;
+  return n;
+}
+// T-154: gestapelter Health-Balken (wiederverwendbar: Drawer-SBOM UND Übersichts-Zeile). status koppelt
+// den Maintenance-Stand als farbige Endkappe an den Balken. Ohne Libs → leer.
+function sbomBar(libs, opts){
+  opts = opts||{}; libs = libs||[];
+  if(!libs.length) return '';
+  const n = libCounts(libs);
   const seg=(c,col,lbl)=> c?`<div title="${lbl}: ${c}" style="flex:${c};background:${col}"></div>`:'';
-  const bar=`<div style="display:flex;height:8px;gap:2px;border-radius:6px;overflow:hidden;background:var(--line);margin:6px 0">${seg(n.current,'#3fb950','current')}${seg(n.outdated,'#d29922','outdated')}${seg(n.unmaint,'#ff8a3d','unmaintained')}${seg(n.unknown,'#6e7681','unknown')}${seg(n.vuln,'#f85149','vulnerable')}</div>`;
+  const cap = opts.status ? `<div title="maintenance: ${esc(opts.status)}" style="flex:0 0 5px;background:${statusColor(opts.status)}"></div>` : '';
+  const h = opts.h || 8;
+  return `<div title="${n.current} current · ${n.outdated} outdated · ${n.unmaint} unmaintained · ${n.unknown} unknown · ${n.vuln} vulnerable" style="display:flex;height:${h}px;gap:2px;border-radius:6px;overflow:hidden;background:var(--line);margin:${opts.compact?'3px 0 0':'6px 0'}">${seg(n.current,'#3fb950','current')}${seg(n.outdated,'#d29922','outdated')}${seg(n.unmaint,'#ff8a3d','unmaintained')}${seg(n.unknown,'#6e7681','unknown')}${seg(n.vuln,'#f85149','vulnerable')}${cap}</div>`;
+}
+// Farbe für den Maintenance-Stand (Endkappe/Marker).
+function statusColor(status){
+  const s=String(status||'').toLowerCase();
+  if(/verwundbar|review-blockiert/.test(s)) return '#f85149';
+  if(/handlungsbedarf|zu klären|action/.test(s)) return '#d29922';
+  if(/ok|aktuell|up to date/.test(s)) return '#3fb950';
+  return '#6e7681';
+}
+// SBOM-Visualisierung: Zähler + gestapelter Balken nach Status (nutzt sbomBar)
+function sbomViz(libs){
+  libs = libs||[];
+  if(!libs.length) return '';
+  const n = libCounts(libs);
+  const bar = sbomBar(libs);
   const chip=(c,col,lbl)=> c?`<span class="badge" style="color:${col};border-color:${col}66">${lbl}: ${c}</span>`:'';
   const summary = (n.current===libs.length)
     ? `<span class="badge" style="color:#3fb950;border-color:#3fb95066">✓ all ${libs.length} current</span>`
