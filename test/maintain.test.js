@@ -117,3 +117,61 @@ describe('T-66 Vollautomatische Pflege = manuelle Pflege', () => {
     expect(runs[0].repo).toBe('P');
   });
 });
+
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+
+describe('T-153 Vorher/Nachher-Gate im regulären Pflegelauf', () => {
+  const mkStore = () => { const s = createComponentStore({ now: () => 't', idGen: () => 'c1' }); s.add({ name: 'P', path: '/repo', repo: 'P', uiTestUrl: 'http://x/mock' }); return s; };
+  // Basis-Deps mit angewandtem Lib-Update (backups nicht leer) + Gate aktiv.
+  const gateDeps = (over = {}, calls = {}) => ({
+    exists: () => true, scan: scanStub, fetchInfo: fetchInfoStub, now: () => 't',
+    update: async () => ({ summary: 'x' }),
+    autoFix: async () => ({ quickFixes: 0, aiResult: null }),
+    applyVendoredUpdates: async () => ({ results: [{ name: 'jquery', from: '3.4.1', to: '3.7.1', applied: true }], backups: over.backups ?? new Map() }),
+    worksAsBefore: true,
+    captureBaseline: async (s, c) => { calls.captured = true; s.update(c.id, { baseline: { scenarios: [{ scenario: 'a', status: 'passed' }], mode: 'ui' } }); },
+    rebuildMock: async () => { calls.rebuilt = (calls.rebuilt || 0) + 1; },
+    runDetailed: async () => ({ ran: true, scenarios: over.afterScenarios ?? [{ scenario: 'a', status: 'passed' }] }),
+    compareToBaseline: (_c, cur) => ({ pass: cur.every((s) => s.status === 'passed'), regressions: cur.filter((s) => s.status !== 'passed'), summary: 'x' }),
+    ...over.deps,
+  });
+
+  it('friert die Baseline VOR der ersten Änderung ein (wenn keine da ist)', async () => {
+    const store = mkStore(); const calls = {};
+    const r = await maintainComponent(store, store.get('c1'), gateDeps({}, calls));
+    expect(calls.captured).toBe(true);
+    expect(r.steps.find((s) => s.step === 'baseline')?.captured).toBe(true);
+    // baseline-Schritt kommt VOR lib-update
+    const iB = r.steps.findIndex((s) => s.step === 'baseline'); const iU = r.steps.findIndex((s) => s.step === 'lib-update');
+    expect(iB).toBeLessThan(iU);
+  });
+
+  it('wie zuvor → Änderung bleibt (kein Rollback)', async () => {
+    const store = mkStore();
+    const r = await maintainComponent(store, store.get('c1'), gateDeps({ afterScenarios: [{ scenario: 'a', status: 'passed' }] }));
+    expect(r.worksAsBefore.pass).toBe(true);
+    expect(r.worksAsBefore.rolledBack).toBeFalsy();
+  });
+
+  it('Regression → Rollback der Lib-Änderungen', async () => {
+    const tmp = path.join(os.tmpdir(), 'aisp-wab-' + Date.now() + '.txt'); fs.writeFileSync(tmp, 'NEW');
+    const backups = new Map([[tmp, 'OLD']]); const calls = {};
+    const store = mkStore();
+    const r = await maintainComponent(store, store.get('c1'), gateDeps({ backups, afterScenarios: [{ scenario: 'a', status: 'failed' }] }, calls));
+    expect(r.worksAsBefore.pass).toBe(false);
+    expect(r.worksAsBefore.rolledBack).toBe(true);
+    expect(fs.readFileSync(tmp, 'utf8')).toBe('OLD'); // Rollback hat die Datei zurückgesetzt
+    expect(calls.rebuilt).toBe(2); // Mock nachher + nach Rollback erneut
+    fs.rmSync(tmp, { force: true });
+  });
+
+  it('Gate aus → kein Baseline/kein Vergleich', async () => {
+    const store = mkStore(); const calls = {};
+    const d = gateDeps({}, calls); d.worksAsBefore = false;
+    const r = await maintainComponent(store, store.get('c1'), d);
+    expect(calls.captured).toBeFalsy();
+    expect(r.worksAsBefore).toBeNull();
+  });
+});

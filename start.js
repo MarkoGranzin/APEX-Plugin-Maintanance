@@ -39,8 +39,8 @@ import { checkLibrariesOnline, libWarningFrom } from './src/service/lib-check.js
 import { buildSbom } from './src/sbom/sbom.js';
 import { autoFixComponent } from './src/service/autofix.js';
 import { maintainComponent } from './src/service/maintain.js';
-import { runUiTests } from './src/test/run-ui.js';
-import { captureBaseline } from './src/service/baseline.js';
+import { runUiTests, runUiTestsDetailed } from './src/test/run-ui.js';
+import { captureBaseline, compareToBaseline } from './src/service/baseline.js';
 import { redevelopComponent } from './src/service/redev.js';
 import { generateAiMock, writeMock, refineMock, mockInputFingerprint, MOCK_SPEC_VERSION, runMockSelfTests, pluginInterface } from './src/test/mock.js';
 import { acceptanceFromSelfTest, writeAcceptance, readAcceptance, acceptanceFeatureFile, acceptanceToDevhub, compareAcceptance, normalizeInterface } from './src/service/acceptance.js';
@@ -396,6 +396,9 @@ function cmdServe(portArg) {
     const specsDir = path.join(DATA_DIR, 'ui-tests', slugify(component.name));
     await buildMockFor(store.get(id)); // Auto-Mock sicherstellen (Default-UI-Test-Ziel)
     const maintainOpts = { ai, updateDeps: { push: localGitPush(component.path), registry: prRegistry, recordRun: record }, logSink: writeLog, onTestPlan, onSbom, recordRun: record, verifyNative: verifyNativeFor(store.get(id)) };
+    // T-153: tiefes Vorher/Nachher-Gate im regulären Lauf — Baseline (vorher) einfrieren, nach Änderungen den
+    // Mock „nachher" bauen und die UI-Szenarien gegen die Baseline vergleichen; Regression → Rollback.
+    Object.assign(maintainOpts, { worksAsBefore: true, captureBaseline, compareToBaseline, runDetailed: runUiTestsDetailed, hasPlaywright, specsDir, rebuildMock: async () => { await buildMockFor(store.get(id)); } });
     if (opts.autoUpload) { maintainOpts.autoUpload = true; maintainOpts.upload = uploadFor(true); } // Job: bei grün auto-commit (Push nur bei allowPush)
     const r = await maintainComponent(store, store.get(id), maintainOpts);
     const breaking = (r.steps || []).filter((s) => s.step === 'migrate' && s.skipped);

@@ -21,6 +21,7 @@ import { checkLibrariesOnline } from './lib-check.js';
 import { autoFixComponent } from './autofix.js';
 import { applyVendoredUpdates, rollbackUpdates } from './lib-update.js';
 import { planReplacements } from './lib-replace.js';
+import { captureBaseline as defaultCaptureBaseline, compareToBaseline as defaultCompareToBaseline } from './baseline.js';
 
 export async function maintainComponent(store, comp, deps = {}) {
   const now = deps.now ?? (() => new Date().toISOString());
@@ -46,6 +47,21 @@ export async function maintainComponent(store, comp, deps = {}) {
     steps.push({ step: 'lib-check', count: enriched.length, outdated: enriched.filter((l) => l.outdated || l.vulnerable).length });
   } catch (e) {
     steps.push({ step: 'lib-check', error: String(e?.message ?? e) });
+  }
+
+  // T-153: VORHER/NACHHER-Gate. „Vorher" = eingefrorene Baseline. Fehlt eine brauchbare Baseline, wird sie
+  // JETZT — VOR jeder Änderung — gegen den unveränderten Stand aufgenommen. Nur wenn das Gate aktiv ist
+  // (deps.worksAsBefore) und ein UI-Test-Ziel existiert; alles injizierbar → deterministisch testbar.
+  const gate = !!deps.worksAsBefore;
+  const captureBaselineFn = deps.captureBaseline ?? defaultCaptureBaseline;
+  const compareFn = deps.compareToBaseline ?? defaultCompareToBaseline;
+  if (gate) {
+    const b = cur().baseline;
+    const usable = b && (b.scenarios ?? []).some((s) => s.status === 'passed');
+    if (!usable && (deps.uiTestUrl || cur().uiTestUrl)) {
+      try { await captureBaselineFn(store, cur(), { pluginUrl: deps.uiTestUrl || cur().uiTestUrl, specsDir: deps.specsDir, hasPlaywright: deps.hasPlaywright, exec: deps.exec, runDetailed: deps.runDetailed, captureShot: deps.captureShot, now }); steps.push({ step: 'baseline', captured: true }); }
+      catch (e) { steps.push({ step: 'baseline', error: String(e?.message ?? e) }); }
+    }
   }
 
   // 2b) Die SOFTWARE spielt sichere Vendored-Lib-Updates (Minor/Patch) wirklich ein; Breaking nur markieren.
@@ -80,6 +96,30 @@ export async function maintainComponent(store, comp, deps = {}) {
     rollbackUpdates(libBackups);
     r2 = runComponentOnce(store, cur(), runOpts);
     steps.push({ step: 'lib-update', rolledBack: true, reason: 'regression on re-test after update — rolled back' });
+  }
+
+  // 4d) T-153 TIEFES Vorher/Nachher-Gate: nach ANGEWANDTEN Änderungen den Mock „nachher" aktualisieren und die
+  // aktuellen UI-Szenarien gegen die eingefrorene Baseline vergleichen (works-as-before). Regression (nicht wie
+  // zuvor) → Rollback der Lib-Änderungen (inkl. .sql-Re-Embed) + Mock zurückbauen. Nur bei aktivem Gate.
+  let wab = null;
+  const changed = appliedLibs || (fixResult && (fixResult.quickFixes || fixResult.aiResult));
+  if (gate && deps.runDetailed && changed) {
+    try {
+      if (deps.rebuildMock) await deps.rebuildMock(cur()); // „Nachher"-Mock
+      const url = deps.uiTestUrl || cur().uiTestUrl;
+      const rr = await deps.runDetailed(cur(), { pluginUrl: url, specsDir: deps.specsDir, hasPlaywright: deps.hasPlaywright, exec: deps.exec });
+      const cmp = compareFn(cur(), rr.ran ? (rr.scenarios ?? []) : []);
+      const regression = rr.ran && !cmp.pass && !cmp.noBaseline && !cmp.noGreenBaseline;
+      if (regression && libBackups && libBackups.size) {
+        rollbackUpdates(libBackups);
+        if (deps.rebuildMock) await deps.rebuildMock(cur());
+        r2 = runComponentOnce(store, cur(), runOpts);
+        wab = { pass: false, rolledBack: true, regressions: cmp.regressions?.length ?? 0, summary: cmp.summary };
+      } else {
+        wab = { pass: !!cmp.pass, mode: cmp.mode, regressions: cmp.regressions?.length ?? 0, staleSpec: !!cmp.staleSpec, summary: cmp.summary };
+      }
+      steps.push({ step: 'works-as-before', ...wab });
+    } catch (e) { steps.push({ step: 'works-as-before', error: String(e?.message ?? e) }); }
   }
 
   // 4b) BREAKING-Updates (Major) werden NICHT still in die Baseline getauscht — ein statischer Test
@@ -126,7 +166,7 @@ export async function maintainComponent(store, comp, deps = {}) {
       repo: comp.repo ?? null,
     });
   }
-  return { component: comp.name, skipped: false, before: r1.status, after: r2.status, status, steps, fix: fixResult };
+  return { component: comp.name, skipped: false, before: r1.status, after: r2.status, status, steps, fix: fixResult, worksAsBefore: wab };
 }
 
 /** Pflegt alle (oder je Repo gefilterten) Komponenten — dieselbe Orchestrierung wie manuell. */
