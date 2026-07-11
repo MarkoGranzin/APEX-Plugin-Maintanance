@@ -120,6 +120,14 @@
   body.busy-lock .lockable{opacity:.5;pointer-events:none;filter:saturate(.6)}
   #busyBanner{position:fixed;top:0;left:0;right:0;z-index:50;background:var(--accent);color:#04283b;text-align:center;padding:5px;font-size:.85rem;font-weight:600;display:none}
   body.busy-lock #busyBanner{display:block}
+  /* Library-Kacheln (Libraries-Tab) */
+  .libgrid{display:flex;flex-direction:column;gap:8px;margin:8px 0}
+  .libcard{background:var(--panel2);border:1px solid var(--line);border-radius:9px;padding:8px 11px}
+  .libcard.warn{background:#d299220d} .libcard.error{background:#f851490d}
+  .libcard-head{display:flex;align-items:center;gap:6px;flex-wrap:wrap}
+  .libcard-head>b{font-size:.92rem}
+  .libcard-meta{margin-top:4px;line-height:1.5}
+  .vpill{font-size:.72rem;padding:1px 7px;border:1px solid var(--line);border-radius:20px;color:var(--muted)}
   .toast{position:fixed;bottom:20px;left:50%;transform:translateX(-50%);background:var(--panel2);border:1px solid var(--line);padding:10px 16px;border-radius:10px;display:none;z-index:50}
   .overlay{position:fixed;inset:0;background:rgba(0,0,0,.5);display:flex;align-items:center;justify-content:center;z-index:60}
   .overlay[hidden]{display:none}
@@ -609,7 +617,7 @@ async function openDetail(id){
       ${sbomViz(c.libs)}
       <div class="inline" style="margin-bottom:6px"><button onclick="checkLibs()">🌐 Check online (version &amp; age)</button>${(c.libs&&c.libs.length)?'<button onclick="downloadSbom()">⬇ SBOM (CycloneDX)</button>':''}</div>
       ${(c.libs && c.libs.length)
-        ? `<div class="logbox">${c.libs.map(l=>libLine(l)).join('')}</div>`
+        ? `<div class="libgrid">${c.libs.map(l=>libLine(l)).join('')}</div>`
         : '<div class="muted small">Not detected yet — run “▶ Check” or add manually.</div>'}
       <div class="inline" style="margin-top:8px">
         <input id="libName" placeholder="Library (e.g. jquery)" style="max-width:180px">
@@ -784,7 +792,19 @@ function libLine(l){
     : '';
   // T-123: bei veralteten Libs das dedizierte Security-Verdikt zeigen (RISIKO vs. nur Code).
   const sec = (l.status==='veraltet' && l.security && l.security.scanned) ? secMark(l) : '';
-  return `<div class="logline ${cls}"><b>${esc(l.name)}@${esc(l.version)}</b>${manual} — ${esc(libStatusLabel(l.status))}${l.vuln?` (${esc(l.vuln)})`:''}${l.reason?` — ${esc(l.reason)}`:''}${web}${inst}${licenseBadge(l)}${sec}${src}${rep}</div>`;
+  // Karten-Akzent nach Status: verwundbar=rot, veraltet/unmaintained/unbekannt=gelb, aktuell=grün.
+  const accent = (l.status==='verwundbar')?'#f85149':(l.status==='nicht gepflegt'||l.status==='veraltet'||l.outdated||unknownVer)?'#d29922':'#3fb950';
+  const vColor = (l.outdated||l.status==='veraltet') ? '#d29922' : unknownVer ? '#6e7681' : '#3fb950';
+  const link2 = l.source||l.homepage||l.npm;
+  return `<div class="libcard ${cls}" style="border-left:3px solid ${accent}">
+    <div class="libcard-head">
+      <b>${esc(l.name)}</b><span class="vpill">${esc(l.version)}</span>
+      <span class="vpill" style="color:${vColor};border-color:${vColor}66">${verdict}</span>
+      ${licenseBadge(l).replace(/^ · /,'')}${licenseChangeBadge(l)}${manual}${sec}
+    </div>
+    <div class="libcard-meta small muted">${l.latest?`latest <b>${esc(l.latest)}</b>${l.ageDays!=null?` · released ${l.ageDays} d ago`:''}`:(l.webStatus==='unbekannt'?'web: unknown':'')}${l.installedAgeDays!=null?` · installed ${l.installedAgeDays} d old`:''}${l.vuln?` · <span style="color:#f85149">${esc(l.vuln)}</span>`:''}${l.reason?` · ${esc(l.reason)}`:''}${link2?` · <a href="${esc(link2)}" target="_blank" rel="noopener" style="color:var(--accent)">Source ↗</a>`:''}</div>
+    ${rep}
+  </div>`;
 }
 // Lizenz-Badge: pflichtenarm (grün) / Attribution (gelb) / copyleft|unklar (rot) — T-95
 function licenseBadge(l){
