@@ -129,6 +129,7 @@
   .libcard-head>b{font-size:.92rem}
   .libcard-meta{margin-top:4px;line-height:1.5}
   .vpill{font-size:.72rem;padding:1px 7px;border:1px solid var(--line);border-radius:20px;color:var(--muted)}
+  th.sorth{cursor:pointer;user-select:none} th.sorth:hover{color:var(--ink)}
   .toast{position:fixed;bottom:20px;left:50%;transform:translateX(-50%);background:var(--panel2);border:1px solid var(--line);padding:10px 16px;border-radius:10px;display:none;z-index:50}
   .overlay{position:fixed;inset:0;background:rgba(0,0,0,.5);display:flex;align-items:center;justify-content:center;z-index:60}
   .overlay[hidden]{display:none}
@@ -195,7 +196,12 @@
 
   <div id="libsView" style="display:none">
     <table>
-      <thead><tr><th>Library</th><th>Version</th><th>Status</th><th>Used by</th></tr></thead>
+      <thead><tr>
+        <th class="sorth" onclick="setLibSort('name')">Library <span id="lsName"></span></th>
+        <th class="sorth" onclick="setLibSort('version')">Version <span id="lsVersion"></span></th>
+        <th class="sorth" onclick="setLibSort('status')">Status <span id="lsStatus"></span></th>
+        <th class="sorth" onclick="setLibSort('used')">Used by <span id="lsUsed"></span></th>
+      </tr></thead>
       <tbody id="libRows"></tbody>
     </table>
     <div id="libsEmpty" class="empty" style="display:none">No libraries detected — assign repos and run “Check all”.</div>
@@ -1469,22 +1475,43 @@ function switchView(v){
   $('navLibs').className = plugins ? 'ghost' : 'primary';
   if(!plugins) loadLibraries();
 }
+// Sortierbare globale Bibliotheks-Tabelle. Default: Status-Kritikalität ↓, dann Library, Version, Used by.
+let LIBS=[], libSortKey='status', libSortDir='desc';
+function libCrit(s){ return ({'verwundbar':4,'nicht gepflegt':3,'veraltet':2,'unbekannt':1,'aktuell':0})[s] ?? 1; }
+function libPrimary(a,b,key){
+  if(key==='status') return libCrit(a.status)-libCrit(b.status);
+  if(key==='version') return String(a.version||'').localeCompare(String(b.version||''),undefined,{numeric:true});
+  if(key==='used') return (a.usedBy||[]).join(', ').localeCompare((b.usedBy||[]).join(', '));
+  return String(a.name||'').localeCompare(String(b.name||''));
+}
+function libCmp(a,b){
+  let d=libPrimary(a,b,libSortKey); if(libSortDir==='desc') d=-d;
+  if(d!==0) return d;
+  // feste Tie-Break-Reihenfolge (Nutzer): Kritikalität ↓ → Library → Version → Used by
+  return (libCrit(b.status)-libCrit(a.status))
+    || String(a.name||'').localeCompare(String(b.name||''))
+    || String(a.version||'').localeCompare(String(b.version||''),undefined,{numeric:true})
+    || (a.usedBy||[]).join(', ').localeCompare((b.usedBy||[]).join(', '));
+}
+function setLibSort(key){ if(libSortKey===key){ libSortDir=libSortDir==='asc'?'desc':'asc'; } else { libSortKey=key; libSortDir = key==='status'?'desc':'asc'; } renderLibsTable(); }
+function renderLibsTable(){
+  const rows=$('libRows'); if(!rows) return;
+  const arrow=libSortDir==='asc'?'▲':'▼';
+  for(const [k,id] of [['name','lsName'],['version','lsVersion'],['status','lsStatus'],['used','lsUsed']]){ const el=$(id); if(el) el.textContent = libSortKey===k?arrow:''; }
+  const cls = { 'verwundbar':'err', 'nicht gepflegt':'warn', 'veraltet':'warn', 'unbekannt':'warn', 'aktuell':'ok' };
+  const sorted=[...LIBS].sort(libCmp);
+  rows.innerHTML = sorted.map(l=>`<tr><td><b>${esc(l.name)}</b></td><td class="small">${esc(l.version)}</td>`
+    + `<td><span class="dot ${cls[l.status]||''}"></span>${esc(libStatusLabel(l.status))}`
+    + `${l.vuln?` <span class="muted small">(${esc(l.vuln)})</span>`:''}${l.reason?` <span class="muted small">— ${esc(l.reason)}</span>`:''}`
+    + `${l.outdated&&l.latest?` <span class="muted small">→ ${esc(l.latest)}</span>`:''}</td>`
+    + `<td class="small muted">${(l.usedBy||[]).map(esc).join(', ')}</td></tr>`).join('');
+}
 async function loadLibraries(){
   try{
     const r = await api('GET','/api/libraries');
-    const libs = r.libraries || [];
-    const rows = $('libRows'); rows.innerHTML='';
-    $('libsEmpty').style.display = libs.length ? 'none' : 'block';
-    const cls = { 'verwundbar':'err', 'nicht gepflegt':'warn', 'veraltet':'warn', 'unbekannt':'warn', 'aktuell':'ok' };
-    for(const l of libs){
-      const tr = document.createElement('tr');
-      tr.innerHTML = `<td><b>${esc(l.name)}</b></td><td class="small">${esc(l.version)}</td>`
-        + `<td><span class="dot ${cls[l.status]||''}"></span>${esc(libStatusLabel(l.status))}`
-        + `${l.vuln?` <span class="muted small">(${esc(l.vuln)})</span>`:''}${l.reason?` <span class="muted small">— ${esc(l.reason)}</span>`:''}`
-        + `${l.outdated&&l.latest?` <span class="muted small">→ ${esc(l.latest)}</span>`:''}</td>`
-        + `<td class="small muted">${(l.usedBy||[]).map(esc).join(', ')}</td>`;
-      rows.appendChild(tr);
-    }
+    LIBS = r.libraries || [];
+    $('libsEmpty').style.display = LIBS.length ? 'none' : 'block';
+    renderLibsTable();
     load(); // libWarning evtl. aktualisiert → Plugin-Übersicht neu zeichnen
   }catch(e){ toast('Error: '+e.message); }
 }
