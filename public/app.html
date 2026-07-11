@@ -115,7 +115,8 @@
   /* Icon-Leiste im Drawer: immer sichtbar, umbrechend */
   .actbar{display:flex;flex-wrap:wrap;gap:6px;margin-top:10px}
   .actchip{display:inline-flex;align-items:center;gap:6px;background:var(--panel2);border:1px solid var(--line);color:var(--ink);padding:6px 10px;border-radius:8px;font-size:.85rem;white-space:nowrap}
-  .actchip:hover{border-color:var(--accent)} .actchip.primary{background:var(--accent);color:#04283b;border-color:var(--accent);font-weight:600} .actchip.danger{color:var(--red);border-color:#f8514966}
+  .actchip:hover{border-color:var(--accent)} .actchip.primary{background:var(--accent);color:#04283b;border-color:var(--accent);font-weight:600} .actchip.danger{color:var(--red);border-color:#f8514966} .actchip.danger:hover{border-color:var(--red);background:#f851491a}
+  .actchip.icononly{width:34px;height:34px;padding:0;justify-content:center;font-size:1.05rem}
   /* globale Eingabe-Sperre während einer Aktion (Maintenance/Check/…) */
   body.busy-lock .lockable{opacity:.5;pointer-events:none;filter:saturate(.6)}
   #busyBanner{position:fixed;top:0;left:0;right:0;z-index:50;background:var(--accent);color:#04283b;text-align:center;padding:5px;font-size:.85rem;font-weight:600;display:none}
@@ -723,7 +724,7 @@ async function loadTestHistory(){
   try{
     const list = await api('GET',`/api/components/${current.id}/logs`);
     $('testHistory').innerHTML = (list&&list.length)
-      ? list.slice(0,10).map(l=>`<div class="note inline" style="justify-content:space-between"><span class="meta">${fmtDate(l.at)}</span><button onclick="openLog('${esc(l.name)}','runLogView')">Open run</button></div>`).join('')
+      ? list.slice(0,10).map(l=>`<div class="runrow"><div class="note inline" style="justify-content:space-between"><span class="meta">${fmtDate(l.at)}</span><button class="ghost small" data-lbl="Open run" onclick="toggleRun(this,'${esc(l.name)}')">Open run</button></div></div>`).join('')
       : '<div class="muted small">No previous runs yet.</div>';
   }catch{ $('testHistory').innerHTML='<div class="muted small">History unavailable.</div>'; }
 }
@@ -850,10 +851,11 @@ const PLUGIN_ACTIONS = [
     { icon:'🗑', label:'Delete everywhere…', title:'Delete the plugin everywhere: tool registry, APEX test page + plug-in, and data on disk. Asks for the exact name.', on:'purgeComponent()' },
   ]},
 ];
-// Icon-LEISTE (immer sichtbar, im Drawer): alle Aktionen als kompakte, umbrechende Icon+Label-Buttons.
+// Icon-LEISTE (immer sichtbar, im Drawer): nur Icons + Beschreibung als Tooltip; NUR die Primäraktion
+// (Full maintenance) trägt ihr Label. Danger-Aktionen rot. Kompakt, umbrechend.
 function renderActionBar(c){
   return `<div class="actbar">`+PLUGIN_ACTIONS.flatMap(g=>g.items.filter(a=>!a.when||a.when(c)).map(a=>
-    `<button class="actchip${a.primary?' primary':''}${g.danger?' danger':''}" title="${esc(a.title)}" onclick="closeRowMenu();${a.on}">${a.icon} <span>${esc(a.label)}</span></button>`
+    `<button class="actchip${a.primary?' primary':' icononly'}${g.danger?' danger':''}" title="${esc(a.label+' — '+a.title)}" aria-label="${esc(a.label)}" onclick="closeRowMenu();${a.on}">${a.icon}${a.primary?` <span>${esc(a.label)}</span>`:''}</button>`
   )).join('')+`</div>`;
 }
 function renderActionList(c){
@@ -1131,18 +1133,21 @@ async function loadLogArchive(){
   try{
     const list = await api('GET',`/api/components/${current.id}/logs`);
     $('logArchive').innerHTML = (list&&list.length)
-      ? list.map(l=>`<div class="note inline" style="justify-content:space-between"><span class="meta">${fmtDate(l.at)}</span><button onclick="openLog('${esc(l.name)}')">open</button></div>`).join('')
+      ? list.map(l=>`<div class="runrow"><div class="note inline" style="justify-content:space-between"><span class="meta">${fmtDate(l.at)}</span><button class="ghost small" data-lbl="open" onclick="toggleRun(this,'${esc(l.name)}')">open</button></div></div>`).join('')
       : '<div class="muted small">No protocols stored yet.</div>';
   }catch{ $('logArchive').innerHTML='<div class="muted small">Archive unavailable.</div>'; }
 }
-async function openLog(name, targetId='logArchive'){
+// Ergebnis eines Laufs DIREKT unter dem geklickten Eintrag ein-/ausklappen (gute UX statt fixem Container).
+async function toggleRun(btn, name){
+  const row = btn.closest('.runrow'); if(!row) return;
+  const open = row.querySelector('.logopen');
+  if(open){ open.remove(); btn.textContent = btn.dataset.lbl || 'Open run'; return; }
+  btn.textContent = 'loading…';
   try{
     const r=await fetch(`/api/components/${current.id}/logs/${encodeURIComponent(name)}`); const t=await r.text();
-    const tgt=$(targetId); if(!tgt) return;
-    const ex=tgt.querySelector('.logopen'); if(ex) ex.remove(); // nur einen offenen Lauf zeigen
-    const block=`<div class="logopen"><div class="inline" style="justify-content:space-between;margin-top:8px"><h4 class="muted small" style="margin:0">📄 Run ${esc(name.replace('.log',''))}</h4><button class="ghost small" onclick="this.closest('.logopen').remove()">close</button></div><pre class="logbox" style="white-space:pre-wrap">${esc(t)}</pre></div>`;
-    tgt.insertAdjacentHTML('afterbegin', block);
-  }catch(e){ toast('Error: '+e.message); }
+    row.insertAdjacentHTML('beforeend', `<pre class="logbox logopen" style="white-space:pre-wrap;margin:6px 0 2px">${esc(t)||'(empty)'}</pre>`);
+    btn.textContent = 'close';
+  }catch(e){ toast('Error: '+e.message); btn.textContent = btn.dataset.lbl || 'Open run'; }
 }
 
 function openEdit(c){
