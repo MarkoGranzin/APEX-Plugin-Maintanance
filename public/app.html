@@ -806,7 +806,13 @@ function licenseBadge(l){
   const c = l.licenseInfo; if(!c) return '';
   const col = c.level==='clean' ? '#3fb950' : c.level==='attribution' ? '#d29922' : '#f85149';
   const icon = c.level==='clean' ? '⚖✓' : c.level==='attribution' ? '⚖' : '⚖⚠';
-  return ` · <span class="badge" title="${esc(c.reason)}" style="color:${col};border-color:${col}66">${icon} ${esc(c.id)}</span>`;
+  return ` · <span class="badge" title="${esc(c.reason)}" style="color:${col};border-color:${col}66">${icon} ${esc(c.id)}</span>${licenseChangeBadge(l)}`;
+}
+// T-156: Lizenzwechsel installiert→latest — riskant (Klasse schlechter) rot, sonst gelb. Rechtlich wichtig.
+function licenseChangeBadge(l){
+  const ch = l.licenseChange; if(!ch) return '';
+  const col = ch.riskier ? '#f85149' : '#d29922';
+  return ` <span class="badge" title="License change ${esc(ch.from)} (${esc(ch.fromClass)}) → ${esc(ch.to)} (${esc(ch.toClass)})${ch.riskier?' — riskier, legally review!':''}" style="color:${col};border-color:${col}66">⚖⇄ ${esc(ch.from)}→${esc(ch.to)}${ch.riskier?' ⛔':''}</span>`;
 }
 // SBOM-Visualisierung: Zähler + gestapelter Balken nach Status
 function sbomViz(libs){
@@ -1386,7 +1392,7 @@ async function loadLibraries(){
 }
 
 // Build-Marker: muss mit BUILD in start.js übereinstimmen. Erkennt einen veralteten Backend-Prozess.
-const APP_BUILD = '26.07.10';
+const APP_BUILD = '26.07.11';
 async function checkBackend(){
   const b = $('staleBanner');
   try{

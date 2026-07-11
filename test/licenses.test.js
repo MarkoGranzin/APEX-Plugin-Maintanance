@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
-import { classifyLicense, licenseWarningFrom } from '../src/sbom/licenses.js';
+import { classifyLicense, licenseWarningFrom, licenseChange } from '../src/sbom/licenses.js';
+import { licenseAtVersion } from '../src/sbom/registry.js';
 
 describe('F-23 T-95 Lizenz-Bewertung', () => {
   it('permissiv & pflichtenarm → ok', () => {
@@ -50,5 +51,33 @@ describe('F-23 T-95 Lizenz-Bewertung', () => {
     const libs = [{ license: 'MIT' }, { license: 'Apache-2.0' }, { license: 'GPL-3.0' }, { license: '' }];
     expect(licenseWarningFrom(libs)).toEqual({ copyleft: 1, unknown: 1, attribution: 1 });
     expect(licenseWarningFrom([{ license: 'MIT' }])).toBeNull();
+  });
+});
+
+describe('T-156 Lizenzwechsel installiert→neu', () => {
+  it('gleiche Lizenz → null', () => {
+    expect(licenseChange('MIT', 'MIT')).toBeNull();
+  });
+  it('MIT → GPL-3.0 → riskier (permissive → copyleft)', () => {
+    const c = licenseChange('MIT', 'GPL-3.0');
+    expect(c).toMatchObject({ from: 'MIT', to: 'GPL-3.0', riskier: true });
+    expect(c.toClass).toBe('copyleft');
+  });
+  it('MIT → Apache-2.0 → geändert + riskier (permissive → attribution)', () => {
+    const c = licenseChange('MIT', 'Apache-2.0');
+    expect(c.riskier).toBe(true); // Pflichten kommen dazu (Attribution)
+  });
+  it('GPL-3.0 → MIT → geändert, NICHT riskier (Klasse wird besser)', () => {
+    const c = licenseChange('GPL-3.0', 'MIT');
+    expect(c).toMatchObject({ from: 'GPL-3.0', to: 'MIT', riskier: false });
+  });
+  it('MIT → ISC → geändert (SPDX), nicht riskier (beide permissive)', () => {
+    const c = licenseChange('MIT', 'ISC');
+    expect(c).toMatchObject({ riskier: false });
+  });
+  it('licenseAtVersion liest die Lizenz einer konkreten Version', () => {
+    const doc = { 'dist-tags': { latest: '2.0.0' }, license: 'GPL-3.0', versions: { '1.0.0': { license: 'MIT' }, '2.0.0': { license: { type: 'GPL-3.0' } } } };
+    expect(licenseAtVersion(doc, '1.0.0')).toBe('MIT');
+    expect(licenseAtVersion(doc, '2.0.0')).toBe('GPL-3.0'); // Objektform → String
   });
 });

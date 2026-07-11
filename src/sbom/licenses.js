@@ -49,6 +49,23 @@ function mk(id, level, commercialOk, obligations) {
   return { id, level, commercialOk, obligations, ok, label, reason };
 }
 
+const LEVEL_ORDER = { clean: 0, attribution: 1, warn: 2 };
+
+/**
+ * T-156 — Lizenzwechsel zwischen zwei Versionen bewerten (installiert → neu/latest).
+ * @returns null wenn keine Änderung; sonst { from, to, fromClass, toClass, fromLevel, toLevel, riskier }.
+ *   riskier=true, wenn die Lizenzklasse SCHLECHTER wird (permissive → attribution/copyleft/unknown) —
+ *   rechtlich relevant. Reine SPDX-Umbenennung ohne Klassenverschlechterung ist changed, aber nicht riskier.
+ */
+export function licenseChange(fromLicense, toLicense) {
+  const a = classifyLicense(fromLicense);
+  const b = classifyLicense(toLicense);
+  const changed = norm(a.id) !== norm(b.id) || a.level !== b.level;
+  if (!changed) return null;
+  const riskier = (LEVEL_ORDER[b.level] ?? 2) > (LEVEL_ORDER[a.level] ?? 2);
+  return { from: a.id, to: b.id, fromClass: a.label, toClass: b.label, fromLevel: a.level, toLevel: b.level, riskier };
+}
+
 /** Zaehlt Lizenz-Auffaelligkeiten ueber eine Lib-Liste (fuer Report/Badge). null wenn alles sauber. */
 export function licenseWarningFrom(libs) {
   let copyleft = 0; let unknown = 0; let attribution = 0;

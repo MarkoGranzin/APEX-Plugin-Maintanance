@@ -14,7 +14,7 @@ import { listFiles } from '../inventory/inventory.js';
 import { isLibraryFile } from '../inventory/format.js';
 import { fetchNpmInfo, versionAtDate } from '../sbom/registry.js';
 import { resolveVersionWithAi } from './ai-version-resolve.js';
-import { classifyLicense } from '../sbom/licenses.js';
+import { classifyLicense, licenseChange } from '../sbom/licenses.js';
 
 const DAY = 86400000;
 
@@ -77,6 +77,10 @@ export async function checkLibrariesOnline(libs, deps = {}) {
       e.webStatus = e.outdated ? 'veraltet' : (knownVersion && info.latest) ? 'aktuell' : 'unbekannt';
       if (info.license != null) e.license = info.license; // Lizenz aus der Registry (T-95)
       e.licenseInfo = classifyLicense(e.license); // kommerziell ok? Pflichten?
+      // T-156: Lizenzwechsel installiert→latest erkennen (rechtlich wichtig). Nur bei bekannter installierter
+      // Version UND vorliegender Lizenz beider Versionen; riskier=true, wenn die Lizenzklasse schlechter wird.
+      const fromLic = knownVersion ? info.licenseByVersion?.[lib.version] : null;
+      if (fromLic && info.license) { const chg = licenseChange(fromLic, info.license); if (chg) e.licenseChange = chg; }
       e.status = libStatus(e); // Gesamtstatus konsistent halten
     } catch (err) {
       e.webStatus = 'unbekannt';

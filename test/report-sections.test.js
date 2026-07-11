@@ -41,5 +41,20 @@ describe('T-94/T-95 Report-Abschnitte', () => {
     const { body } = renderReport({ updated: [{ artifact: 'X', change: 'c', testResult: 'ok' }] });
     expect(body).not.toMatch(/Rebuilt/);
     expect(body).not.toMatch(/License attention/);
+    expect(body).not.toMatch(/License changes/);
+  });
+
+  it('T-156: Lizenzänderungen als eigener Abschnitt + im Subject (riskante zuerst markiert)', () => {
+    const { subject, body } = renderReport({
+      updated: [],
+      licenseChanges: [
+        { plugin: 'BI-Dashboard', name: 'nbillboard', from: 'MIT', to: 'GPL-3.0', fromClass: 'permissive', toClass: 'copyleft', riskier: true },
+        { plugin: 'BI-Dashboard', name: 'pell', from: 'MIT', to: 'ISC', fromClass: 'permissive', toClass: 'permissive', riskier: false },
+      ],
+    });
+    expect(body).toMatch(/⚖️ License changes \(2, 1 riskier/);
+    expect(body).toMatch(/nbillboard: MIT \(permissive\) → GPL-3\.0 \(copyleft\)\s+⛔ RISKIER/);
+    expect(body).toMatch(/pell: MIT \(permissive\) → ISC/);
+    expect(subject).toMatch(/2 license change\(s\)/);
   });
 });

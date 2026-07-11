@@ -121,5 +121,14 @@ export async function fetchNpmInfo(name, deps = {}) {
   // Lizenz: bevorzugt aus dem latest-Manifest, sonst Root (T-95)
   const lic = doc?.versions?.[latest]?.license ?? doc?.license ?? null;
   const license = lic && typeof lic === 'object' ? (lic.type || lic.name || null) : lic;
-  return { name: pkg, latest, releasedAt: latest ? time[latest] ?? null : null, time, links, license };
+  // T-156: Lizenz je Version (kompakt) — damit die INSTALLIERTE Version mit latest verglichen werden kann.
+  const licenseByVersion = {};
+  for (const [v, m] of Object.entries(doc?.versions ?? {})) { const s = licenseAtVersion(doc, v); if (s) licenseByVersion[v] = s; }
+  return { name: pkg, latest, releasedAt: latest ? time[latest] ?? null : null, time, links, license, licenseByVersion };
+}
+
+/** T-156 — Lizenz-String einer KONKRETEN Version aus einem npm-Doc (normalisiert auf String). */
+export function licenseAtVersion(doc, ver) {
+  const lv = doc?.versions?.[ver]?.license ?? (ver === (doc?.['dist-tags']?.latest) ? doc?.license : null) ?? null;
+  return lv && typeof lv === 'object' ? (lv.type || lv.name || null) : (lv ?? null);
 }
