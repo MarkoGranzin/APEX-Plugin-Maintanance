@@ -112,6 +112,14 @@
   .actrow:hover{background:var(--panel2)} .actrow.danger{color:var(--red)}
   .actmenu{position:fixed;z-index:40;background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:6px;box-shadow:0 10px 28px rgba(0,0,0,.45);min-width:236px;max-height:74vh;overflow:auto}
   .rowmenu{background:none;border:none;color:var(--muted);font-size:18px;line-height:1;padding:2px 6px;border-radius:6px} .rowmenu:hover{background:var(--panel2);color:var(--ink)}
+  /* Icon-Leiste im Drawer: immer sichtbar, umbrechend */
+  .actbar{display:flex;flex-wrap:wrap;gap:6px;margin-top:10px}
+  .actchip{display:inline-flex;align-items:center;gap:6px;background:var(--panel2);border:1px solid var(--line);color:var(--ink);padding:6px 10px;border-radius:8px;font-size:.85rem;white-space:nowrap}
+  .actchip:hover{border-color:var(--accent)} .actchip.primary{background:var(--accent);color:#04283b;border-color:var(--accent);font-weight:600} .actchip.danger{color:var(--red);border-color:#f8514966}
+  /* globale Eingabe-Sperre während einer Aktion (Maintenance/Check/…) */
+  body.busy-lock .lockable{opacity:.5;pointer-events:none;filter:saturate(.6)}
+  #busyBanner{position:fixed;top:0;left:0;right:0;z-index:50;background:var(--accent);color:#04283b;text-align:center;padding:5px;font-size:.85rem;font-weight:600;display:none}
+  body.busy-lock #busyBanner{display:block}
   .toast{position:fixed;bottom:20px;left:50%;transform:translateX(-50%);background:var(--panel2);border:1px solid var(--line);padding:10px 16px;border-radius:10px;display:none;z-index:50}
   .overlay{position:fixed;inset:0;background:rgba(0,0,0,.5);display:flex;align-items:center;justify-content:center;z-index:60}
   .overlay[hidden]{display:none}
@@ -133,7 +141,7 @@
   <span class="sp"></span>
   <a class="small" href="/readme.html" target="_blank">Docs ↗</a>
   <button class="ghost" onclick="openSettings()">⚙ Settings</button>
-  <button class="primary" onclick="openEdit()" title="Add a plugin — via Git URL/path, or the file import at the bottom of the dialog (for when you don't use Git).">+ Plugin</button>
+  <button class="primary lockable" onclick="openEdit()" title="Add a plugin — via Git URL/path, or the file import at the bottom of the dialog (for when you don't use Git).">+ Plugin</button>
 </header>
 
 <div id="staleBanner" style="display:none;margin:0;padding:10px 22px;background:#7a1d1d;color:#fff;font-size:.9rem"></div>
@@ -143,7 +151,7 @@
     <button id="navLibs" class="ghost" onclick="switchView('libs')">Libraries</button>
     <span class="muted small" id="wdLabel" style="margin-left:8px"></span>
     <span class="sp" style="flex:1"></span>
-    <button class="primary" onclick="runAll()">▶ Check all</button>
+    <button class="primary lockable" onclick="runAll()">▶ Check all</button>
   </div>
 
   <div id="pluginsView">
@@ -161,7 +169,7 @@
       <button class="chip" data-flt="ok" onclick="setFilterStatus('ok')">OK</button>
       <span class="muted small" id="fltCount" style="margin-left:6px"></span>
     </div>
-    <table id="tbl">
+    <table id="tbl" class="lockable">
       <thead><tr>
         <th class="srt" data-sort="name" onclick="setSort('name')">Name</th>
         <th>Repo</th><th>Type</th><th>Format</th>
@@ -187,7 +195,7 @@
 
 <!-- Detail-Drawer -->
 <div class="drawer-bg" id="drawerBg" onclick="closeDrawer()"></div>
-<div class="drawer" id="drawer">
+<div class="drawer lockable" id="drawer">
   <div class="dh">
     <h2 id="dName" style="display:flex;align-items:center"><span class="spin" id="dSpin" hidden></span><span id="dNameTxt">—</span></h2><span class="sp" style="flex:1"></span>
     <button class="ghost" onclick="closeDrawer()">✕</button>
@@ -332,6 +340,7 @@
 </div>
 
 <div class="toast" id="toast"></div>
+<div id="busyBanner">⏳ Aktion läuft — Eingaben gesperrt, bitte warten…</div>
 
 <!-- F-29: Clone-/Lauf-Overlay nach „Save" (Repo klonen + Mock bauen) -->
 <div class="overlay" id="busyOverlay" hidden>
@@ -432,7 +441,12 @@ function applySpin(id){
   document.querySelectorAll(`.runlbl[data-cid="${id}"]`).forEach(s=>{ s.hidden=!on; s.textContent = on ? ` · ${step||'running…'}` : ''; });
   const d=$('dSpin'); if(d && current && current.id===id) d.hidden=!on;
 }
-function setBusy(id, on){ if(on) BUSY.add(id); else BUSY.delete(id); applySpin(id); }
+function setBusy(id, on){ if(on) BUSY.add(id); else BUSY.delete(id); applySpin(id); syncBusyLock(); }
+// Globale Eingabe-Sperre: solange eine Aktion läuft (per-Komponente via BUSY ODER global via _extraBusy),
+// werden alle .lockable-Bereiche (Tabelle, Drawer, Kopf-Buttons) nicht-interaktiv + ein Banner erscheint.
+let _extraBusy=0;
+function syncBusyLock(){ const on = BUSY.size>0 || _extraBusy>0; document.body.classList.toggle('busy-lock', on); if(on) closeRowMenu(); }
+function guardBusy(){ if(BUSY.size>0 || _extraBusy>0){ toast('⏳ Bitte warten — eine Aktion läuft'); return false; } return true; }
 // F-29: serverseitig laufende Komponenten pollen und Spinner entsprechend setzen
 async function pollRunning(){
   try{
@@ -561,17 +575,9 @@ async function openDetail(id){
         <span class="badge">${c.type==='template_component'?'Template Component':'Plugin'}</span>
         <span class="badge ${c.formatBadge==='APEX-SQL-Export'?'export':''}">${esc(c.formatBadge)}</span>
       </div>
-      <!-- Schlanker Kopf: nur Primäraktionen sichtbar; alles Weitere (inkl. der frueheren Zeilen-Aktionen)
-           ordentlich unter „More actions" gruppiert — der Kopf bleibt ruhig. -->
-      <div class="inline" style="margin-top:10px;gap:6px">
-        <button class="primary" onclick="runMaintain()" title="Full cycle: check → web lib check → apply SAFE lib updates → auto-fix → re-test. Writes files in the workspace. Pushes only if “allow push” is ON.">🧰 Full maintenance now</button>
-        <button onclick="runOne()" title="Read-only analysis (status, libraries, protocol). With auto-repair ON this runs Full maintenance instead.">▶ Check</button>
-        <button onclick="openFeedback()" title="Einen Fehler melden, den die Tests nicht gefangen haben: Beschreibung + Screenshots. Die KI analysiert das Problem, legt einen DAUERHAFTEN Regressionstest an (läuft ab dann immer mit) und startet den Rework.">🐞 Report issue…</button>
-        <details class="moreact"><summary>⋯ More actions</summary>
-          <!-- T-155: Aktionen als Icon-Liste aus dem gemeinsamen Datenmodell (identisch zum Zeilen-Popover). -->
-          <div class="iconlist" style="margin-top:6px">${renderActionList(c)}</div>
-        </details>
-      </div>
+      <!-- Aktionen als IMMER sichtbare Icon-Leiste (kein Aufklappen, kein separater „Check"). Full maintenance
+           + Report issue kommen aus demselben Datenmodell wie das Zeilen-Popover. -->
+      ${renderActionBar(c)}
       ${c.reviewUrl?`<div class="finding low" style="margin-top:8px">📤 Open review: <a href="${esc(c.reviewUrl)}" target="_blank" rel="noopener" style="color:var(--accent)">branch ${esc(c.reviewBranch||'')} → open PR ↗</a></div>`:''}
       <div id="reviewOut" style="margin-top:8px"></div>
     </div>
@@ -796,6 +802,10 @@ function licenseChangeBadge(l){
 // T-155: Aktionen als DATEN (eine Quelle) — im Drawer als Icon-Liste UND im Zeilen-Popover.
 // on = onclick-JS auf `current`; für das Zeilen-Popover wird current vorher auf die Zeilen-Komponente gesetzt.
 const PLUGIN_ACTIONS = [
+  { group:'Maintain', items:[
+    { icon:'🧰', label:'Full maintenance now', title:'Full cycle: check → web lib check → apply SAFE lib updates → auto-fix → re-test. Writes files. Pushes only if allow-push is ON.', on:'runMaintain()', primary:true },
+    { icon:'🐞', label:'Report issue…', title:'Report a bug the tests missed (text + screenshots). AI analyses it, adds a permanent regression test and starts the rework.', on:'openFeedback()' },
+  ]},
   { group:'This plugin', items:[
     { icon:'🧪', label:'Open mock', title:'Open the rendered mock in a new tab', on:"window.open(current.mockUrl,'_blank','noopener')", when:c=>c.mockUrl },
     { icon:'⤓', label:'Requirements', title:'Export the acceptance requirements (works-as-before) as a Gherkin .feature', on:'exportRequirements(current)', when:c=>c.mockSelfCheck },
@@ -820,6 +830,12 @@ const PLUGIN_ACTIONS = [
     { icon:'🗑', label:'Delete everywhere…', title:'Delete the plugin everywhere: tool registry, APEX test page + plug-in, and data on disk. Asks for the exact name.', on:'purgeComponent()' },
   ]},
 ];
+// Icon-LEISTE (immer sichtbar, im Drawer): alle Aktionen als kompakte, umbrechende Icon+Label-Buttons.
+function renderActionBar(c){
+  return `<div class="actbar">`+PLUGIN_ACTIONS.flatMap(g=>g.items.filter(a=>!a.when||a.when(c)).map(a=>
+    `<button class="actchip${a.primary?' primary':''}${g.danger?' danger':''}" title="${esc(a.title)}" onclick="closeRowMenu();${a.on}">${a.icon} <span>${esc(a.label)}</span></button>`
+  )).join('')+`</div>`;
+}
 function renderActionList(c){
   return PLUGIN_ACTIONS.map(g=>{
     const items=g.items.filter(a=>!a.when||a.when(c));
@@ -1395,6 +1411,8 @@ async function runUpdate(force){
   finally{ setBusy(id,false); }
 }
 async function runAll(){
+  if(!guardBusy()) return;
+  _extraBusy++; syncBusyLock();
   try{
     const r = await api('POST','/api/run',{}); await load();
     if(settingsCache.autoRepair){
@@ -1406,6 +1424,7 @@ async function runAll(){
       toast(`Checked + repaired (${todo.length})`);
     } else { toast(`Checked: ${r.count} component(s)`); }
   }catch(e){ toast('Error: '+e.message); }
+  finally{ _extraBusy=Math.max(0,_extraBusy-1); syncBusyLock(); }
 }
 async function runOne(){
   if(!current) return;
