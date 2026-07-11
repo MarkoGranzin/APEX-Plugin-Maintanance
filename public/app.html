@@ -105,6 +105,13 @@
   .stabs button{background:none;border:none;color:var(--muted);padding:9px 14px;border-bottom:2px solid transparent;white-space:nowrap;border-radius:0}
   .stabs button.active{color:var(--ink);border-bottom-color:var(--accent)}
   .spanel{display:none} .spanel.active{display:block} .spanel h3{margin:2px 0 10px;font-size:1rem}
+  /* T-155: Aktionen als Icon-Liste + Zeilen-Popover */
+  .actgrp{margin:10px 0 3px;font-size:.8rem} .actgrp.danger{color:var(--red)}
+  .iconlist{display:flex;flex-direction:column;gap:1px}
+  .actrow{display:flex;align-items:center;gap:9px;width:100%;justify-content:flex-start;background:none;border:none;color:var(--ink);padding:6px 8px;border-radius:7px;text-align:left;font:inherit}
+  .actrow:hover{background:var(--panel2)} .actrow.danger{color:var(--red)}
+  .actmenu{position:fixed;z-index:40;background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:6px;box-shadow:0 10px 28px rgba(0,0,0,.45);min-width:236px;max-height:74vh;overflow:auto}
+  .rowmenu{background:none;border:none;color:var(--muted);font-size:18px;line-height:1;padding:2px 6px;border-radius:6px} .rowmenu:hover{background:var(--panel2);color:var(--ink)}
   .toast{position:fixed;bottom:20px;left:50%;transform:translateX(-50%);background:var(--panel2);border:1px solid var(--line);padding:10px 16px;border-radius:10px;display:none;z-index:50}
   .overlay{position:fixed;inset:0;background:rgba(0,0,0,.5);display:flex;align-items:center;justify-content:center;z-index:60}
   .overlay[hidden]{display:none}
@@ -524,7 +531,7 @@ function renderTable(){
       <td class="small muted">${(c.libs||[]).slice(0,4).map(l=>`<span class="badge" style="${l.status==='verwundbar'?'color:var(--red);border-color:#f8514966':(l.status==='nicht gepflegt'||l.status==='veraltet')?'color:var(--yellow);border-color:#d2992266':l.status==='unbekannt'?'color:var(--muted)':''}" title="${esc((libStatusLabel(l.status)||l.status||'')+(l.action&&l.action!=='ok'?' → '+l.action+(l.actionPath?' ('+l.actionPath+')':''):'')+(l.security&&l.security.scanned?' · 🛡 '+l.security.reason:''))}">${esc(l.name)}@${esc(l.version)}</span>${l.status==='veraltet'?secMark(l):''}`).join(' ')||'—'}${(c.libs||[]).length>4?` <span class="muted">+${c.libs.length-4}</span>`:''}${sbomBar(c.libs,{compact:true,status:c.status})}</td>
       <td class="small muted">${fmtDate(c.lastChange&&c.lastChange.at)}</td>
       <td class="small">${esc(c.changeSummary)}</td>
-      <td style="text-align:right;color:var(--muted);font-size:18px;width:24px" title="Open details">›</td>`;
+      <td style="text-align:right;white-space:nowrap;width:60px"><button class="rowmenu" title="Actions" onclick="openRowMenu(event,'${c.id}')">⋯</button><span style="color:var(--muted);font-size:18px" title="Open details">›</span></td>`;
     // Actions leben im Drawer (bessere UX): die ganze Zeile öffnet das Detail.
     tr.style.cursor = 'pointer';
     tr.onclick = ()=> openDetail(c.id);
@@ -561,36 +568,8 @@ async function openDetail(id){
         <button onclick="runOne()" title="Read-only analysis (status, libraries, protocol). With auto-repair ON this runs Full maintenance instead.">▶ Check</button>
         <button onclick="openFeedback()" title="Einen Fehler melden, den die Tests nicht gefangen haben: Beschreibung + Screenshots. Die KI analysiert das Problem, legt einen DAUERHAFTEN Regressionstest an (läuft ab dann immer mit) und startet den Rework.">🐞 Report issue…</button>
         <details class="moreact"><summary>⋯ More actions</summary>
-          <div class="small muted" style="margin-top:8px">This plugin</div>
-          <div class="inline" style="margin-top:4px;gap:6px;flex-wrap:wrap">
-            ${c.mockUrl?`<button onclick="window.open(current.mockUrl,'_blank','noopener')" title="Open the rendered mock in a new tab${c.mockMode==='ai'?' (AI-written)':c.mockMode?' (static fallback)':''}">🧪 Open mock</button>`:''}
-            ${c.mockSelfCheck?`<button onclick="exportRequirements(current)" title="Export the acceptance requirements (works-as-before) as a Gherkin .feature — devhub-ready">⤓ Requirements</button>`:''}
-            <button onclick="openEdit(current)" title="Edit the plugin name / repo path.">✏ Edit</button>
-          </div>
-          <div class="small muted" style="margin-top:10px">Read-only / local</div>
-          <div class="inline" style="margin-top:4px;gap:6px;flex-wrap:wrap">
-            <button onclick="openAssign()" title="Connect/clone the Git repo so check, tests and library detection work.">🔗 Assign repo</button>
-            <button onclick="openGit()" title="Open the repo URL in the browser. No changes.">🌐 Open Git</button>
-            <button onclick="openDir()" title="Open the local working copy in the OS file manager. No changes.">📂 Open locally</button>
-            <button onclick="runReview()" title="Security + quality gate. Read-only — reports findings, changes nothing.">🔍 Manual review</button>
-            <button onclick="rebuildRequirements()" title="Re-derive the acceptance requirements (works-as-before contract incl. the exact APEX parameter/JSON interface) freshly from the mock self-test. Writes only .maintenance/acceptance.json.">🔄 Rebuild requirements</button>
-            <button onclick="apexSetup()" title="Erzeugt aus der Plugin-Analyse das Setup-JSON („Rezept" zum Einrichten einer Testseite: Region-Typ, benötigtes Page-Item + AJAX, Datenquelle/Beispielquery, Attribute mit Defaults, JS/CSS-File-URLs) und lädt es herunter. Schreibt .maintenance/apex-setup.json. Read-only.">🧩 Setup-JSON</button>
-            ${(c.libActions&&c.libActions.redevelop)?`<button onclick="redevelopDeadLib(current)" title="Dead library without successor → slice-wise re-development against the acceptance contract (license-gated)">🧬 Re-develop</button>`:''}
-          </div>
-          <div class="small muted" style="margin-top:10px">Writes files / Git <span class="muted">— fixes &amp; AI review live inside “🧰 Full maintenance now”</span></div>
-          <div class="inline" style="margin-top:4px;gap:6px;flex-wrap:wrap">
-            <button onclick="runUpdate()" title="Update libraries to the latest version. Safe updates are applied directly; for breaking ones you get a force option (you verify) or use the verified migration in the Tests tab.">⬆ Update libs to latest</button>
-            <button onclick="runUpload()" title="Commit current changes on a NEW branch and push it + show the PR link (asks for confirmation). Never touches your current branch.">📤 Upload (branch + PR)</button>
-            <button onclick="apexLive()" title="Spielt das Plugin in die konfigurierte APEX-Ziel-App ein (Shared Components → Plug-ins → Import), setzt die File URLs to Load, legt eine analyse-getriebene Testseite an (Page-Item/AJAX/ConfigJSON) und macht einen headless Render-Smoke-Test. Braucht die APEX-Verbindung in den Settings. Test-App verwenden!">🚀 In APEX einspielen &amp; live testen</button>
-          </div>
-          <details class="moreact" style="margin-top:12px">
-            <summary style="color:var(--red)">⚠ Danger zone</summary>
-            <div class="inline" style="margin-top:8px;gap:6px;flex-wrap:wrap">
-              <button class="ghost small danger" onclick="delComponent(current)" title="Remove from this tool's list only. The APEX app and the files on disk are kept.">Remove from list</button>
-              <button class="ghost small danger" onclick="purgeComponent()" title="Löscht das Plugin überall: Tool-Registry, APEX-Testseite + Plug-in, und die auf der Platte gespeicherten Daten (Klon, Mock, Logs, Tests). Fragt zur Sicherheit den exakten Namen ab.">🗑 Delete everywhere…</button>
-            </div>
-            <div class="small muted" style="margin-top:6px">“Remove from list” only unregisters it here. “Delete everywhere” also removes the APEX test page + plug-in and the data on disk (clone, mock, logs, tests) — cannot be undone.</div>
-          </details>
+          <!-- T-155: Aktionen als Icon-Liste aus dem gemeinsamen Datenmodell (identisch zum Zeilen-Popover). -->
+          <div class="iconlist" style="margin-top:6px">${renderActionList(c)}</div>
         </details>
       </div>
       ${c.reviewUrl?`<div class="finding low" style="margin-top:8px">📤 Open review: <a href="${esc(c.reviewUrl)}" target="_blank" rel="noopener" style="color:var(--accent)">branch ${esc(c.reviewBranch||'')} → open PR ↗</a></div>`:''}
@@ -813,6 +792,59 @@ function licenseChangeBadge(l){
   const ch = l.licenseChange; if(!ch) return '';
   const col = ch.riskier ? '#f85149' : '#d29922';
   return ` <span class="badge" title="License change ${esc(ch.from)} (${esc(ch.fromClass)}) → ${esc(ch.to)} (${esc(ch.toClass)})${ch.riskier?' — riskier, legally review!':''}" style="color:${col};border-color:${col}66">⚖⇄ ${esc(ch.from)}→${esc(ch.to)}${ch.riskier?' ⛔':''}</span>`;
+}
+// T-155: Aktionen als DATEN (eine Quelle) — im Drawer als Icon-Liste UND im Zeilen-Popover.
+// on = onclick-JS auf `current`; für das Zeilen-Popover wird current vorher auf die Zeilen-Komponente gesetzt.
+const PLUGIN_ACTIONS = [
+  { group:'This plugin', items:[
+    { icon:'🧪', label:'Open mock', title:'Open the rendered mock in a new tab', on:"window.open(current.mockUrl,'_blank','noopener')", when:c=>c.mockUrl },
+    { icon:'⤓', label:'Requirements', title:'Export the acceptance requirements (works-as-before) as a Gherkin .feature', on:'exportRequirements(current)', when:c=>c.mockSelfCheck },
+    { icon:'✏', label:'Edit', title:'Edit the plugin name / repo path', on:'openEdit(current)' },
+  ]},
+  { group:'Read-only / local', items:[
+    { icon:'🔗', label:'Assign repo', title:'Connect/clone the Git repo so check, tests and library detection work', on:'openAssign()' },
+    { icon:'🌐', label:'Open Git', title:'Open the repo URL in the browser. No changes.', on:'openGit()' },
+    { icon:'📂', label:'Open locally', title:'Open the local working copy in the file manager. No changes.', on:'openDir()' },
+    { icon:'🔍', label:'Manual review', title:'Security + quality gate. Read-only.', on:'runReview()' },
+    { icon:'🔄', label:'Rebuild requirements', title:'Re-derive the acceptance requirements from the mock self-test. Writes only .maintenance/acceptance.json.', on:'rebuildRequirements()' },
+    { icon:'🧩', label:'Setup-JSON', title:'Build the setup recipe (JSON) from the analysis and download it. Read-only.', on:'apexSetup()' },
+    { icon:'🧬', label:'Re-develop', title:'Dead library without successor → slice-wise re-development against the acceptance contract', on:'redevelopDeadLib(current)', when:c=>c.libActions&&c.libActions.redevelop },
+  ]},
+  { group:'Writes files / Git', items:[
+    { icon:'⬆', label:'Update libs to latest', title:'Update libraries. Safe updates applied directly; breaking ones offer a force option or verified migration.', on:'runUpdate()' },
+    { icon:'📤', label:'Upload (branch + PR)', title:'Commit current changes on a NEW branch + push + show PR link (asks for confirmation).', on:'runUpload()' },
+    { icon:'🚀', label:'In APEX einspielen & live testen', title:'Install into the configured APEX target app + build a test page + headless render check. Needs the APEX connection in Settings.', on:'apexLive()' },
+  ]},
+  { group:'Danger zone', danger:true, items:[
+    { icon:'—', label:'Remove from list', title:"Remove from this tool's list only. APEX app and files on disk are kept.", on:'delComponent(current)' },
+    { icon:'🗑', label:'Delete everywhere…', title:'Delete the plugin everywhere: tool registry, APEX test page + plug-in, and data on disk. Asks for the exact name.', on:'purgeComponent()' },
+  ]},
+];
+function renderActionList(c){
+  return PLUGIN_ACTIONS.map(g=>{
+    const items=g.items.filter(a=>!a.when||a.when(c));
+    if(!items.length) return '';
+    return `<div class="actgrp${g.danger?' danger':''}">${g.group}</div>`+
+      items.map(a=>`<button class="actrow${g.danger?' danger':''}" title="${esc(a.title)}" onclick="closeRowMenu();${a.on}">${a.icon} <span>${esc(a.label)}</span></button>`).join('');
+  }).join('');
+}
+// Zeilen-Popover: schneller Aktions-Zugriff ohne den ganzen Drawer. Kontext = die Zeilen-Komponente.
+let _rowMenuEl=null;
+function _rowMenuKey(e){ if(e.key==='Escape') closeRowMenu(); }
+function closeRowMenu(){ if(_rowMenuEl){ _rowMenuEl.remove(); _rowMenuEl=null; document.removeEventListener('keydown',_rowMenuKey); document.removeEventListener('click',closeRowMenu,true); } }
+function openRowMenu(ev, id){
+  ev.stopPropagation(); ev.preventDefault();
+  closeRowMenu();
+  const c = (ALL||[]).find(x=>x.id===id); if(!c) return;
+  current = c; // Handler wirken auf DIESE Zeile
+  const m=document.createElement('div'); m.className='actmenu'; m.innerHTML=renderActionList(c);
+  m.onclick=e=>e.stopPropagation();
+  document.body.appendChild(m);
+  const r=ev.currentTarget.getBoundingClientRect();
+  m.style.top=Math.max(8, Math.min(r.bottom+4, window.innerHeight-10-m.offsetHeight))+'px';
+  m.style.left=Math.max(8, Math.min(r.right-m.offsetWidth, window.innerWidth-10-m.offsetWidth))+'px';
+  _rowMenuEl=m;
+  setTimeout(()=>{ document.addEventListener('click',closeRowMenu,true); document.addEventListener('keydown',_rowMenuKey); },0);
 }
 // Jede Lib in genau EINE Kategorie zählen (konsistent zum Backend-libStatus). Unbekannte Version ist NICHT „current".
 function libCounts(libs){
