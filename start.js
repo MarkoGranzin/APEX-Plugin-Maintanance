@@ -44,7 +44,7 @@ import { runUiTests, runUiTestsDetailed, abortUiChildren } from './src/test/run-
 import { abortAiChildren } from './src/ai/backend.js';
 import { captureBaseline, compareToBaseline } from './src/service/baseline.js';
 import { redevelopComponent } from './src/service/redev.js';
-import { generateAiMock, writeMock, refineMock, mockInputFingerprint, MOCK_SPEC_VERSION, runMockSelfTests, pluginInterface } from './src/test/mock.js';
+import { generateAiMock, writeMock, refineMock, mockInputFingerprint, MOCK_SPEC_VERSION, runMockSelfTests, pluginInterface, refreshMockLibs } from './src/test/mock.js';
 import { acceptanceFromSelfTest, writeAcceptance, readAcceptance, acceptanceFeatureFile, acceptanceToDevhub, compareAcceptance, normalizeInterface } from './src/service/acceptance.js';
 import { redevelopDeadLib, buildSliceRebuildPrompt } from './src/service/redev-slices.js';
 import { inspectAssets, parseOk } from './src/extract/assets.js';
@@ -419,7 +419,9 @@ function cmdServe(portArg) {
     const maintainOpts = { ai, updateDeps: { push: localGitPush(component.path), registry: prRegistry, recordRun: record }, logSink: writeLog, onTestPlan, onSbom, recordRun: record, verifyNative: verifyNativeFor(store.get(id)) };
     // T-153: tiefes Vorher/Nachher-Gate im regulären Lauf — Baseline (vorher) einfrieren, nach Änderungen den
     // Mock „nachher" bauen und die UI-Szenarien gegen die Baseline vergleichen; Regression → Rollback.
-    Object.assign(maintainOpts, { worksAsBefore: true, captureBaseline, compareToBaseline, runDetailed: runUiTestsDetailed, hasPlaywright, specsDir, rebuildMock: async () => { await buildMockFor(store.get(id)); } });
+    // B-70: „Nachher"-Mock nur die vendored Libs auf den aktualisierten Repo-Stand re-synchronisieren (gleiche
+    // Szenarien) statt KI-Neubau; rebuildMock bleibt als Fallback, falls noch kein Mock-Verzeichnis existiert.
+    Object.assign(maintainOpts, { worksAsBefore: true, captureBaseline, compareToBaseline, runDetailed: runUiTestsDetailed, hasPlaywright, specsDir, rebuildMock: async () => { await buildMockFor(store.get(id)); }, refreshMockLibs: async () => { const c = store.get(id); const mockDir = path.join(c.path, '.maintenance', 'mock'); if (!fs.existsSync(path.join(mockDir, 'index.html'))) { await buildMockFor(c); } else { refreshMockLibs(mockDir, c.path); } } });
     if (opts.autoUpload) { maintainOpts.autoUpload = true; maintainOpts.upload = uploadFor(true); } // Job: bei grün auto-commit (Push nur bei allowPush)
     const r = await maintainComponent(store, store.get(id), maintainOpts);
     bail(); // B-59

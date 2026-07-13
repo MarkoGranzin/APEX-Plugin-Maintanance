@@ -110,16 +110,20 @@ export async function maintainComponent(store, comp, deps = {}) {
   // zuvor) → Rollback der Lib-Änderungen (inkl. .sql-Re-Embed) + Mock zurückbauen. Nur bei aktivem Gate.
   let wab = null;
   const changed = appliedLibs || (fixResult && (fixResult.quickFixes || fixResult.aiResult));
+  // B-70: „Nachher"-Mock NICHT per KI neu bauen (nicht-deterministische Sichten → falscher „missing"-Regress),
+  // sondern nur die vendored Lib-/CSS-Dateien im eingecheckten Mock auf den aktuellen Repo-Stand re-synchronisieren.
+  // index.html + Self-Test-Szenarien bleiben identisch → gleiche Keys, echter Lib-Vergleich. Fallback: rebuildMock.
+  const refreshAfterMock = async () => { if (deps.refreshMockLibs) await deps.refreshMockLibs(cur()); else if (deps.rebuildMock) await deps.rebuildMock(cur()); };
   if (gate && deps.runDetailed && changed) {
     try {
-      if (deps.rebuildMock) await deps.rebuildMock(cur()); // „Nachher"-Mock
+      await refreshAfterMock(); // „Nachher"-Mock (gleiche Szenarien, aktualisierte Libs)
       const url = deps.uiTestUrl || cur().uiTestUrl;
       const rr = await deps.runDetailed(cur(), { pluginUrl: url, specsDir: deps.specsDir, hasPlaywright: deps.hasPlaywright, exec: deps.exec });
       const cmp = compareFn(cur(), rr.ran ? (rr.scenarios ?? []) : []);
       const regression = rr.ran && !cmp.pass && !cmp.noBaseline && !cmp.noGreenBaseline;
       if (regression && libBackups && libBackups.size) {
         rollbackUpdates(libBackups);
-        if (deps.rebuildMock) await deps.rebuildMock(cur());
+        await refreshAfterMock(); // Libs zurückgerollt → Mock wieder auf den Ausgangsstand re-synchronisieren
         r2 = runComponentOnce(store, cur(), runOpts);
         wab = { pass: false, rolledBack: true, regressions: cmp.regressions?.length ?? 0, summary: cmp.summary };
       } else {

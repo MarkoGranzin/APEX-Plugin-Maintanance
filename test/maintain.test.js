@@ -174,4 +174,28 @@ describe('T-153 Vorher/Nachher-Gate im regulären Pflegelauf', () => {
     expect(calls.captured).toBeFalsy();
     expect(r.worksAsBefore).toBeNull();
   });
+
+  it('B-70: „Nachher"-Mock nutzt refreshMockLibs (kein KI-Neubau) statt rebuildMock', async () => {
+    const store = mkStore(); const calls = {};
+    const d = gateDeps({ afterScenarios: [{ scenario: 'a', status: 'passed' }] }, calls);
+    d.refreshMockLibs = async () => { calls.refreshed = (calls.refreshed || 0) + 1; };
+    const r = await maintainComponent(store, store.get('c1'), d);
+    expect(r.worksAsBefore.pass).toBe(true);
+    expect(calls.refreshed).toBe(1);   // Libs re-synchronisiert (gleiche Szenarien)
+    expect(calls.rebuilt).toBeFalsy();  // KEIN nicht-deterministischer KI-Neubau für den Vergleich
+  });
+
+  it('B-70: Regression → Rollback re-synchronisiert die Libs erneut (refreshMockLibs 2×), kein rebuildMock', async () => {
+    const tmp = path.join(os.tmpdir(), 'aisp-wab70-' + Date.now() + '.txt'); fs.writeFileSync(tmp, 'NEW');
+    const backups = new Map([[tmp, 'OLD']]); const calls = {};
+    const store = mkStore();
+    const d = gateDeps({ backups, afterScenarios: [{ scenario: 'a', status: 'failed' }] }, calls);
+    d.refreshMockLibs = async () => { calls.refreshed = (calls.refreshed || 0) + 1; };
+    const r = await maintainComponent(store, store.get('c1'), d);
+    expect(r.worksAsBefore.rolledBack).toBe(true);
+    expect(fs.readFileSync(tmp, 'utf8')).toBe('OLD');
+    expect(calls.refreshed).toBe(2); // nachher + nach Rollback
+    expect(calls.rebuilt).toBeFalsy();
+    fs.rmSync(tmp, { force: true });
+  });
 });

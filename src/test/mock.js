@@ -724,3 +724,35 @@ export function writeMock(mockDir, repoDir, gen) {
   fs.writeFileSync(path.join(mockDir, 'index.html'), gen.html);
   return path.join(mockDir, 'index.html');
 }
+
+/**
+ * B-70 — „Nachher"-Mock für das works-as-before-Gate OHNE KI-Neubau erzeugen. Ein voller Neubau
+ * (generateAiMock) wählt nicht-deterministisch andere Sichten/Szenarien → der Key-Vergleich in
+ * worksAsBefore meldet vorher-grüne Szenarien als „missing" und rollt fälschlich zurück. Stattdessen
+ * die im EINGECHECKTEN Mock bereits vorhandenen vendored Dateien (Libs/CSS/Assets) auf den AKTUELLEN
+ * Repo-Stand (nach dem Lib-Update) re-synchronisieren — index.html + Self-Test-Szenarien bleiben
+ * unverändert. So laufen exakt DIESELBEN Szenarien gegen die neuen Lib-Versionen; nur eine echte,
+ * lib-bedingte Regression wird erkannt (nicht der Analyse-Zufall). Rein/idempotent.
+ * @returns {{ok:boolean, refreshed:number, files:string[]}}
+ */
+export function refreshMockLibs(mockDir, repoDir) {
+  if (!mockDir || !repoDir || !fs.existsSync(path.join(mockDir, 'index.html'))) return { ok: false, refreshed: 0, files: [] };
+  const files = [];
+  const walk = (sub) => {
+    let entries = [];
+    try { entries = fs.readdirSync(path.join(mockDir, sub), { withFileTypes: true }); } catch { return; }
+    for (const e of entries) {
+      const rel = sub ? path.join(sub, e.name) : e.name;
+      if (e.isDirectory()) { walk(rel); continue; }
+      const relPosix = rel.split(path.sep).join('/');
+      // index.html/Fingerprint/Specs sind Mock-Eigenbau — nie aus dem Repo überschreiben.
+      if (relPosix === 'index.html' || e.name === '.mock-fingerprint.json' || /\.spec\.js$/i.test(e.name)) continue;
+      const src = path.join(repoDir, rel);
+      // Nur Dateien re-synchronisieren, die es an gleicher Stelle im Repo gibt (= die kopierten vendored Libs/CSS/Assets).
+      // plugin/*-Kopien und KI-Fakes existieren dort nicht → bleiben unberührt.
+      try { if (fs.statSync(src).isFile()) { fs.copyFileSync(src, path.join(mockDir, rel)); files.push(relPosix); } } catch { /* im Repo nicht vorhanden → überspringen */ }
+    }
+  };
+  walk('');
+  return { ok: true, refreshed: files.length, files };
+}

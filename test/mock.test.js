@@ -2,7 +2,7 @@ import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { buildMockPage, buildMockSpec, generateMock, writeMock, generateAiMock, aiMockPrompt, aiAnalyzePrompt, analyzeViews, finalizeAiHtml, runMockSelfTests, aiRefinePrompt, refineMock, mockInputFingerprint, MOCK_SPEC_VERSION, collectMock, normalizeLibPaths, HARNESS_RESET } from '../src/test/mock.js';
+import { buildMockPage, buildMockSpec, generateMock, writeMock, generateAiMock, aiMockPrompt, aiAnalyzePrompt, analyzeViews, finalizeAiHtml, runMockSelfTests, aiRefinePrompt, refineMock, mockInputFingerprint, MOCK_SPEC_VERSION, collectMock, normalizeLibPaths, HARNESS_RESET, refreshMockLibs } from '../src/test/mock.js';
 
 describe('F-28 T-97 Auto-Mock', () => {
   it('buildMockPage: self-contained HTML mit Shim, Libs (src), Plugin-Dateien (src), DOM, Entry-Calls, Events, __rendered/__features', () => {
@@ -445,5 +445,45 @@ describe('F-28 T-97 Auto-Mock', () => {
       expect(typeof MOCK_SPEC_VERSION).toBe('string');
       expect(MOCK_SPEC_VERSION.length).toBeGreaterThan(0);
     });
+  });
+});
+
+describe('B-70 refreshMockLibs — Nachher-Mock ohne KI-Neubau', () => {
+  it('re-synchronisiert vendored Lib-/CSS-Dateien aus dem Repo, lässt index.html + Specs unberührt', () => {
+    const repo = fs.mkdtempSync(path.join(os.tmpdir(), 'b70-repo-'));
+    const mock = fs.mkdtempSync(path.join(os.tmpdir(), 'b70-mock-'));
+    // Repo hat die AKTUALISIERTE Lib-Version + CSS
+    fs.mkdirSync(path.join(repo, 'js'), { recursive: true });
+    fs.writeFileSync(path.join(repo, 'js', 'lib.js'), 'v2-new');
+    fs.writeFileSync(path.join(repo, 'style.css'), 'body{color:red}');
+    // Mock hält die ALTE Kopie derselben Pfade + eigenen Self-Test-Harness (index.html/Spec/Fingerprint)
+    fs.mkdirSync(path.join(mock, 'js'), { recursive: true });
+    fs.writeFileSync(path.join(mock, 'js', 'lib.js'), 'v1-old');
+    fs.writeFileSync(path.join(mock, 'style.css'), 'body{color:blue}');
+    fs.writeFileSync(path.join(mock, 'index.html'), 'MOCK-HTML');
+    fs.writeFileSync(path.join(mock, 'plugin.spec.js'), 'SPEC');
+    fs.writeFileSync(path.join(mock, '.mock-fingerprint.json'), '{"fp":"x"}');
+    // Datei, die es NUR im Mock gibt (KI-Fake) → bleibt unberührt
+    fs.writeFileSync(path.join(mock, 'faked.js'), 'FAKE');
+
+    const r = refreshMockLibs(mock, repo);
+    expect(r.ok).toBe(true);
+    expect(r.refreshed).toBe(2); // js/lib.js + style.css
+    expect(fs.readFileSync(path.join(mock, 'js', 'lib.js'), 'utf8')).toBe('v2-new'); // aktualisiert
+    expect(fs.readFileSync(path.join(mock, 'style.css'), 'utf8')).toBe('body{color:red}');
+    expect(fs.readFileSync(path.join(mock, 'index.html'), 'utf8')).toBe('MOCK-HTML'); // Szenarien unverändert
+    expect(fs.readFileSync(path.join(mock, 'plugin.spec.js'), 'utf8')).toBe('SPEC');   // Spec unberührt
+    expect(fs.readFileSync(path.join(mock, 'faked.js'), 'utf8')).toBe('FAKE');         // nicht im Repo → unberührt
+
+    fs.rmSync(repo, { recursive: true, force: true }); fs.rmSync(mock, { recursive: true, force: true });
+  });
+
+  it('ohne bestehenden Mock (kein index.html) → ok:false, nichts angefasst', () => {
+    const repo = fs.mkdtempSync(path.join(os.tmpdir(), 'b70-repo2-'));
+    const mock = fs.mkdtempSync(path.join(os.tmpdir(), 'b70-mock2-'));
+    const r = refreshMockLibs(mock, repo);
+    expect(r.ok).toBe(false);
+    expect(r.refreshed).toBe(0);
+    fs.rmSync(repo, { recursive: true, force: true }); fs.rmSync(mock, { recursive: true, force: true });
   });
 });
