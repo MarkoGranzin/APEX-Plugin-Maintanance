@@ -20,6 +20,42 @@ describe('F-31 T-128 apex-deploy: Install-Skript & Sicherheit', () => {
     expect(() => buildInstallScript({ exportFile: 'x.sql' })).toThrow(/workspace/);
   });
 
+  it('B-69: baseDir beschränkt die ausgeführte exportFile auf ein Verzeichnis', () => {
+    const base = process.platform === 'win32' ? 'D:\\repo' : '/repo';
+    const outside = process.platform === 'win32' ? 'D:\\evil\\x.sql' : '/evil/x.sql';
+    // innerhalb → ok
+    expect(() => buildInstallScript({ exportFile: `${base}${path.sep}plugin.sql`, workspace: 'W', baseDir: base })).not.toThrow();
+    // absoluter Pfad außerhalb → wirft
+    expect(() => buildInstallScript({ exportFile: outside, workspace: 'W', baseDir: base })).toThrow(/außerhalb/);
+    // ../-Ausbruch → wirft
+    expect(() => buildInstallScript({ exportFile: `${base}${path.sep}..${path.sep}evil.sql`, workspace: 'W', baseDir: base })).toThrow(/außerhalb/);
+    // ohne baseDir → keine Beschränkung (rückwärtskompatibel)
+    expect(() => buildInstallScript({ exportFile: outside, workspace: 'W' })).not.toThrow();
+  });
+
+  it('B-67: assertSafeApexBaseUrl erzwingt http(s) + https außerhalb localhost (kein Klartext-Credential-Leak)', () => {
+    // https überall ok
+    expect(() => apexUi.assertSafeApexBaseUrl('https://apex.example.com/ords')).not.toThrow();
+    // http nur für localhost
+    expect(() => apexUi.assertSafeApexBaseUrl('http://localhost:8080/ords')).not.toThrow();
+    expect(() => apexUi.assertSafeApexBaseUrl('http://127.0.0.1/ords')).not.toThrow();
+    // http auf fremdem Host → würde Passwort im Klartext senden → wirft
+    expect(() => apexUi.assertSafeApexBaseUrl('http://evil.example.com/ords')).toThrow(/https/);
+    // fremdes Schema (file:/javascript:) → wirft
+    expect(() => apexUi.assertSafeApexBaseUrl('file:///etc/passwd')).toThrow(/http/);
+    // Unfug → wirft
+    expect(() => apexUi.assertSafeApexBaseUrl('not-a-url')).toThrow(/URL/);
+  });
+
+  it('B-67: uiLogin liefert bei unsicherer baseUrl einen Fehler und navigiert nicht dorthin', async () => {
+    let navigated = null;
+    const fakePage = { goto: async (u) => { navigated = u; }, getByPlaceholder: () => ({ count: async () => 0 }), locator: () => ({ count: async () => 0 }), url: () => '' };
+    const r = await apexUi.uiLogin(fakePage, { baseUrl: 'http://evil.example.com', workspace: 'W', user: 'u', pass: 'p' });
+    expect(r.ok).toBe(false);
+    expect(r.error).toMatch(/https/);
+    expect(navigated).toBeNull(); // nie zum unsicheren Host navigiert
+  });
+
   it('parsePluginName liest p_name aus dem Export', () => {
     const sql = `wwv_flow_api.create_plugin(\n p_id=>wwv_flow_api.id(123)\n,p_plugin_type=>'REGION TYPE'\n,p_name=>'DE.AISS.APEXFLOWCHART'\n,p_display_name=>'ApexFlowChart'\n);`;
     expect(parsePluginName(sql)).toBe('DE.AISS.APEXFLOWCHART');

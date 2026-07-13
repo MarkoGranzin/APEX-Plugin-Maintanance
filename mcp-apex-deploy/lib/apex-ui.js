@@ -18,6 +18,23 @@ export async function loadChromium(cwd = process.cwd()) {
 }
 
 /**
+ * B-67 — die APEX-baseUrl kommt aus der (pro Komponente frei setzbaren) Konfiguration und bekommt
+ * beim Login Workspace/Username/Passwort im Klartext gefüttert. Ohne Schema-/Host-Prüfung würde ein
+ * gefälschter/vertippter Wert (http://…, file:, javascript:, oder ein fremder Host über http) die
+ * echten APEX-Credentials an einen beliebigen Ort schicken. Darum VOR der Navigation validieren:
+ * nur http(s); http ausschließlich für localhost (sonst geht das Passwort im Klartext übers Netz).
+ * @returns {URL} die geparste, sichere Basis-URL
+ */
+export function assertSafeApexBaseUrl(baseUrl) {
+  let u;
+  try { u = new URL(String(baseUrl)); } catch { throw new Error('APEX Base-URL ist keine gültige URL'); }
+  if (u.protocol !== 'https:' && u.protocol !== 'http:') throw new Error(`APEX Base-URL muss http(s) sein, nicht ${u.protocol}`);
+  const isLocal = /^(localhost|127\.0\.0\.1|\[?::1\]?)$/i.test(u.hostname);
+  if (u.protocol !== 'https:' && !isLocal) throw new Error('APEX Base-URL muss https nutzen (sonst würden Workspace/User/Passwort im Klartext übertragen)');
+  return u;
+}
+
+/**
  * Anmeldung an der modernen APEX-Workspace-Sign-In-Seite (Workspace + Database Username + Passwort).
  * @param {import('playwright').Page} page
  * @param {{baseUrl:string, workspace:string, user:string, pass:string}} cfg
@@ -26,6 +43,8 @@ export async function uiLogin(page, cfg = {}) {
   const { baseUrl, workspace, user, pass } = cfg;
   if (!baseUrl) return { ok: false, error: 'baseUrl fehlt.' };
   if (!workspace || !user || !pass) return { ok: false, error: 'Login unvollständig — workspace, user, pass nötig.' };
+  // B-67: config-getriebene baseUrl prüfen, BEVOR Credentials dorthin gefüttert werden.
+  try { assertSafeApexBaseUrl(baseUrl); } catch (e) { return { ok: false, error: e.message }; }
   await page.goto(`${baseUrl.replace(/\/$/, '')}/r/apex/app-builder/home`, { waitUntil: 'domcontentloaded', timeout: 30000 });
   const fill = async (labels, ids, value) => {
     for (const l of labels) { const loc = page.getByPlaceholder(l, { exact: false }); if (await loc.count()) { await loc.first().fill(value); return true; } }

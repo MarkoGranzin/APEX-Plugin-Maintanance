@@ -33,6 +33,19 @@ describe('Security-Review-Fixes', () => {
     expect(() => reinjectAsset({ type: 'file', path: '../../evil.js' }, 'x', { rootDir: os.tmpdir() })).toThrow(/verlässt/);
   });
 
+  it('B-68: Symlink im Repo, der nach außen zeigt, wird als Ausbruch erkannt (realpath)', () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'b68-'));
+    const outside = fs.mkdtempSync(path.join(os.tmpdir(), 'b68-out-'));
+    fs.writeFileSync(path.join(outside, 'secret.txt'), 'TOP-SECRET');
+    let linked = false;
+    try { fs.symlinkSync(outside, path.join(root, 'evil'), 'dir'); linked = true; } catch { /* Windows ohne Dev-Mode → Symlink nicht erstellbar */ }
+    if (!linked) { fs.rmSync(root, { recursive: true, force: true }); fs.rmSync(outside, { recursive: true, force: true }); return; }
+    // lexisch wirkt 'evil/secret.txt' im Repo, real zeigt es nach außen → muss werfen
+    expect(() => resolveWithin(root, 'evil/secret.txt')).toThrow(/verlässt/);
+    expect(() => resolveWithin(root, 'inside/x.js')).not.toThrow(); // echter Pfad im Repo bleibt erlaubt
+    fs.rmSync(root, { recursive: true, force: true }); fs.rmSync(outside, { recursive: true, force: true });
+  });
+
   it('B-50: findRepoSource ignoriert Traversal-Namen aus fremdem Plugin-SQL', () => {
     const deps = { exists: () => true, walk: () => [] };
     // ../ oder absoluter Name → NICHT der ausbrechende Pfad, sondern null (nichts Eindeutiges)

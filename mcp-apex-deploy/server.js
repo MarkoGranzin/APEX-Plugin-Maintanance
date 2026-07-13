@@ -81,8 +81,16 @@ const TOOLS = [
       const workspace = a.workspace || ENV.workspace; const appId = a.appId ?? ENV.appId;
       if (!workspace || !appId) return { ok: false, error: 'workspace/appId fehlen (Parameter oder env APEX_WORKSPACE/APEX_APP_ID setzen).' };
       if (!fs.existsSync(a.exportFile)) return { ok: false, error: `Export-Datei nicht gefunden: ${a.exportFile}` };
-      const pluginName = parsePluginName(fs.readFileSync(a.exportFile, 'utf8'));
-      const r = await runSqlcl(buildInstallScript({ exportFile: path.resolve(a.exportFile), workspace, appId }));
+      // B-69: exportFile wird von SQLcl ausgeführt → auf ein erlaubtes Verzeichnis beschränken (Default: cwd,
+      // override via APEX_EXPORT_BASE), realpath-basiert, damit Symlinks nicht ausbrechen (B-68).
+      const realBase = fs.realpathSync(path.resolve(process.env.APEX_EXPORT_BASE || process.cwd()));
+      const realFile = fs.realpathSync(path.resolve(a.exportFile));
+      const relF = path.relative(realBase, realFile);
+      if (relF.startsWith('..' + path.sep) || relF === '..' || path.isAbsolute(relF)) {
+        return { ok: false, error: `Export-Datei liegt außerhalb des erlaubten Verzeichnisses (${realBase}). Mit APEX_EXPORT_BASE erweitern.` };
+      }
+      const pluginName = parsePluginName(fs.readFileSync(realFile, 'utf8'));
+      const r = await runSqlcl(buildInstallScript({ exportFile: realFile, workspace, appId, baseDir: realBase }));
       return { ...r, pluginName, appId: Number(appId), workspace };
     },
   },

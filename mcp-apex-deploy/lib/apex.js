@@ -9,6 +9,7 @@
  * Resultat: mcp-apex-deploy/lib/apex.js
  */
 
+import path from 'node:path';
 import { detectEmbeddedAssets } from './plugin-assets.js';
 
 /** Passwort im Connect-String maskieren — Secrets erscheinen NIE in Ausgaben/Logs. */
@@ -29,6 +30,15 @@ export function buildInstallScript(o = {}) {
   // Quotierung ausbrechen und beliebige SQLcl-Befehle einschleusen → solche Pfade ablehnen.
   const exportFile = String(o.exportFile);
   if (/["\r\n]/.test(exportFile)) throw new Error('exportFile enthält unzulässige Zeichen (", CR/LF)');
+  // B-69: SQLcl FÜHRT exportFile via @"…" AUS. Ist ein baseDir gesetzt, muss die Datei darin liegen —
+  // sonst könnte ein beliebiger System-Pfad (z.B. /tmp/evil.sql) als SQL-Skript ausgeführt werden.
+  if (o.baseDir) {
+    const base = path.resolve(o.baseDir);
+    const rel = path.relative(base, path.resolve(base, exportFile));
+    if (rel === '' || rel === '..' || rel.startsWith('..' + path.sep) || path.isAbsolute(rel)) {
+      throw new Error(`exportFile liegt außerhalb des erlaubten Verzeichnisses (${base}): ${exportFile}`);
+    }
+  }
   const app = o.appId != null && String(o.appId) !== '' ? Number(o.appId) : null;
   const lines = [
     'whenever sqlerror exit failure rollback',

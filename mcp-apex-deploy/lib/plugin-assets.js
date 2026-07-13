@@ -124,10 +124,17 @@ export function findRepoSource(repoDir, embeddedName, deps = {}) {
 
 /** B-50: bleibt rel (nach repoDir aufgelöst) innerhalb des Repos? (kein ../, kein absoluter/anderes-Laufwerk-Pfad) */
 function withinRepo(repoDir, rel) {
-  const root = path.resolve(repoDir ?? '.');
-  const r = path.relative(root, path.resolve(root, String(rel ?? '')));
+  const realRoot = realpathSafe(path.resolve(repoDir ?? '.'));
+  const abs = path.resolve(realRoot, String(rel ?? ''));
+  // B-68: Symlinks im existierenden Pfad-Anteil auflösen (path.resolve tut das nicht) → kein Symlink-Ausbruch.
+  let probe = abs;
+  while (!fs.existsSync(probe) && path.dirname(probe) !== probe) probe = path.dirname(probe);
+  const realAbs = path.join(realpathSafe(probe), path.relative(probe, abs));
+  const r = path.relative(realRoot, realAbs);
   return r !== '' && r !== '..' && !r.startsWith('..' + path.sep) && !path.isAbsolute(r);
 }
+
+function realpathSafe(p) { try { return fs.realpathSync(p); } catch { return p; } }
 
 function defaultWalk(root, sub = '', acc = []) {
   let entries = [];

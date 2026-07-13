@@ -23,14 +23,22 @@ import { skipString, unquote } from './sql-scan.js';
  * So kann eine manipulierte sourceMap-Herkunft nicht außerhalb des Repos schreiben/lesen.
  */
 export function resolveWithin(rootDir, p) {
-  const root = path.resolve(rootDir ?? '.');
-  const abs = path.resolve(root, String(p ?? ''));
-  const rel = path.relative(root, abs);
+  const realRoot = realpathSafe(path.resolve(rootDir ?? '.'));
+  const abs = path.resolve(realRoot, String(p ?? ''));
+  // B-68: path.resolve löst SYMLINKS NICHT auf — ein Symlink im Repo (repo/x -> /außerhalb) bestünde die
+  // lexische Prüfung, bräche aber real aus. Deshalb den EXISTIERENDEN Pfad-Anteil per realpath kanonisieren
+  // (der Ziel-Blattname darf noch fehlen, z.B. neue Datei) und ERST DANN auf Containment prüfen.
+  let probe = abs;
+  while (!fs.existsSync(probe) && path.dirname(probe) !== probe) probe = path.dirname(probe);
+  const realAbs = path.join(realpathSafe(probe), path.relative(probe, abs));
+  const rel = path.relative(realRoot, realAbs);
   if (rel === '' || rel === '..' || rel.startsWith('..' + path.sep) || path.isAbsolute(rel)) {
     throw new Error(`Pfad verlässt das Repo-Verzeichnis: ${p}`);
   }
-  return abs;
+  return realAbs;
 }
+
+function realpathSafe(p) { try { return fs.realpathSync(p); } catch { return p; } }
 
 /**
  * Ersetzt nur den p_file_content-Ausdruck genau eines create_plugin_file-Aufrufs (minimaler Diff).
