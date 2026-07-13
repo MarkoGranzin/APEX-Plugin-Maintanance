@@ -281,28 +281,67 @@ async function pdOpenOrCreatePage(page, o) {
   return { ok: true, mode };
 }
 
-/** T-149 — Ermittelt, welche der benötigten Hidden-Page-Items auf der Seite bereits existieren, über das
- *  Page-Designer-Modell (window.pe). SICHER & read-only: KEINE Modell-Transaction, keine Anlage (ein blinder
- *  Modell-Add über eine unbestätigte API ließ eine Transaction hängen und brach die Seite — daher bewusst
- *  nur Bestandsaufnahme). Fehlende Items werden ehrlich gemeldet; das physische Anlegen im Page Designer
- *  ist ein separater, noch nicht automatisierter Schritt. */
-async function pdCreatePageItems(page, items) {
-  const names = (items || []).map((i) => (typeof i === 'string' ? i : i?.name)).filter(Boolean);
-  if (!names.length) return { created: 0, existing: [], missing: [], note: 'keine Page-Items nötig' };
-  return page.evaluate(({ names }) => {
+/** T-149/T-150 — normalisiert die (Manifest-)Page-Items zu {name,type,submit}. Rein/ohne Browser → unit-testbar. */
+export function normalizePageItems(items) {
+  return (items || [])
+    .map((i) => (typeof i === 'string' ? { name: i, type: 'Hidden', submit: false }
+      : i && i.name ? { name: String(i.name), type: i.type || 'Hidden', submit: !!(i.ajaxItemsToSubmit ?? i.submit) } : null))
+    .filter((i) => i && i.name);
+}
+
+/** Namen der als „Items to Submit" markierten Page-Items (für die Region-Verdrahtung). */
+export function itemsToSubmitNames(items) {
+  return normalizePageItems(items).filter((i) => i.submit).map((i) => i.name);
+}
+
+/**
+ * T-149/T-150 — Hidden-Page-Items im Page Designer prüfen und (opt-in) physisch anlegen.
+ *
+ * Read-only-Default (opts.create=false): reine Bestandsaufnahme über window.pe (existing/missing), wie T-149.
+ * Mit opts.create=true wird jedes fehlende Item über das Modell angelegt. ENTSCHEIDEND (Lehre aus dem
+ * Vorfall, der eine Transaction hängen ließ und die Seite brach): die Modell-Transaction wird IMMER im
+ * finally geschlossen (execute/…), egal ob die Anlage klappt, wirft oder die API fehlt. Dadurch kann die
+ * Anlage die Seite NICHT mehr blockieren; schlägt sie fehl, wird das ehrlich gemeldet (kein stiller Erfolg).
+ * Die Anlage ist bewusst opt-in und bis zur Live-Verifikation NICHT der Default.
+ */
+async function pdCreatePageItems(page, items, opts = {}) {
+  const specs = normalizePageItems(items);
+  if (!specs.length) return { created: 0, existing: [], missing: [], note: 'keine Page-Items nötig' };
+  return page.evaluate(({ specs, create }) => {
+    const m = window.pe;
+    if (!m || !m.getComponents || !m.COMP_TYPE) return { created: 0, existing: [], missing: specs.map((s) => s.name.toUpperCase()), note: 'kein pe/Modell' };
+    const have = new Set();
     try {
-      const m = window.pe;
-      if (!m || !m.getComponents || !m.COMP_TYPE) return { created: 0, existing: [], missing: names, note: 'kein pe/Modell' };
-      const have = new Set();
       for (const c of (m.getComponents(m.COMP_TYPE.PAGE_ITEM) || [])) {
         try { const v = c.getProperty(m.PROP.ITEM_NAME)?.getValue(); if (v) have.add(String(v).toUpperCase()); } catch { /* egal */ }
       }
-      const upper = names.map((n) => String(n).toUpperCase());
-      const existing = upper.filter((n) => have.has(n));
-      const missing = upper.filter((n) => !have.has(n));
-      return { created: 0, existing, missing, note: missing.length ? 'Anlage im Page Designer noch nicht automatisiert' : 'alle vorhanden' };
-    } catch (e) { return { created: 0, existing: [], missing: names, note: String(e && e.message || e).slice(0, 80) }; }
-  }, { names });
+    } catch (e) { return { created: 0, existing: [], missing: specs.map((s) => s.name.toUpperCase()), note: String(e && e.message || e).slice(0, 80) }; }
+    const existing = specs.map((s) => s.name.toUpperCase()).filter((n) => have.has(n));
+    const missing = specs.filter((s) => !have.has(s.name.toUpperCase()));
+    if (!create) return { created: 0, existing, missing: missing.map((s) => s.name.toUpperCase()), note: missing.length ? 'read-only Bestandsaufnahme (Anlage nicht angefordert)' : 'alle vorhanden' };
+    if (!missing.length) return { created: 0, existing, missing: [], note: 'alle vorhanden' };
+
+    // Anlage — IMMER in einer Transaction, die im finally geschlossen wird (sonst „Finish pending
+    // Transaction first!" → Seite blockiert). Das ist genau die Disziplin aus pdSetRegionSqlModel.
+    let created = 0; const failed = [];
+    let t = null;
+    try {
+      t = m.transaction && m.transaction.start ? m.transaction.start('aisp', 'create page items') : null;
+      const pageId = m.getCurrentPageId ? m.getCurrentPageId() : undefined;
+      for (const s of missing) {
+        try {
+          if (typeof m.createComponents === 'function') {
+            const props = [{ id: m.PROP.ITEM_NAME, value: s.name }];
+            if (m.PROP.ITEM_TYPE != null) props.push({ id: m.PROP.ITEM_TYPE, value: 'NATIVE_HIDDEN' });
+            m.createComponents(pageId, [{ typeId: m.COMP_TYPE.PAGE_ITEM, properties: props }]);
+            created++;
+          } else { failed.push(s.name + ':no-create-api'); }
+        } catch (e) { failed.push(s.name + ':' + String(e && e.message || e).slice(0, 40)); }
+      }
+    } catch (e) { failed.push('tx:' + String(e && e.message || e).slice(0, 40)); }
+    finally { try { for (const fn of ['execute', 'done', 'commit', 'apply', 'end', 'close']) { if (t && typeof t[fn] === 'function') { t[fn](); break; } } } catch { /* egal */ } }
+    return { created, existing, missing: missing.map((s) => s.name.toUpperCase()), failed: failed.length ? failed : undefined, note: created ? `angelegt: ${created}${failed.length ? `, fehlgeschlagen: ${failed.length}` : ''}` : 'Anlage fehlgeschlagen/kein Create-API — Live-Verifikation nötig' };
+  }, { specs, create: !!opts.create });
 }
 
 /** Setzt die SQL-Quelle einer Region über das Page-Designer-MODELL (window.pe). Nötig, weil der
@@ -621,13 +660,21 @@ export async function uiCreateTestPage(page, o = {}) {
   const attrs = [];
   for (const a of (o.attributes || [])) { if (a && a.prompt && a.value != null && a.value !== '') attrs.push({ prompt: a.prompt, r: await pdSetProp(page, a.prompt, a.value) }); }
 
-  // T-149: Bestandsaufnahme der benötigten Hidden-Page-Items (sicher, read-only) — nur zur Meldung.
-  // Das physische Anlegen im Page Designer + „Items to Submit"-Verdrahtung ist bewusst NOCH NICHT
-  // automatisiert (ein blinder Modell-Add über eine unbestätigte API ließ eine Transaction hängen und
-  // brach die Testseite). Die benötigten Items stehen vollständig im Manifest (pageItems/itemsToSubmit)
-  // für den standalone-MCP/künftige Automatisierung; hier wird nur berichtet, was fehlt.
+  // T-149/T-150: benötigte Hidden-Page-Items. Default read-only (nur Bestandsaufnahme). Mit
+  // o.createPageItems=true werden fehlende Items transaction-sicher angelegt (finally schließt IMMER →
+  // kann die Seite nicht mehr blockieren) und die „Items to Submit"-Liste der Region verdrahtet.
   let pageItems = null;
-  if (o.pageItems && o.pageItems.length) pageItems = await pdCreatePageItems(page, o.pageItems);
+  if (o.pageItems && o.pageItems.length) {
+    pageItems = await pdCreatePageItems(page, o.pageItems, { create: !!o.createPageItems });
+    if (o.createPageItems) {
+      const submit = itemsToSubmitNames(o.pageItems);
+      if (submit.length) {
+        await page.getByText(new RegExp(`^${rxEsc(o.regionName)}$`)).first().click().catch(() => {});
+        await page.waitForTimeout(500);
+        pageItems.itemsToSubmit = await pdSetProp(page, 'Page Items to Submit', submit.join(','));
+      }
+    }
+  }
 
   // Seite öffentlich machen (Page-Root selektieren → „Authentication" = Page Is Public).
   await page.locator('.a-TreeView-label').filter({ hasText: rxi(`Page ${o.pageId}`) }).first().click().catch(() => {}); await page.waitForTimeout(700);

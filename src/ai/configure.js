@@ -9,11 +9,38 @@
  * Resultat: src/ai/configure.js
  */
 
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 import { createBackend } from './backend.js';
+
+/**
+ * Login-/Auth-Zustand des CLI-Backends (claude) für die GUI — OHNE Secrets zu lesen/auszugeben.
+ * Prüft NUR die Ablauf-Zeitstempel in ~/.claude/.credentials.json (claudeAiOauth.expiresAt /
+ * refreshTokenExpiresAt). Ist ein API-Key hinterlegt (B-62), ist das Login egal → headless ok.
+ * Alle Zugriffe injizierbar → deterministisch testbar.
+ * @returns {{method:'api-key'|'oauth', loggedIn:boolean, validUntil:string|null, reason:string|null}}
+ */
+export function cliAuthState({ hasApiKey = false, readFile, exists, home, now } = {}) {
+  if (hasApiKey) return { method: 'api-key', loggedIn: true, validUntil: null, reason: null };
+  const nowMs = now ? now() : Date.now();
+  const file = path.join(home ?? os.homedir(), '.claude', '.credentials.json');
+  const ex = exists ?? ((f) => fs.existsSync(f));
+  const rd = readFile ?? ((f) => fs.readFileSync(f, 'utf8'));
+  if (!ex(file)) return { method: 'oauth', loggedIn: false, validUntil: null, reason: 'nie eingeloggt (keine Credentials-Datei)' };
+  let o;
+  try { o = JSON.parse(rd(file)).claudeAiOauth || {}; }
+  catch { return { method: 'oauth', loggedIn: false, validUntil: null, reason: 'Credentials-Datei nicht lesbar' }; }
+  // eingeloggt, solange Access ODER Refresh noch gültig ist (Access wird per Refresh erneuert)
+  const best = Math.max(Number(o.expiresAt) || 0, Number(o.refreshTokenExpiresAt) || 0);
+  if (best > nowMs) return { method: 'oauth', loggedIn: true, validUntil: new Date(best).toISOString(), reason: null };
+  return { method: 'oauth', loggedIn: false, validUntil: null, reason: best ? `Login abgelaufen am ${new Date(best).toISOString()}` : 'kein Token' };
+}
 
 export function resolveAiBackend(settings, secretStore, deps = {}) {
   const cfg = { ...(settings?.aiBackend ?? { kind: 'stub' }) };
-  if (cfg.kind === 'provider' && cfg.secretRef && secretStore) {
+  // B-62: Key aus dem SecretStore auch für 'cli' auflösen (optionaler headless-Key) — nicht nur 'provider'.
+  if ((cfg.kind === 'provider' || cfg.kind === 'cli') && cfg.secretRef && secretStore) {
     try { cfg.apiKey = secretStore.get(cfg.secretRef) ?? undefined; } catch { /* kein Key */ }
   }
   return createBackend(cfg, deps);

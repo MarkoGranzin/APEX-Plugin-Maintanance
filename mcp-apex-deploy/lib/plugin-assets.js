@@ -114,10 +114,19 @@ export function findRepoSource(repoDir, embeddedName, deps = {}) {
   const exists = deps.exists ?? ((f) => fs.existsSync(f));
   const walk = deps.walk ?? defaultWalk;
   const rel = embeddedName.replace(/^\.?\//, '');
-  if (exists(path.join(repoDir, rel))) return rel; // exakter Pfad (z.B. map/world-tour.json, js/flipcard.min.js)
+  // B-50: embeddedName stammt aus dem (potenziell fremden) Plugin-SQL. Ein exakter Pfad mit ../
+  // oder absoluter Pfad würde aus repoDir ausbrechen und beim Re-Embed fremde Dateien einlesen.
+  if (withinRepo(repoDir, rel) && exists(path.join(repoDir, rel))) return rel; // exakter Pfad (z.B. map/world-tour.json, js/flipcard.min.js)
   const base = path.basename(rel);
   const matches = walk(repoDir).filter((p) => path.basename(p) === base);
   return matches.length === 1 ? matches[0] : null; // nur bei Eindeutigkeit (sonst ehrlich: unklar)
+}
+
+/** B-50: bleibt rel (nach repoDir aufgelöst) innerhalb des Repos? (kein ../, kein absoluter/anderes-Laufwerk-Pfad) */
+function withinRepo(repoDir, rel) {
+  const root = path.resolve(repoDir ?? '.');
+  const r = path.relative(root, path.resolve(root, String(rel ?? '')));
+  return r !== '' && r !== '..' && !r.startsWith('..' + path.sep) && !path.isAbsolute(r);
 }
 
 function defaultWalk(root, sub = '', acc = []) {

@@ -25,10 +25,10 @@ describe('T-94/T-95 Report-Abschnitte', () => {
 
   it('Automatik-Mail: Links zu Mockup UND APEX-Plugin-Seite je Artefakt', () => {
     const { body } = renderReport({
-      updated: [{ artifact: 'APEX-Vanta', change: 'three bump', testResult: 'ok', mockUrl: 'http://localhost:4711/mock/apex-vanta/index.html', apexUrl: 'https://host/ords/r/meetup/200000/20057' }],
+      updated: [{ artifact: 'APEX-Vanta', change: 'three bump', testResult: 'ok', mockUrl: 'http://localhost:4711/mock/apex-vanta/index.html', apexUrl: 'https://host/ords/r/demo/200000/20057' }],
     });
     expect(body).toMatch(/→ Mockup \(Review\): http:\/\/localhost:4711\/mock\/apex-vanta\/index\.html/);
-    expect(body).toMatch(/→ APEX plugin page: https:\/\/host\/ords\/r\/meetup\/200000\/20057/);
+    expect(body).toMatch(/→ APEX plugin page: https:\/\/host\/ords\/r\/demo\/200000\/20057/);
   });
 
   it('ohne Mock/APEX-URL keine Link-Zeilen (nur vorhandene Links erscheinen)', () => {

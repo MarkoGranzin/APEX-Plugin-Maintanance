@@ -92,7 +92,9 @@ export async function setupFromManifest(manifest, connection, o = {}, deps = {})
       // altem Einzel-pageItem (→ als einelementige Liste behandeln).
       const pageItems = m.testPage?.pageItems || (m.testPage?.pageItem ? [m.testPage.pageItem] : []);
       const itemsToSubmit = m.testPage?.itemsToSubmit || pageItems.filter((i) => i?.ajaxItemsToSubmit).map((i) => i.name);
-      result.testPage = await d.uiCreateTestPage(pdPage, { appId: c.appId, pageId, pageName, pluginDisplayName: displayName, regionName, sourceSql, attributes, pageItems, itemsToSubmit });
+      // T-150: createPageItems ist opt-in (Default aus → sichere read-only Bestandsaufnahme). Erst mit
+      // c.createPageItems=true legt uiCreateTestPage fehlende Items transaction-sicher an (Live-Verifikation).
+      result.testPage = await d.uiCreateTestPage(pdPage, { appId: c.appId, pageId, pageName, pluginDisplayName: displayName, regionName, sourceSql, attributes, pageItems, itemsToSubmit, createPageItems: c.createPageItems });
     }
     await pdPage.close().catch(() => {});
 

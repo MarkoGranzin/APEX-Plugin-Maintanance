@@ -19,6 +19,20 @@ import { inspectAssets, parseOk } from '../extract/assets.js';
 import { autoReviewFix as defaultAutoReviewFix } from './autoreview.js';
 import { autoUpdateComponent as defaultAutoUpdate } from './update-component.js';
 
+// B-39: Quick-Fix greift zu weit. detectArtifacts nimmt auch LOSE .js auf — dazu zählen Build-Tooling
+// (gulpfile.js, *.config.js) und Demo/Daten (data/**, examples/**), die NICHT die Plugin-Laufzeit sind.
+// Solche Dateien dürfen nicht deterministisch verändert werden (console.log in einem gulpfile/Demo-Daten
+// ist beabsichtigt). Nur echte Plugin-Assets (in .sql eingebettet oder unter js/src/…) werden gefixt.
+const NON_RUNTIME_DIR_RE = /(^|\/)(data|demo|examples?|docs?|tests?|specs?|scripts?|coverage|fixtures?|mock|mocks)\//i;
+const BUILD_FILE_RE = /(^|\/)(gulpfile|gruntfile)(\.[\w-]+)?\.js$|\.(config|conf)\.[cm]?js$|(^|\/)(webpack|rollup|vite|esbuild|babel|karma|jest|eslint|prettier)\.[\w.-]*js$/i;
+
+/** True, wenn das Asset Build-Tooling oder Demo/Daten ist (kein Plugin-Laufzeitcode) → vom Quick-Fix ausnehmen. */
+export function isNonRuntimeAsset(asset) {
+  const p = asset?.origin?.type === 'file' ? asset.origin.path : asset?.name;
+  const s = String(p || '').split('\\').join('/');
+  return NON_RUNTIME_DIR_RE.test(s) || BUILD_FILE_RE.test(s);
+}
+
 /** Deterministische, sichere Quick-Fixes: console.log/debug & debugger entfernen. */
 export function quickFix(code) {
   let out = code;
@@ -35,10 +49,12 @@ export async function autoFixComponent(store, comp, deps = {}) {
   const now = deps.now ?? (() => new Date().toISOString());
   const protocol = [];
 
-  // 1) deterministische Quick-Fixes (ohne KI)
+  // 1) deterministische Quick-Fixes (ohne KI) — NUR auf echten Plugin-Assets (B-39)
   let quickFixes = 0;
+  let skipped = 0;
   for (const asset of inspectAssets(dir)) {
     if (!asset.origin) continue;
+    if (isNonRuntimeAsset(asset)) { skipped++; continue; } // Build-Tooling/Demo/Daten nie anfassen
     const fixed = quickFix(asset.code);
     if (fixed !== asset.code && parseOk(fixed)) {
       reinjectAsset(asset.origin, fixed, { rootDir: dir });
@@ -46,6 +62,7 @@ export async function autoFixComponent(store, comp, deps = {}) {
       protocol.push({ agent: 'Quick-Fix', file: asset.name, result: 'removed console.log/debugger' });
     }
   }
+  if (skipped) protocol.push({ agent: 'Quick-Fix', file: comp.name, result: `skipped ${skipped} build/demo/data file(s) — not plugin runtime` });
   if (quickFixes === 0) protocol.push({ agent: 'Quick-Fix', file: comp.name, result: 'no deterministically fixable findings' });
 
   // 2) veraltete/verwundbare Bibliotheken aktualisieren

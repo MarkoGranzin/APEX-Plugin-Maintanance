@@ -18,6 +18,21 @@ import { buildInlineLiteral } from './inline.js';
 import { skipString, unquote } from './sql-scan.js';
 
 /**
+ * B-43: Löst einen (potenziell aus fremdem Plugin-SQL stammenden) relativen Pfad innerhalb
+ * von rootDir auf und verweigert jeden Ausbruch (absolute Pfade, ../, anderes Laufwerk).
+ * So kann eine manipulierte sourceMap-Herkunft nicht außerhalb des Repos schreiben/lesen.
+ */
+export function resolveWithin(rootDir, p) {
+  const root = path.resolve(rootDir ?? '.');
+  const abs = path.resolve(root, String(p ?? ''));
+  const rel = path.relative(root, abs);
+  if (rel === '' || rel === '..' || rel.startsWith('..' + path.sep) || path.isAbsolute(rel)) {
+    throw new Error(`Pfad verlässt das Repo-Verzeichnis: ${p}`);
+  }
+  return abs;
+}
+
+/**
  * Ersetzt nur den p_file_content-Ausdruck genau eines create_plugin_file-Aufrufs (minimaler Diff).
  * Single-Literal und g_varchar2_table werden durch EIN base64-Literal ersetzt; bei unverändertem
  * Single-Literal bleibt die Datei byte-identisch.
@@ -58,8 +73,9 @@ export function replacePluginFileContent(sql, fileName, newBase64) {
  */
 export function reinjectAsset(origin, newCode, opts = {}) {
   const rootDir = opts.rootDir ?? '.';
-  const readFile = opts.readFile ?? ((p) => fs.readFileSync(path.join(rootDir, p), 'utf8'));
-  const writeFile = opts.writeFile ?? ((p, c) => fs.writeFileSync(path.join(rootDir, p), c));
+  // Default-FS-Zugriffe sind auf rootDir eingesperrt (B-43); injizierte read/write bleiben unberührt.
+  const readFile = opts.readFile ?? ((p) => fs.readFileSync(resolveWithin(rootDir, p), 'utf8'));
+  const writeFile = opts.writeFile ?? ((p, c) => fs.writeFileSync(resolveWithin(rootDir, p), c));
 
   // 'extraktion-unsicher' → nie automatisch zurückschreiben
   if (opts.bundleStatus === 'extraktion-unsicher' || origin == null) {

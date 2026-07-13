@@ -25,6 +25,10 @@ export function maskConn(conn) {
 export function buildInstallScript(o = {}) {
   if (!o.exportFile) throw new Error('exportFile fehlt');
   if (!o.workspace) throw new Error('workspace fehlt');
+  // B-49: exportFile landet als @"…" im SQLcl-Skript. Ein " oder Zeilenumbruch könnte aus der
+  // Quotierung ausbrechen und beliebige SQLcl-Befehle einschleusen → solche Pfade ablehnen.
+  const exportFile = String(o.exportFile);
+  if (/["\r\n]/.test(exportFile)) throw new Error('exportFile enthält unzulässige Zeichen (", CR/LF)');
   const app = o.appId != null && String(o.appId) !== '' ? Number(o.appId) : null;
   const lines = [
     'whenever sqlerror exit failure rollback',
@@ -34,7 +38,7 @@ export function buildInstallScript(o = {}) {
   ];
   if (app != null) lines.push(`  apex_application_install.set_application_id(${app});`);
   if (o.offset !== false) lines.push('  apex_application_install.generate_offset;');
-  lines.push('end;', '/', `@"${o.exportFile}"`, 'commit;', 'exit');
+  lines.push('end;', '/', `@"${exportFile}"`, 'commit;', 'exit');
   return lines.join('\n') + '\n';
 }
 

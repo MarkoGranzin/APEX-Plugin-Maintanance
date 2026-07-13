@@ -1,8 +1,10 @@
 {
   "name": "plugin-maintenance",
   "version": "0.1.0",
-  "description": "Automatisierte Pflege von APEX-Plugins und Template-Komponenten: Repo anbinden, Artefakte erkennen, kanonisch extrahieren, KI-Tests generieren und ausführen.",
+  "description": "Autonomous maintenance for Oracle APEX plugins and template components: connect a repo, detect artifacts, keep vendored libraries current (incl. re-embedding into the plugin .sql), verify works-as-before, deploy & test in APEX.",
   "type": "module",
+  "license": "MIT",
+  "author": "Marko Granzin",
   "engines": {
     "node": ">=20"
   },

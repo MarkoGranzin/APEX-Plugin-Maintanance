@@ -44,10 +44,15 @@ export function decryptSecret(blob, passphrase) {
   }
 }
 
-/** Maskiert ein Secret für die Anzeige (zeigt nie den vollen Wert). */
+/**
+ * Maskiert ein Secret für die Anzeige (zeigt nie den vollen Wert).
+ * B-42: Bei kurzen Secrets (<12 Zeichen) würden 3 Kopf- + 4 Endzeichen fast den ganzen
+ * Wert preisgeben (bzw. sich überlappen) — daher wird dann NICHTS enthüllt. Head/Tail
+ * nur bei ausreichend langen Secrets, wo der sichtbare Teil ein kleiner Bruchteil bleibt.
+ */
 export function mask(plaintext) {
   const s = String(plaintext ?? '');
-  if (s.length <= 4) return '****';
+  if (s.length < 12) return '****';
   return `${s.slice(0, 3)}${'*'.repeat(Math.max(4, s.length - 7))}${s.slice(-4)}`;
 }
 

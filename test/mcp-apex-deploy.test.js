@@ -60,12 +60,12 @@ describe('F-31 T-129 apex-deploy: generische Testseite (APEX 24.x-Format)', () =
   const CFG = '{"refresh":0,"style":[{"name":"default"}]}';
 
   it('vollständige, importierbare Seite: Header + create_page + Plugin-Region + Footer', () => {
-    const sql = buildTestPageSql({ appId: 200000, pageId: 9999, pluginInternalName: 'APEX.FLOW.CHART.1', workspaceId: '123', owner: 'WKSP_MEETUP' });
+    const sql = buildTestPageSql({ appId: 200000, pageId: 9999, pluginInternalName: 'APEX.FLOW.CHART.1', workspaceId: '123', owner: 'WKSP_DEMO' });
     // Öffentliche wwv_flow_api.*-Aufrufe (versions-stabil, wie echte APEX-Exports) statt interner wwv_flow_imp*.
     expect(sql).toMatch(/wwv_flow_api\.import_begin/);
     expect(sql).toContain('p_default_application_id=>200000');
     expect(sql).toContain('p_default_workspace_id=>123');
-    expect(sql).toContain(`p_default_owner=>'WKSP_MEETUP'`);
+    expect(sql).toContain(`p_default_owner=>'WKSP_DEMO'`);
     expect(sql).toMatch(/wwv_flow_api\.create_page\(/);
     expect(sql).toMatch(/wwv_flow_api\.create_page_plug\(/);
     expect(sql).toContain(`p_plug_source_type=>'NATIVE_PLUGIN_APEX.FLOW.CHART.1'`);
@@ -274,5 +274,30 @@ describe('F-31 T-128 apex-deploy: MCP-Handshake (stdio, dependency-frei)', () =>
     const list = lines.find((m) => m.id === 2);
     const names = list.result.tools.map((t) => t.name);
     expect(names).toEqual(expect.arrayContaining(['apex_install', 'apex_create_test_page', 'apex_test_page', 'apex_info']));
+  });
+});
+
+describe('T-150 Page-Items: reine Normalisierungs-/Submit-Logik', () => {
+  it('normalizePageItems vereinheitlicht Strings und Manifest-Objekte zu {name,type,submit}', () => {
+    const out = apexUi.normalizePageItems([
+      'P1_X',
+      { name: 'P1_Y', type: 'Hidden', ajaxItemsToSubmit: true },
+      { name: 'P1_Z', submit: false },
+      null, { foo: 'bar' },
+    ]);
+    expect(out).toEqual([
+      { name: 'P1_X', type: 'Hidden', submit: false },
+      { name: 'P1_Y', type: 'Hidden', submit: true },
+      { name: 'P1_Z', type: 'Hidden', submit: false },
+    ]);
+  });
+
+  it('itemsToSubmitNames liefert nur die als submit markierten Namen', () => {
+    const items = [
+      { name: 'P1_A', ajaxItemsToSubmit: true },
+      { name: 'P1_B', ajaxItemsToSubmit: false },
+      { name: 'P1_C', ajaxItemsToSubmit: true },
+    ];
+    expect(apexUi.itemsToSubmitNames(items)).toEqual(['P1_A', 'P1_C']);
   });
 });

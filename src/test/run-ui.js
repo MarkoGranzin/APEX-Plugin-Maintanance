@@ -14,6 +14,46 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
 
+// B-48: KI-generierte Specs werden vor dem Ausführen statisch geprüft. Ein reiner Playwright-DOM-Test
+// braucht NIEMALS Node-Fähigkeiten (Prozesse starten, Dateisystem, Netzwerk, eval). Enthält eine Spec
+// solche Konstrukte, wird sie NICHT geschrieben/ausgeführt. Unsere eigenen Mock-Specs (nur
+// '@playwright/test' + process.env.PLUGIN_URL + DOM) passieren die Prüfung.
+const SPEC_DANGER = [
+  [/\bchild_process\b/, 'child_process'],
+  [/\brequire\s*\(/, 'require()'],
+  [/\bimport\s*\(/, 'dynamic import()'],
+  [/\bfrom\s*['"]\s*(?:node:)?(child_process|fs|net|http|https|dns|os|vm|cluster|worker_threads|dgram|tls|repl|inspector|module|process|readline|zlib)\s*['"]/, 'node-core import'],
+  [/\b(execSync|spawnSync|spawn|execFile|fork)\s*\(/, 'process spawn'],
+  [/\bprocess\s*\.\s*(binding|dlopen|exit|kill|abort|setuid|setgid|chdir)\b/, 'process control'],
+  [/\beval\s*\(/, 'eval()'],
+  [/\bnew\s+Function\s*\(/, 'new Function()'],
+  [/\bfs\s*\.\s*(write|append|unlink|rm|rmdir|mkdir|chmod|chown|createWriteStream|readFile|readdir)/, 'fs access'],
+];
+
+/** Statischer Sicherheits-Vorabscan einer generierten Spec. @returns {{safe:boolean, reason?:string}} */
+export function scanSpecSafety(content) {
+  const src = String(content || '');
+  for (const [re, label] of SPEC_DANGER) if (re.test(src)) return { safe: false, reason: label };
+  return { safe: true };
+}
+
+/** Teilt Specs in ausführbare (safe) und blockierte auf. */
+function partitionSafeSpecs(specs) {
+  const safe = [], blocked = [];
+  for (const s of specs) { const v = scanSpecSafety(s.content); if (v.safe) safe.push(s); else blocked.push({ name: s.name, reason: v.reason }); }
+  return { safe, blocked };
+}
+
+// Register aktiver Playwright-/UI-Kindprozesse — damit „Abbrechen" den laufenden Test-Run wirklich killt.
+const _uiChildren = new Set();
+
+/** Killt alle laufenden UI-/Playwright-Kindprozesse (Abbruch). @returns Anzahl gekillter Prozesse */
+export function abortUiChildren() {
+  let n = 0;
+  for (const c of _uiChildren) { try { c.kill('SIGKILL'); n++; } catch { /* egal */ } }
+  return n;
+}
+
 function defaultExec(cmd, args, opts) {
   return new Promise((resolve) => {
     let stdout = '';
@@ -24,11 +64,12 @@ function defaultExec(cmd, args, opts) {
     } catch (e) {
       return resolve({ code: -1, stdout: '', stderr: String(e?.message ?? e) });
     }
+    _uiChildren.add(child);
     const timer = setTimeout(() => { try { child.kill('SIGKILL'); } catch { /* ignore */ } }, opts.timeoutMs ?? 180000);
     child.stdout?.on('data', (d) => { stdout += d; });
     child.stderr?.on('data', (d) => { stderr += d; });
-    child.on('error', (e) => { clearTimeout(timer); resolve({ code: -1, stdout, stderr: stderr + String(e?.message ?? e) }); });
-    child.on('close', (code) => { clearTimeout(timer); resolve({ code: code ?? -1, stdout, stderr }); });
+    child.on('error', (e) => { _uiChildren.delete(child); clearTimeout(timer); resolve({ code: -1, stdout, stderr: stderr + String(e?.message ?? e) }); });
+    child.on('close', (code) => { _uiChildren.delete(child); clearTimeout(timer); resolve({ code: code ?? -1, stdout, stderr }); });
   });
 }
 
@@ -73,7 +114,10 @@ export async function runUiTestsDetailed(component, deps = {}) {
 
   const dir = deps.specsDir;
   fs.mkdirSync(dir, { recursive: true });
-  for (const s of specs) fs.writeFileSync(path.join(dir, s.name), s.content);
+  // B-48: unsichere Specs vor dem Ausführen aussortieren; B-44: nur den Basename schreiben.
+  const { safe, blocked } = partitionSafeSpecs(specs);
+  if (!safe.length) return { ran: false, reason: `Alle Coded-UI-Specs von der Sicherheitsprüfung blockiert: ${blocked.map((b) => `${b.name} (${b.reason})`).join('; ')}` };
+  for (const s of safe) fs.writeFileSync(path.join(dir, path.basename(s.name)), s.content);
   const exec = deps.exec ?? defaultExec;
   const { code, stdout, stderr } = await exec('npx', ['playwright', 'test', '--reporter=json'], {
     cwd: dir, env: { ...process.env, PLUGIN_URL: url }, timeoutMs: deps.timeoutMs ?? 180000,
@@ -97,7 +141,10 @@ export async function runUiTests(component, deps = {}) {
 
   const dir = deps.specsDir;
   fs.mkdirSync(dir, { recursive: true });
-  for (const s of specs) fs.writeFileSync(path.join(dir, s.name), s.content);
+  // B-48: unsichere Specs aussortieren; B-44: nur den Basename schreiben.
+  const { safe, blocked } = partitionSafeSpecs(specs);
+  if (!safe.length) return { ran: false, reason: `Alle Coded-UI-Specs von der Sicherheitsprüfung blockiert: ${blocked.map((b) => `${b.name} (${b.reason})`).join('; ')}` };
+  for (const s of safe) fs.writeFileSync(path.join(dir, path.basename(s.name)), s.content);
 
   const exec = deps.exec ?? defaultExec;
   const { code, stdout, stderr } = await exec('npx', ['playwright', 'test', '--reporter=list'], {

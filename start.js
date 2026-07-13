@@ -27,6 +27,7 @@ import { importFromFiles } from './src/service/import-file.js';
 import { saveFeedback, createFeedbackTest } from './src/service/feedback.js';
 import { buildSetupManifest } from './mcp-apex-deploy/lib/apex.js';
 import { createComponentStore } from './src/gui/store.js';
+import { recoverInterruptedRun } from './src/service/run-guard.js';
 import { apiHandler, metaApiHandler } from './src/gui/api.js';
 import { defaultGather } from './src/gui/components.js';
 import { syncRepo } from './src/service/workspace.js';
@@ -39,7 +40,8 @@ import { checkLibrariesOnline, libWarningFrom } from './src/service/lib-check.js
 import { buildSbom } from './src/sbom/sbom.js';
 import { autoFixComponent } from './src/service/autofix.js';
 import { maintainComponent } from './src/service/maintain.js';
-import { runUiTests, runUiTestsDetailed } from './src/test/run-ui.js';
+import { runUiTests, runUiTestsDetailed, abortUiChildren } from './src/test/run-ui.js';
+import { abortAiChildren } from './src/ai/backend.js';
 import { captureBaseline, compareToBaseline } from './src/service/baseline.js';
 import { redevelopComponent } from './src/service/redev.js';
 import { generateAiMock, writeMock, refineMock, mockInputFingerprint, MOCK_SPEC_VERSION, runMockSelfTests, pluginInterface } from './src/test/mock.js';
@@ -50,7 +52,7 @@ import { reinjectAsset } from './src/extract/reinject.js';
 import { uploadFix } from './src/service/upload.js';
 import { authenticatedPushUrl, redactToken } from './src/run/git-auth.js';
 import { slug as slugify } from './src/util/slug.js';
-import { resolveAiBackend, aiBackendView } from './src/ai/configure.js';
+import { resolveAiBackend, aiBackendView, cliAuthState } from './src/ai/configure.js';
 import { createPrRegistry } from './src/run/dedup.js';
 import { SecretStore } from './src/config/secrets.js';
 import { renderReport } from './src/report/mail.js';
@@ -133,6 +135,17 @@ function cmdServe(portArg) {
   const store = createComponentStore({ file: path.join(DATA_DIR, 'components.json') });
   const record = (entry) => recordRun(history, entry);
 
+  // B-58: Crash-Recovery beim Start. Ist ein Dienst mitten in einem Pflegelauf gestorben, blieb ein
+  // Run-Marker (.maintenance/run.json) samt persistierter Backups zurück. Diese Läufe sauber ABSCHLIESSEN,
+  // indem der halb-aktualisierte Stand aus den Backups zurückgerollt wird — kein halb-verifizierter Rest.
+  for (const c of store.list()) {
+    try {
+      if (!c.path || !fs.existsSync(c.path)) continue;
+      const rec = recoverInterruptedRun(c.path);
+      if (rec.recovered) console.log(`[recovery] ${c.name}: unterbrochener Lauf zurückgerollt (${rec.restored} wiederhergestellt, ${rec.removed} entfernt)`);
+    } catch { /* best effort */ }
+  }
+
   // Prüfprotokoll-Archiv je Komponente (F-22) — bleibt auch erhalten, wenn die GUI zu war
   const logDir = path.join(DATA_DIR, 'logs');
   const compLogDir = (component) => path.join(logDir, slugify(component.name));
@@ -192,6 +205,11 @@ function cmdServe(portArg) {
   // F-29+: aktueller Schritt je laufender Komponente (z.B. „Mock: Analyse…") → GUI zeigt, WAS gerade passiert.
   const STEP = new Map();
   const setStep = (id, step) => { if (id) STEP.set(id, step); };
+  // B-59: Abbruch. CANCELLED markiert Komponenten, deren Lauf abgebrochen werden soll — die Pipeline
+  // prüft das kooperativ zwischen den Phasen; zusätzlich werden die laufenden Kindprozesse (claude/Playwright)
+  // gekillt, damit die Arbeit WIRKLICH stoppt (nicht nur das Flag). isCancelled() ist der Prüf-Hook.
+  const CANCELLED = new Set();
+  const isCancelled = (id) => CANCELLED.has(id);
   // Auto-Mock je Plugin (F-28/T-97/T-99): self-contained Testseite + generierte Tests INS REPO schreiben
   // (unter <repo>/.maintenance/), damit sie beim Upload mitcommittet werden; von dort statisch ausliefern.
   // KI-first (T-101): die KI schreibt aus der Analyse einen plugin-spezifischen Mock; ohne KI Fallback
@@ -389,18 +407,22 @@ function cmdServe(portArg) {
   // Migration (redevelopComponent, B-17 tauscht die Libs real) → adopt „wie zuvor" / sonst Rollback.
   const fullMaintain = async (component, opts = {}) => {
     const id = component.id;
+    CANCELLED.delete(id); // B-59: frischer Lauf startet nicht als „abgebrochen"
     RUNNING.add(id); // F-29: auch autonome Läufe (Scheduler/Cron) zeigen den „running…"-Indikator in der GUI
+    const bail = () => { if (isCancelled(id)) throw new Error('__CANCELLED__'); }; // kooperativer Abbruch-Punkt
     try {
     const ai = resolveAiBackend(settings, secretStore);
     const hasPlaywright = fs.existsSync(path.join(__dirname, 'node_modules', '@playwright', 'test'));
     const specsDir = path.join(DATA_DIR, 'ui-tests', slugify(component.name));
     await buildMockFor(store.get(id)); // Auto-Mock sicherstellen (Default-UI-Test-Ziel)
+    bail(); // B-59
     const maintainOpts = { ai, updateDeps: { push: localGitPush(component.path), registry: prRegistry, recordRun: record }, logSink: writeLog, onTestPlan, onSbom, recordRun: record, verifyNative: verifyNativeFor(store.get(id)) };
     // T-153: tiefes Vorher/Nachher-Gate im regulären Lauf — Baseline (vorher) einfrieren, nach Änderungen den
     // Mock „nachher" bauen und die UI-Szenarien gegen die Baseline vergleichen; Regression → Rollback.
     Object.assign(maintainOpts, { worksAsBefore: true, captureBaseline, compareToBaseline, runDetailed: runUiTestsDetailed, hasPlaywright, specsDir, rebuildMock: async () => { await buildMockFor(store.get(id)); } });
     if (opts.autoUpload) { maintainOpts.autoUpload = true; maintainOpts.upload = uploadFor(true); } // Job: bei grün auto-commit (Push nur bei allowPush)
     const r = await maintainComponent(store, store.get(id), maintainOpts);
+    bail(); // B-59
     const breaking = (r.steps || []).filter((s) => s.step === 'migrate' && s.skipped);
     if (breaking.length && r.skipped !== true) {
       if (!hasPlaywright) r.migration = { skipped: true, reason: 'Playwright not installed — needed for the verified migration (Tests tab → Install Playwright)' };
@@ -425,6 +447,7 @@ function cmdServe(portArg) {
     // Teil der Pflege (F-31): das GEPFLEGTE Plugin real in die echte APEX-App einspielen und die Seite
     // prüfen — „alles macht die Maintenance". Nur wenn ein APEX-Ziel konfiguriert ist (sonst übersprungen).
     // Generisch: eigene Seite je Plugin aus dem Register; die Seite wird im Page Designer aufgebaut (B-30).
+    bail(); // B-59: vor dem (langen) APEX-Deploy nochmal auf Abbruch prüfen
     try {
       const t = settings.apexTarget || {}; let pass; try { pass = secretStore.get('apex-pass'); } catch { /* kein Passwort */ }
       const exportFile = component.path ? findPluginExport(component.path) : null;
@@ -445,7 +468,16 @@ function cmdServe(portArg) {
       }
     } catch (e) { writeLog(component, `[apex-live] übersprungen: ${e?.message ?? e}`); }
     return r;
-    } finally { RUNNING.delete(id); }
+    } catch (e) {
+      // B-59: Abbruch (durch Kindprozess-Kill ausgelöste Rejection ODER kooperativer bail()) → die bereits
+      // angewandten Änderungen aus den persistierten Backups zurückrollen und ehrlich melden.
+      if (isCancelled(id) || String(e?.message || '').includes('__CANCELLED__')) {
+        try { const rec = recoverInterruptedRun(component.path); writeLog(component, `[cancel] abgebrochen — ${rec.recovered ? `zurückgerollt (${rec.restored} wiederhergestellt, ${rec.removed} entfernt)` : 'nichts zurückzurollen'}`); } catch { /* egal */ }
+        try { store.update(id, { mockNote: 'Lauf abgebrochen — Kindprozesse beendet, Änderungen zurückgerollt' }); } catch { /* egal */ }
+        return { cancelled: true, component: component.name };
+      }
+      throw e;
+    } finally { CANCELLED.delete(id); RUNNING.delete(id); }
   };
 
   // API-Kontexte (T-32/T-34, F-18, F-19)
@@ -508,7 +540,21 @@ function cmdServe(portArg) {
 
     // Health/Build-Marker: das Frontend vergleicht ihn mit seinem APP_BUILD und warnt bei Abweichung
     // F-29: welche Komponenten gerade einen langen Lauf haben (clone/maintain/migrate/…) → GUI-Spinner
-    if (p === '/api/running') return json(res, { running: [...RUNNING], steps: Object.fromEntries(STEP), lastScheduledRunAt, scheduledRunning });
+    if (p === '/api/running') return json(res, { running: [...RUNNING], steps: Object.fromEntries(STEP), cancelling: [...CANCELLED], lastScheduledRunAt, scheduledRunning });
+
+    // B-59: Laufenden Lauf ABBRECHEN. Markiert die Komponente als abgebrochen (kooperativer Bail zwischen den
+    // Phasen) UND killt die laufenden Kindprozesse (claude/Playwright) → die Arbeit stoppt wirklich. Der Lauf
+    // rollt seine bereits angewandten Änderungen aus den persistierten Backups zurück (run-guard).
+    if (p.startsWith('/api/components/') && p.endsWith('/cancel') && req.method === 'POST') {
+      const id = p.split('/')[3];
+      const c = store.get(id);
+      if (!c) return json(res, { error: 'not found' }, 404);
+      if (!RUNNING.has(id)) return json(res, { cancelled: false, reason: 'kein laufender Lauf' });
+      CANCELLED.add(id);
+      const killed = abortAiChildren() + abortUiChildren();
+      setStep(id, 'Abbruch… (Kindprozesse beendet, Rollback)');
+      return json(res, { cancelled: true, killed });
+    }
 
     if (p === '/api/health') return json(res, { ok: true, build: BUILD, hasPlaywright: fs.existsSync(path.join(__dirname, 'node_modules', '@playwright', 'test')), aiReady: resolveAiBackend(settings, secretStore).kind !== 'stub', features: ['vendored-libs', 'sbom', 'deep-tests', 'maintain', 'web-libcheck', 'ui-tests', 'pr-upload', 'lib-update', 'auto-repair', 'characterization', 'redev', 'licenses'] });
 
@@ -538,6 +584,29 @@ function cmdServe(portArg) {
         const r = be.testConnection ? await be.testConnection() : { ok: true, note: be.kind };
         return json(res, { kind: be.kind, ...r });
       } catch (err) { return json(res, { ok: false, error: String(err?.message ?? err) }, 200); }
+    }
+    // B-62/GUI: Login-Zustand des CLI-Backends (nur Ablaufdaten, keine Secrets) → Anzeige in den Settings.
+    if (p === '/api/ai/auth' && req.method === 'GET') {
+      const cfg = settings.aiBackend ?? { kind: 'stub' };
+      if (cfg.kind !== 'cli') return json(res, { kind: cfg.kind, applicable: false });
+      let hasApiKey = false; try { hasApiKey = !!(cfg.secretRef && secretStore.get(cfg.secretRef)); } catch { /* kein Key */ }
+      return json(res, { kind: 'cli', applicable: true, ...cliAuthState({ hasApiKey }) });
+    }
+    // Öffnet auf dem Desktop ein Terminal mit der konfigurierten claude-CLI für /login (der OAuth-Link ist
+    // dynamisch und entsteht erst im claude-Prozess — deshalb Terminal statt Direktlink). Nur sinnvoll, wenn
+    // der Dienst in der Nutzer-Sitzung läuft (Start.cmd) — sonst erscheint kein Fenster (Hinweis in der GUI).
+    if (p === '/api/ai/login' && req.method === 'POST') {
+      try {
+        const { resolveCliCommand } = await import('./src/ai/backend.js');
+        const cmd = resolveCliCommand((settings.aiBackend ?? {}).command || 'claude');
+        const { spawn } = await import('node:child_process');
+        if (process.platform === 'win32') {
+          spawn('cmd', ['/c', 'start', 'claude login', 'cmd', '/k', `"${cmd}" /login`], { detached: true, stdio: 'ignore', shell: true }).unref();
+        } else {
+          spawn('sh', ['-c', `x-terminal-emulator -e '${cmd} /login' || open -a Terminal '${cmd}'`], { detached: true, stdio: 'ignore' }).unref();
+        }
+        return json(res, { ok: true, command: cmd, note: 'Terminal geöffnet — dort den Browser-Login bestätigen (falls nötig /login eingeben).' });
+      } catch (e) { return json(res, { ok: false, error: String(e?.message ?? e) }, 500); }
     }
     if (p === '/api/ai/key' && req.method === 'POST') {
       const body = await readBody(req);

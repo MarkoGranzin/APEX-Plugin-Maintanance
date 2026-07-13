@@ -158,19 +158,26 @@ export function resolveCliCommand(command, env = process.env) {
   return command;
 }
 
-/** Lokale CLI: kein API-Key nötig; Prompt geht an den Befehl, Antwort kommt aus stdout. */
+/**
+ * Lokale CLI: Prompt geht an den Befehl, Antwort kommt aus stdout.
+ * B-62: config.apiKey ist OPTIONAL. Ist er gesetzt, wird ANTHROPIC_API_KEY ins Child-Env injiziert →
+ * claude authentifiziert HEADLESS (kein interaktives Login, funktioniert in jeder Session/Scheduler).
+ * Ohne Key bleibt das Env unverändert → claude nutzt das interaktive Login (bisheriges Verhalten).
+ */
 export function cliBackend(config, deps = {}) {
   const run = deps.spawn ?? defaultSpawn;
   const resolve = deps.resolveCommand ?? resolveCliCommand;
   const cmd = resolve(config.command); // bares `claude` (win32) → gebündelte Desktop-Binary, falls vorhanden
   const args = config.args ?? cliArgsFor(config.command); // z.B. claude → ['-p'] (Print-Modus)
+  const apiKey = config.apiKey || undefined; // optional (headless-Auth)
   return {
     kind: 'cli',
     requiresApiKey: false,
     resolvedCommand: cmd,
+    usesApiKey: !!apiKey,
     async complete(prompt, opts = {}) {
       try {
-        const { stdout } = await run(cmd, args, { input: prompt });
+        const { stdout } = await run(cmd, args, { input: prompt, apiKey });
         return String(stdout).trim();
       } catch (err) {
         const msg = String(err?.message ?? err);
@@ -183,14 +190,28 @@ export function cliBackend(config, deps = {}) {
     },
     async testConnection() {
       try {
-        await run(cmd, ['--version'], {});
-        return { ok: true, command: cmd };
+        await run(cmd, ['--version'], { apiKey });
+        return { ok: true, command: cmd, headless: !!apiKey };
       } catch (err) {
         const hint = /ENOENT/i.test(String(err?.message ?? err)) ? ' — not found on PATH (install it or set the full path in settings)' : '';
         return { ok: false, error: `CLI "${cmd}" not callable: ${err?.message ?? err}${hint}` };
       }
     },
   };
+}
+
+/**
+ * B-41: Der API-Key geht als `Authorization: Bearer …` an config.endpoint. Damit der Key nicht
+ * versehentlich im Klartext (http) oder an eine Nicht-URL geschickt wird, muss der Endpoint eine
+ * gültige http(s)-URL sein und https nutzen (Ausnahme: localhost für lokale Provider wie ollama).
+ */
+export function assertSafeEndpoint(endpoint) {
+  let u;
+  try { u = new URL(String(endpoint)); } catch { throw new Error('AI-Provider-Endpoint ist keine gültige URL'); }
+  if (u.protocol !== 'https:' && u.protocol !== 'http:') throw new Error(`AI-Provider-Endpoint muss http(s) sein, nicht ${u.protocol}`);
+  const isLocal = /^(localhost|127\.0\.0\.1|\[?::1\]?)$/i.test(u.hostname);
+  if (u.protocol !== 'https:' && !isLocal) throw new Error('AI-Provider-Endpoint muss https nutzen (sonst würde der API-Key im Klartext übertragen)');
+  return u;
 }
 
 /** Provider+API-Key: braucht gültigen Key; ungültiger Key blockiert produktive Läufe. */
@@ -204,6 +225,7 @@ export function providerBackend(config, deps = {}) {
     kind: 'provider',
     requiresApiKey: true,
     async complete(prompt, opts = {}) {
+      assertSafeEndpoint(config.endpoint);
       const res = await http(config.endpoint, {
         method: 'POST',
         headers: auth(),
@@ -218,6 +240,7 @@ export function providerBackend(config, deps = {}) {
     async testConnection() {
       try {
         if (!config.apiKey) return { ok: false, error: 'Kein API-Key gesetzt' };
+        assertSafeEndpoint(config.endpoint);
         const res = await http(config.endpoint, { method: 'GET', headers: auth() });
         if (res.status === 401 || res.status === 403) return { ok: false, error: 'Ungültiger API-Key' };
         if (res.status >= 400) return { ok: false, error: `Provider-Fehler ${res.status}` };
@@ -229,20 +252,36 @@ export function providerBackend(config, deps = {}) {
   };
 }
 
-async function defaultSpawn(command, args, { input } = {}) {
+// Register aktiver KI-Kindprozesse — damit ein „Abbrechen" den laufenden claude-Call wirklich killt
+// (nur so stoppt die Arbeit; ein reines Flag würde claude weiterlaufen lassen). Da immer nur EIN
+// Pflegelauf gleichzeitig läuft (globale Sperre), reicht „alle aktiven Kinder killen".
+const _aiChildren = new Set();
+
+/** Killt alle laufenden KI-Kindprozesse (Abbruch). @returns Anzahl gekillter Prozesse */
+export function abortAiChildren() {
+  let n = 0;
+  for (const c of _aiChildren) { try { c.kill('SIGKILL'); n++; } catch { /* egal */ } }
+  return n;
+}
+
+async function defaultSpawn(command, args, { input, apiKey } = {}) {
   const { spawn } = await import('node:child_process');
   return new Promise((resolve, reject) => {
     // Windows: für Shims (.cmd/.bat/.ps1) oder bare Namen braucht spawn shell:true, sonst ENOENT.
     // Eine direkt startbare .exe (z.B. aufgelöste Desktop-Binary) wird OHNE shell gestartet — das
     // vermeidet die DEP0190-Warnung und das Arg-Quoting-Risiko. Der Prompt geht ohnehin über stdin.
     const isExe = /\.exe$/i.test(command);
-    const p = spawn(command, args, { stdio: ['pipe', 'pipe', 'pipe'], shell: process.platform === 'win32' && !isExe });
+    // B-62: mit Key headless authentifizieren (ANTHROPIC_API_KEY ins Child-Env); ohne Key process.env erben.
+    const env = apiKey ? { ...process.env, ANTHROPIC_API_KEY: apiKey } : undefined;
+    const p = spawn(command, args, { stdio: ['pipe', 'pipe', 'pipe'], shell: process.platform === 'win32' && !isExe, env });
+    _aiChildren.add(p);
+    const done = () => _aiChildren.delete(p);
     let stdout = '';
     let stderr = '';
     p.stdout.on('data', (d) => (stdout += d));
     p.stderr.on('data', (d) => (stderr += d));
-    p.on('error', reject);
-    p.on('close', (code) => (code === 0 ? resolve({ stdout, stderr }) : reject(new Error(stderr || `exit ${code}`))));
+    p.on('error', (e) => { done(); reject(e); });
+    p.on('close', (code) => { done(); code === 0 ? resolve({ stdout, stderr }) : reject(new Error(stderr || `exit ${code}`)); });
     if (input != null) p.stdin.end(input);
   });
 }

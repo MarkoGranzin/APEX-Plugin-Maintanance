@@ -22,6 +22,7 @@ import { autoFixComponent } from './autofix.js';
 import { applyVendoredUpdates, rollbackUpdates } from './lib-update.js';
 import { planReplacements } from './lib-replace.js';
 import { captureBaseline as defaultCaptureBaseline, compareToBaseline as defaultCompareToBaseline } from './baseline.js';
+import { beginRun, persistBackups, finishRun } from './run-guard.js';
 
 export async function maintainComponent(store, comp, deps = {}) {
   const now = deps.now ?? (() => new Date().toISOString());
@@ -75,6 +76,12 @@ export async function maintainComponent(store, comp, deps = {}) {
     appliedLibs = upd.results.filter((r) => r.applied).length;
     breakingLibs = upd.results.filter((r) => r.breaking && !r.applied);
     for (const r of upd.results) steps.push({ step: 'lib-update', name: r.name, from: r.from, to: r.to, applied: r.applied, reason: r.reason });
+    // B-58: Backups NACH dem Anwenden auf Platte sichern → stirbt der Dienst vor dem works-as-before-Gate,
+    // rollt der nächste Start den halb-aktualisierten Stand aus diesen persistierten Backups zurück.
+    // NUR bei real existierendem Repo-Verzeichnis — sonst würden Fake-Pfade (Tests) Phantom-.maintenance anlegen.
+    if (appliedLibs && libBackups && libBackups.size && comp.path && fs.existsSync(comp.path)) {
+      try { beginRun(comp.path, { startedAt: now(), component: comp.name }); persistBackups(comp.path, libBackups); } catch { /* best effort */ }
+    }
   } catch (e) { steps.push({ step: 'lib-update', error: String(e?.message ?? e) }); }
 
   // 3) Auto-Fix: deterministisch + KI (falls Backend) + ALLE relevanten Lib-Updates
@@ -166,6 +173,9 @@ export async function maintainComponent(store, comp, deps = {}) {
       repo: comp.repo ?? null,
     });
   }
+  // B-58: Lauf sauber zu Ende gebracht (adoptiert ODER regulär zurückgerollt) → persistierte Backups/Marker
+  // räumen, damit der nächste Start diesen Lauf NICHT fälschlich als „unterbrochen" zurückrollt.
+  try { finishRun(comp.path); } catch { /* best effort */ }
   return { component: comp.name, skipped: false, before: r1.status, after: r2.status, status, steps, fix: fixResult, worksAsBefore: wab };
 }
 
