@@ -84,35 +84,35 @@ const c = (col, s) => `${C[col]}${s}${C.reset}`;
 function printScan(result) {
   console.log(c('bold', `\n  Plugin Maintenance — Scan: ${result.repoDir}\n`));
   if (result.artifacts.length === 0) {
-    console.log(c('yellow', '  Keine APEX-Plugins/Template-Komponenten erkannt.\n'));
+    console.log(c('yellow', '  No APEX plugins/template components detected.\n'));
     return;
   }
   for (const a of result.artifacts) {
     const statusCol = a.status === 'ok' ? 'green' : a.status === 'extraktion-unsicher' ? 'red' : 'yellow';
     console.log(`  ${c('bold', a.name)} ${c('dim', `(${a.type})`)}  ${c(statusCol, a.status ?? 'ok')}`);
-    console.log(`    Format: ${a.format}   Test-Pfad: ${a.testPath ?? c('yellow', 'zu klären')}`);
+    console.log(`    Format: ${a.format}   Test path: ${a.testPath ?? c('yellow', 'to clarify')}`);
     console.log(`    Assets: js=${a.assets.js} css=${a.assets.css} inline=${a.assets.inline} urls=${a.assets.referencedUrls}`);
-    if (a.entryPoints.length) console.log(c('dim', `    Einstiegspunkte: ${a.entryPoints.join(', ')}`));
+    if (a.entryPoints.length) console.log(c('dim', `    Entry points: ${a.entryPoints.join(', ')}`));
     for (const comp of a.components) console.log(c('dim', `    Lib: ${comp.name}@${comp.version} (${comp.detectedBy})`));
     for (const u of a.updates) if (u.outdated) console.log(c('yellow', `    ⬆ Update: ${u.name} ${u.current} → ${u.latest}`));
     for (const r of a.risks) console.log(c('red', `    ${r.label} ${r.name}: ${r.reasons.join('; ')}`));
-    for (const f of a.static.retire.findings) console.log(c('red', `    ⚠ Schwachstelle: ${f.lib}@${f.version} (${f.vuln}, fix ab ${f.fixedFrom})`));
+    for (const f of a.static.retire.findings) console.log(c('red', `    ⚠ Vulnerability: ${f.lib}@${f.version} (${f.vuln}, fixed from ${f.fixedFrom})`));
     if (!a.static.lint.ok) console.log(c('red', `    Lint: ${a.static.lint.findings.map((f) => f.message).join('; ')}`));
   }
   const t = result.triage.inconsistency;
-  console.log(c('cyan', `\n  Kennzahl: ${t.text}`));
+  console.log(c('cyan', `\n  Metric: ${t.text}`));
   if (result.triage.triageList.length) {
-    console.log(c('yellow', `  Braucht Entscheidung: ${result.triage.triageList.map((x) => x.name).join(', ')}`));
+    console.log(c('yellow', `  Needs decision: ${result.triage.triageList.map((x) => x.name).join(', ')}`));
   }
   console.log('');
-  console.log(c('bold', '  Report-Vorschau:'));
+  console.log(c('bold', '  Report preview:'));
   console.log(result.report.body.split('\n').map((l) => '    ' + l).join('\n'));
   console.log('');
 }
 
 function cmdScan(repoPath) {
-  if (!repoPath) return fail('Bitte einen Repo-Pfad angeben:  node start.js scan <pfad>');
-  if (!fs.existsSync(repoPath)) return fail(`Pfad nicht gefunden: ${repoPath}`);
+  if (!repoPath) return fail('Please provide a repo path:  node start.js scan <path>');
+  if (!fs.existsSync(repoPath)) return fail(`Path not found: ${repoPath}`);
   const result = scanRepo(repoPath);
   printScan(result);
 }
@@ -142,7 +142,7 @@ function cmdServe(portArg) {
     try {
       if (!c.path || !fs.existsSync(c.path)) continue;
       const rec = recoverInterruptedRun(c.path);
-      if (rec.recovered) console.log(`[recovery] ${c.name}: unterbrochener Lauf zurückgerollt (${rec.restored} wiederhergestellt, ${rec.removed} entfernt)`);
+      if (rec.recovered) console.log(`[recovery] ${c.name}: interrupted run rolled back (${rec.restored} restored, ${rec.removed} removed)`);
     } catch { /* best effort */ }
   }
 
@@ -240,19 +240,19 @@ function cmdServe(portArg) {
       // enthalten. Ein degradierter/statischer Mock (z.B. nach Rollback ohne KI) gilt sonst fälschlich als grün.
       if (known) { try { const html = fs.readFileSync(path.join(mockDir, 'index.html'), 'utf8'); if (!/__views|__selftested|__features/.test(html)) { known = false; try { fs.rmSync(fpPath, { force: true }); } catch { /* egal */ } } } catch { known = false; } }
       if (exists && known && !upgrade) {
-        if (opts.force) writeLog(component, '[mock] bekannte Version (Fingerprint match) — KI-Untersuchung übersprungen, eingecheckter Mock wiederverwendet');
+        if (opts.force) writeLog(component, '[mock] known version (fingerprint match) — AI investigation skipped, reusing the checked-in mock');
         // Self-Test-Bilanz + Modus aus der Fingerprint-Datei wiederherstellen (Badge/Anzeige stimmt auch beim Cache-Treffer).
         const sc = (fpFile && typeof fpFile.total === 'number') ? { views: fpFile.views ?? null, total: fpFile.total, failed: fpFile.failed ?? 0 } : (cur0.mockSelfCheck || null);
         store.update(component.id, { mockUrl, mockFingerprint: fp, mockMode: fpFile?.mode || cur0.mockMode || 'ai', mockSelfCheck: sc, ...(cur0.uiTestUrl ? {} : { uiTestUrl: mockUrl }) });
         return mockUrl;
       }
-      setStep(component.id, 'Mock: Plugin wird untersucht…');
+      setStep(component.id, 'Mock: investigating plugin…');
       const gen = await generateAiMock(component.path, { ai, name: component.name, onStep: (s) => setStep(component.id, `Mock: ${s}`) }); // KI schreibt; Fallback statisch
       writeMock(mockDir, component.path, gen); // committet (git add .)
       // Selbstkorrektur-Schleife: Self-Tests headless laufen lassen; rote (Fehl-Charakterisierungen) lässt die KI
       // generisch nachbessern (Ist-Werte statt geratener Konstanten) → bis grün. Für JEDES Plugin, ohne Handarbeit.
       try {
-        setStep(component.id, 'Mock: Self-Tests prüfen…');
+        setStep(component.id, 'Mock: checking self-tests…');
         const ref = await refineMock(gen, {
           ai, url: mockUrl, name: component.name,
           write: (html) => writeMock(mockDir, component.path, { ...gen, html }),
@@ -266,7 +266,7 @@ function cmdServe(portArg) {
           // → Grundlage für eine spätere slice-weise Neuentwicklung (F-30/T-117).
           try { const contract = acceptanceFromSelfTest(ref.after, { name: component.name, at: new Date().toISOString(), interface: pluginInterface(component.path) }); if (!contract.error) writeAcceptance(component.path, contract); } catch { /* best effort */ }
         }
-      } catch (e) { writeLog(component, `[mock-selfcheck] übersprungen: ${e?.message ?? e}`); }
+      } catch (e) { writeLog(component, `[mock-selfcheck] skipped: ${e?.message ?? e}`); }
       const testsDir = path.join(component.path, '.maintenance', 'tests');
       fs.mkdirSync(testsDir, { recursive: true });
       fs.writeFileSync(path.join(testsDir, gen.spec.name), gen.spec.content);
@@ -334,7 +334,7 @@ function cmdServe(portArg) {
 
   // Verschlüsselter Secret-Speicher (T-12) für interne Repo-Zugangsdaten (F-21)
   const masterKey = process.env.AISPP_MASTER_KEY || 'dev-insecure-key';
-  if (masterKey === 'dev-insecure-key') console.log(c('yellow', '  Hinweis: AISPP_MASTER_KEY nicht gesetzt — Secrets werden mit unsicherem Dev-Key verschlüsselt.'));
+  if (masterKey === 'dev-insecure-key') console.log(c('yellow', '  Note: AISPP_MASTER_KEY not set — secrets are encrypted with an insecure dev key.'));
   const secretsFile = path.join(DATA_DIR, 'secrets.json');
   let initialBlobs = {};
   try { if (fs.existsSync(secretsFile)) initialBlobs = JSON.parse(fs.readFileSync(secretsFile, 'utf8')).blobs ?? {}; } catch {}
@@ -461,20 +461,20 @@ function cmdServe(portArg) {
           store.update(id, { apexPageId: pageId });
           settings.apexTarget = { ...t, nextPageId: pageId + 1 }; try { saveSettings(); } catch { /* egal */ }
         }
-        setStep(id, `APEX: einspielen & prüfen (Seite ${pageId})…`);
+        setStep(id, `APEX: deploy & verify (page ${pageId})…`);
         const al = await deployAndTest({ exportFile, pageId, target: { baseUrl: t.baseUrl, workspace: t.workspace, user: t.loginUser, pass, appId: Number(t.appId), alias: t.alias, workspaceId: t.workspaceId, owner: t.owner, release: t.release } });
         try { store.addReview(id, { kind: 'apex-live', pass: al.ok, rendered: !!al.render?.rendered, apexError: al.render?.apexError || null, url: al.render?.url || null, plugin: al.plugin, pageId }); } catch { /* egal */ }
         r.apexLive = { ok: al.ok, rendered: !!al.render?.rendered, url: al.render?.url || null, pageId, plugin: al.plugin };
         (r.steps = r.steps || []).push({ step: 'apex-live', ok: al.ok, rendered: !!al.render?.rendered, url: al.render?.url || null });
-        writeLog(component, `[apex-live] Seite ${pageId}: ${al.ok ? 'gerendert ✓' : 'nicht bestätigt'} (${al.render?.url || ''})`);
+        writeLog(component, `[apex-live] page ${pageId}: ${al.ok ? 'rendered ✓' : 'not confirmed'} (${al.render?.url || ''})`);
       }
-    } catch (e) { writeLog(component, `[apex-live] übersprungen: ${e?.message ?? e}`); }
+    } catch (e) { writeLog(component, `[apex-live] skipped: ${e?.message ?? e}`); }
     return r;
     } catch (e) {
       // B-59: Abbruch (durch Kindprozess-Kill ausgelöste Rejection ODER kooperativer bail()) → die bereits
       // angewandten Änderungen aus den persistierten Backups zurückrollen und ehrlich melden.
       if (isCancelled(id) || String(e?.message || '').includes('__CANCELLED__')) {
-        try { const rec = recoverInterruptedRun(component.path); writeLog(component, `[cancel] abgebrochen — ${rec.recovered ? `zurückgerollt (${rec.restored} wiederhergestellt, ${rec.removed} entfernt)` : 'nichts zurückzurollen'}`); } catch { /* egal */ }
+        try { const rec = recoverInterruptedRun(component.path); writeLog(component, `[cancel] cancelled — ${rec.recovered ? `rolled back (${rec.restored} restored, ${rec.removed} removed)` : 'nothing to roll back'}`); } catch { /* egal */ }
         try { store.update(id, { mockNote: 'Lauf abgebrochen — Kindprozesse beendet, Änderungen zurückgerollt' }); } catch { /* egal */ }
         return { cancelled: true, component: component.name };
       }
@@ -554,7 +554,7 @@ function cmdServe(portArg) {
       if (!RUNNING.has(id)) return json(res, { cancelled: false, reason: 'kein laufender Lauf' });
       CANCELLED.add(id);
       const killed = abortAiChildren() + abortUiChildren();
-      setStep(id, 'Abbruch… (Kindprozesse beendet, Rollback)');
+      setStep(id, 'Cancelling… (child processes terminated, rollback)');
       return json(res, { cancelled: true, killed });
     }
 
@@ -607,12 +607,12 @@ function cmdServe(portArg) {
         } else {
           spawn('sh', ['-c', `x-terminal-emulator -e '${cmd} /login' || open -a Terminal '${cmd}'`], { detached: true, stdio: 'ignore' }).unref();
         }
-        return json(res, { ok: true, command: cmd, note: 'Terminal geöffnet — dort den Browser-Login bestätigen (falls nötig /login eingeben).' });
+        return json(res, { ok: true, command: cmd, note: 'Terminal opened — confirm the browser login there (enter /login if needed).' });
       } catch (e) { return json(res, { ok: false, error: String(e?.message ?? e) }, 500); }
     }
     if (p === '/api/ai/key' && req.method === 'POST') {
       const body = await readBody(req);
-      if (!body?.key) return json(res, { error: 'key fehlt' }, 400);
+      if (!body?.key) return json(res, { error: 'key missing' }, 400);
       secretStore.set('ai-key', body.key);
       settings.aiBackend = { ...(settings.aiBackend ?? { kind: 'provider' }), secretRef: 'ai-key' };
       saveSecrets(); saveSettings();
@@ -634,7 +634,7 @@ function cmdServe(portArg) {
     // SMTP-Passwort verschlüsselt hinterlegen
     if (p === '/api/smtp/pass' && req.method === 'POST') {
       const body = await readBody(req);
-      if (!body?.pass) return json(res, { error: 'pass fehlt' }, 400);
+      if (!body?.pass) return json(res, { error: 'pass missing' }, 400);
       secretStore.set('smtp-pass', body.pass); saveSecrets();
       return json(res, { ok: true });
     }
@@ -650,9 +650,9 @@ function cmdServe(portArg) {
     }
     if (p === '/api/apex-target/test' && req.method === 'POST') {
       const t = settings.apexTarget || {}; let pass; try { pass = secretStore.get('apex-pass'); } catch {}
-      if (!t.baseUrl || !t.workspace || !t.loginUser || !pass) return json(res, { ok: false, error: 'APEX-Verbindung unvollständig — Base-URL/Workspace/User/Passwort setzen.' }, 200);
+      if (!t.baseUrl || !t.workspace || !t.loginUser || !pass) return json(res, { ok: false, error: 'APEX connection incomplete — set base URL/workspace/user/password.' }, 200);
       const chromium = await loadChromium();
-      if (!chromium) return json(res, { ok: false, error: 'Playwright nicht installiert.' }, 200);
+      if (!chromium) return json(res, { ok: false, error: 'Playwright not installed.' }, 200);
       const browser = await chromium.launch({ headless: true });
       try { const page = await browser.newPage(); const r = await uiLogin(page, { baseUrl: t.baseUrl, workspace: t.workspace, user: t.loginUser, pass }); return json(res, { ok: r.ok, error: r.error, url: r.url }); }
       catch (e) { return json(res, { ok: false, error: String(e?.message ?? e) }, 200); }
@@ -661,7 +661,7 @@ function cmdServe(portArg) {
     // Report jetzt senden — nur wenn SMTP & Empfänger konfiguriert sind
     if (p === '/api/report/send' && req.method === 'POST') {
       if (!settings.smtp?.host || !settings.recipients?.length) {
-        return json(res, { ok: false, configured: false, error: 'E-Mail nicht konfiguriert — SMTP-Host und Empfänger in den Einstellungen hinterlegen.' }, 200);
+        return json(res, { ok: false, configured: false, error: 'Email not configured — set SMTP host and recipients in settings.' }, 200);
       }
       try {
         const report = buildReport();
@@ -771,12 +771,12 @@ function cmdServe(portArg) {
       const fb = saveFeedback(c.path, body || {});
       if (fb.error) return json(res, { ok: false, error: fb.error }, 400);
       const ai = resolveAiBackend(settings, secretStore);
-      setStep(id, 'Feedback: Problem analysieren & Regressionstest ableiten…');
+      setStep(id, 'Feedback: analyzing issue & deriving regression test…');
       const mockUrl = c.uiTestUrl || `http://localhost:${port}/mock/${slugify(c.name)}/index.html`;
       const t = await createFeedbackTest(store, c, fb, { ai, mockUrl });
       if (t.error) return json(res, { ok: false, error: t.error, feedback: fb.dir }, 200);
       // Reproduktion: Suite einmal ausführen — rot = Fehler im Mock nachgestellt; grün = dort nicht reproduzierbar.
-      setStep(id, 'Feedback: Test ausführen (Reproduktion)…');
+      setStep(id, 'Feedback: running test (reproduction)…');
       const hasPlaywright = fs.existsSync(path.join(__dirname, 'node_modules', '@playwright', 'test'));
       const run = await runUiTests(store.get(id), { pluginUrl: mockUrl, specsDir: path.join(DATA_DIR, 'ui-tests', slugify(c.name)), hasPlaywright });
       const reproduced = run.ran ? !run.ok : null;
@@ -830,7 +830,7 @@ function cmdServe(portArg) {
       // Eine Slice (= Sicht) implementieren: KI baut die Funktionalität tech-frei/lizenzrein neu, re-injiziert
       // in das primäre Plugin-Asset. Backups je Datei → vollständiger Rollback bei Misserfolg.
       const implementSlice = async (slice, ctx) => {
-        setStep(id, `Redev Slice „${slice.view}"`);
+        setStep(id, `Redev slice “${slice.view}”`);
         const asset = inspectAssets(dir).find((a) => a.origin);
         if (!asset) return;
         let out = '';
@@ -859,7 +859,7 @@ function cmdServe(portArg) {
         const sl0 = slugify(c.name); const mockUrl = `http://localhost:${port}/mock/${sl0}/index.html`;
         try { const st = await runMockSelfTests(mockUrl, { timeoutMs: 14000 }); if (st.ran) { contract = acceptanceFromSelfTest(st, { name: c.name, at: new Date().toISOString(), interface: pluginInterface(c.path) }); if (!contract.error) writeAcceptance(c.path, contract); } } catch { /* kein Mock/Playwright */ }
       }
-      if (!contract || contract.error || !(contract.criteria || []).length) return json(res, { error: 'Kein Akzeptanz-Vertrag — erst einen grünen Mock bauen (Plugin importieren/„Open mock").' }, 400);
+      if (!contract || contract.error || !(contract.criteria || []).length) return json(res, { error: 'No acceptance contract — build a green mock first (import plugin / “Open mock”).' }, 400);
       // T-126: Schnittstelle beim Export sicherstellen — fehlt sie, aus dem Repo nachrüsten; sonst
       // re-normalisieren (idempotent → entdoppelt auch ältere, doppelt deklarierte Verträge).
       try {
@@ -877,9 +877,9 @@ function cmdServe(portArg) {
     // T-135 — In echte APEX-App einspielen & live testen (analyse-getrieben, headless Render-Smoke-Test).
     if (p.startsWith('/api/components/') && p.endsWith('/apex-live') && req.method === 'POST') return withComponentRunning(async (c) => {
       const t = settings.apexTarget || {}; let pass; try { pass = secretStore.get('apex-pass'); } catch {}
-      if (!t.baseUrl || !t.workspace || !t.loginUser || !pass || !t.appId) return json(res, { ok: false, error: 'APEX-Verbindung/App unvollständig — in den Einstellungen (APEX-Ziel) setzen + Verbindung testen.' }, 200);
+      if (!t.baseUrl || !t.workspace || !t.loginUser || !pass || !t.appId) return json(res, { ok: false, error: 'APEX connection/app incomplete — set in settings (APEX target) and test the connection.' }, 200);
       const exportFile = findPluginExport(c.path);
-      if (!exportFile) return json(res, { ok: false, error: 'Keine Plugin-Export-SQL im Repo gefunden (Repo zuordnen?).' }, 200);
+      if (!exportFile) return json(res, { ok: false, error: 'No plugin export SQL found in the repo (assign a repo?).' }, 200);
       const body = await readBody(req).catch(() => ({}));
       // Pro-Plugin-Seiten-Register: jedes Plugin bekommt eine EIGENE Testseite, die für dasselbe Plugin
       // wiederverwendet wird (kein Überschreiben fremder/reservierter Seiten). Neue Seiten fortlaufend
@@ -893,7 +893,7 @@ function cmdServe(portArg) {
         try { store.update(c.id, { apexPageId: pageId }); } catch { /* egal */ }
         try { settings.apexTarget = { ...(settings.apexTarget || {}), nextPageId: pageId + 1 }; saveSettings(); } catch { /* egal */ }
       }
-      setStep(c.id, `APEX: einrichten & testen (Seite ${pageId})…`);
+      setStep(c.id, `APEX: set up & test (page ${pageId})…`);
       const r = await deployAndTest({ exportFile, pageId, sourceSql: body?.sourceSql, target: { baseUrl: t.baseUrl, workspace: t.workspace, user: t.loginUser, pass, appId: Number(t.appId), alias: t.alias, workspaceId: t.workspaceId, owner: t.owner, release: t.release } });
       try { store.addReview(c.id, { kind: 'apex-live', pass: r.ok, rendered: !!r.render?.rendered, apexError: r.render?.apexError || null, url: r.render?.url || null, plugin: r.plugin, pageId }); } catch { /* egal */ }
       // Passwort/Verbindung nie ins Ergebnis spiegeln (deployAndTest gibt es ohnehin nicht zurück).
@@ -906,7 +906,7 @@ function cmdServe(portArg) {
     if (p.startsWith('/api/components/') && p.endsWith('/purge') && req.method === 'POST') return withComponent(async (c, id) => {
       const body = await readBody(req).catch(() => ({}));
       if (!body || String(body.confirm || '') !== c.name) {
-        return json(res, { ok: false, error: 'Bestätigung stimmt nicht — zum Löschen den exakten Plugin-Namen eingeben.' }, 400);
+        return json(res, { ok: false, error: 'Confirmation does not match — type the exact plugin name to delete.' }, 400);
       }
       const t = settings.apexTarget || {}; let pass; try { pass = secretStore.get('apex-pass'); } catch { /* kein Passwort */ }
       const apexCleanup = (t.baseUrl && t.workspace && t.loginUser && pass && t.appId) ? async (comp) => {
@@ -914,7 +914,7 @@ function cmdServe(portArg) {
         let displayName = null;
         try { if (exportFile) displayName = buildSetupManifest(fs.readFileSync(exportFile, 'utf8')).plugin.displayName; } catch { /* Analyse optional */ }
         const chromium = await loadChromium(__dirname);
-        if (!chromium) return { ok: false, error: 'Playwright nicht installiert — APEX-Cleanup übersprungen.' };
+        if (!chromium) return { ok: false, error: 'Playwright not installed — APEX cleanup skipped.' };
         const browser = await chromium.launch({ headless: true });
         try {
           const pg = await browser.newPage();
@@ -932,7 +932,7 @@ function cmdServe(portArg) {
         rm: (pp) => fs.rmSync(pp, { recursive: true, force: true }),
         exists: (pp) => fs.existsSync(pp),
       });
-      writeLog(c, `[purge] Plugin gelöscht — APEX: ${result.apex ? (result.apex.ok ? 'entfernt' : result.apex.error) : 'übersprungen (keine Verbindung)'}; Platte: ${result.removed.length} Pfad(e)`);
+      writeLog(c, `[purge] plugin deleted — APEX: ${result.apex ? (result.apex.ok ? 'removed' : result.apex.error) : 'skipped (no connection)'}; disk: ${result.removed.length} path(s)`);
       return json(res, result, 200);
     });
 
@@ -974,21 +974,21 @@ function cmdServe(portArg) {
         return { st, contract: contract.error ? null : contract };
       };
       // 1) Günstig: aus dem vorhandenen Mock ableiten.
-      setStep(id, 'Requirements: Mock sicherstellen…');
-      if (!(await buildMockFor(store.get(id)))) return json(res, { ok: false, error: 'Kein Mock baubar (Repo/Plugin fehlt) — Requirements nicht ableitbar.' }, 400);
-      setStep(id, 'Requirements: Mock-Self-Test…');
+      setStep(id, 'Requirements: ensuring mock…');
+      if (!(await buildMockFor(store.get(id)))) return json(res, { ok: false, error: 'Cannot build a mock (repo/plugin missing) — requirements not derivable.' }, 400);
+      setStep(id, 'Requirements: mock self-test…');
       let { st, contract } = await derive();
       // 2) Ergibt der vorhandene Mock kein grünes Soll → VOLLER KI-Neuaufbau des Mocks (das eigentliche „neu bauen").
       if (!contract || contract.total === 0) {
-        setStep(id, 'Requirements: voller KI-Neuaufbau des Mocks (kann dauern)…');
+        setStep(id, 'Requirements: full AI rebuild of the mock (may take a while)…');
         await buildMockFor(store.get(id), { force: true });
-        setStep(id, 'Requirements: Mock-Self-Test (nach Neuaufbau)…');
+        setStep(id, 'Requirements: mock self-test (after rebuild)…');
         ({ st, contract } = await derive());
       }
       // 3) NON-DESTRUKTIV: nur einen Vertrag MIT grünen Kriterien schreiben; sonst den vorhandenen behalten.
       if (!contract || contract.total === 0) {
         const kept = readAcceptance(c.path);
-        return json(res, { ok: false, selfFailed: true, keptPrevious: !!(kept && (kept.criteria || []).length), error: 'Frische Charakterisierung ergab KEIN grünes Soll — der Mock lädt das Plugin nicht sauber. Bisheriger Vertrag bleibt unverändert; ein voller KI-Neuaufbau hat es nicht grün bekommen.' }, 200);
+        return json(res, { ok: false, selfFailed: true, keptPrevious: !!(kept && (kept.criteria || []).length), error: 'Fresh characterization produced NO green baseline — the mock does not load the plugin cleanly. The previous contract is kept unchanged; a full AI rebuild did not turn it green either.' }, 200);
       }
       writeAcceptance(c.path, contract);
       try { store.update(id, { mockSelfCheck: { views: st.views ?? null, total: st.total ?? contract.total, failed: (st.problems || []).length } }); } catch { /* egal */ }
@@ -1028,7 +1028,7 @@ function cmdServe(portArg) {
     // Bibliothek manuell hinzufügen (T-67) → async
     if (p.startsWith('/api/components/') && p.endsWith('/libraries') && req.method === 'POST') return withComponent(async (c, id) => {
       const body = await readBody(req);
-      if (!body?.name) return json(res, { error: 'Name fehlt' }, 400);
+      if (!body?.name) return json(res, { error: 'Name missing' }, 400);
       const lib = { name: String(body.name), version: String(body.version || ''), status: 'unbekannt', detectedBy: 'manuell', source: body.source || null };
       const libs = [...(c.libs || []), lib];
       store.update(id, { libs });
@@ -1064,7 +1064,7 @@ function cmdServe(portArg) {
     if (p === '/api/dashboard') return json(res, { repos: settings.repos, runs: listRuns(history) });
     if (p === '/api/scan') {
       const repoPath = url.searchParams.get('path');
-      if (!repoPath || !fs.existsSync(repoPath)) return json(res, { error: 'path fehlt/ungültig' }, 400);
+      if (!repoPath || !fs.existsSync(repoPath)) return json(res, { error: 'path missing/invalid' }, 400);
       return json(res, scanRepo(repoPath));
     }
     if (p === '/api/trigger') {
@@ -1078,9 +1078,9 @@ function cmdServe(portArg) {
 
   server.listen(port, () => {
     console.log(c('bold', `\n  Plugin Maintenance — Web-GUI: http://localhost:${port}`));
-    console.log(c('dim', '  GUI: /   ·   Doku: /readme.html'));
+    console.log(c('dim', '  GUI: /   ·   Docs: /readme.html'));
     console.log(c('dim', '  API: /api/components (CRUD, /:id/notes, /:id/review, /:id/open) · /api/scan?path= · /api/dashboard'));
-    console.log(c('dim', '  Beenden mit Strg+C.\n'));
+    console.log(c('dim', '  Stop with Ctrl+C.\n'));
   });
 
   // Zeitplan: jede Minute prüfen, ob der automatische Lauf fällig ist (Cron, settings.schedule).
@@ -1098,7 +1098,7 @@ function cmdServe(portArg) {
       lastTick = stamp;
       if (scheduledRunning) return; // vorheriger geplanter Lauf noch aktiv → überspringen
       scheduledRunning = true;
-      console.log(c('dim', `  [${now.toLocaleString('de-DE')}] geplanter Pflege-Lauf läuft …`));
+      console.log(c('dim', `  [${now.toLocaleString('en-GB')}] scheduled maintenance run in progress …`));
       (async () => {
         try {
           for (const comp of store.list()) {
@@ -1119,7 +1119,7 @@ function cmdServe(portArg) {
 function serveFile(res, file, type) {
   if (!fs.existsSync(file)) {
     res.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8' });
-    return res.end('readme.html noch nicht erzeugt');
+    return res.end('readme.html not generated yet');
   }
   res.writeHead(200, { 'Content-Type': `${type}; charset=utf-8` });
   res.end(fs.readFileSync(file));
@@ -1144,21 +1144,21 @@ function cmdTest(filter) {
   let comps = store.list();
   if (filter) comps = comps.filter((x) => x.name.toLowerCase().includes(String(filter).toLowerCase()));
   if (comps.length === 0) {
-    console.log(c('yellow', `\n  Keine ${filter ? `passende ` : ''}verwalteten Plugins/Template-Komponenten gefunden.\n`));
+    console.log(c('yellow', `\n  No ${filter ? `matching ` : ''}managed plugins/template components found.\n`));
     return;
   }
-  console.log(c('bold', `\n  Plugin Maintenance — Tests für ${comps.length} verwaltete Komponente(n)\n`));
+  console.log(c('bold', `\n  Plugin Maintenance — tests for ${comps.length} managed component(s)\n`));
   const { results, green, red, skipped, ok } = runComponentTests(comps, { scan: scanRepo });
   for (const r of results) {
     if (r.verdict === 'skipped') {
-      console.log(`  ${c('yellow', '● übersprungen')} ${c('bold', r.name)} ${c('dim', `(${r.reason})`)}`);
+      console.log(`  ${c('yellow', '● skipped')} ${c('bold', r.name)} ${c('dim', `(${r.reason})`)}`);
       continue;
     }
-    const tag = r.verdict === 'red' ? c('red', '● rot') : c('green', '● grün');
-    console.log(`  ${tag} ${c('bold', r.name)} ${c('dim', `[${r.format ?? '—'}]`)} — ${r.scenarios} Szenario(en), Security ${r.security}, Code ${r.quality}, Schwachstellen ${r.vulnerabilities}`);
+    const tag = r.verdict === 'red' ? c('red', '● red') : c('green', '● green');
+    console.log(`  ${tag} ${c('bold', r.name)} ${c('dim', `[${r.format ?? '—'}]`)} — ${r.scenarios} scenario(s), Security ${r.security}, Code ${r.quality}, Vulnerabilities ${r.vulnerabilities}`);
     for (const f of r.failures) console.log(c('red', `      ✗ ${f.artifact}: ${f.reason}`));
   }
-  console.log(c('bold', `\n  Ergebnis: ${c('green', green + ' grün')}, ${c(red ? 'red' : 'dim', red + ' rot')}, ${skipped} übersprungen\n`));
+  console.log(c('bold', `\n  Result: ${c('green', green + ' green')}, ${c(red ? 'red' : 'dim', red + ' red')}, ${skipped} skipped\n`));
   process.exitCode = ok ? 0 : 1;
 }
 
@@ -1170,10 +1170,10 @@ function help() {
   console.log(`
   ${c('bold', 'Plugin Maintenance')}
 
-  node start.js scan <repo-pfad>     Einmaliger read-only Pflege-Lauf (Analyse/SBOM/Risiko/Triage)
-  node start.js test [name]           Tests ALLER verwalteten Plugins/Template-Komponenten ausführen
-  node start.js serve [port]          Dienst: Scheduler + Mini-Web-GUI (Default-Port 4317)
-  node start.js help                  Diese Hilfe
+  node start.js scan <repo-path>     One-off read-only maintenance run (analysis/SBOM/risk/triage)
+  node start.js test [name]           Run tests for ALL managed plugins/template components
+  node start.js serve [port]          Service: scheduler + mini web GUI (default port 4317)
+  node start.js help                  This help
 `);
 }
 
@@ -1183,5 +1183,5 @@ switch (cmd) {
   case 'test': cmdTest(arg); break;
   case 'serve': cmdServe(arg); break;
   case 'help': case undefined: help(); break;
-  default: fail(`Unbekannter Befehl: ${cmd}`); help();
+  default: fail(`Unknown command: ${cmd}`); help();
 }

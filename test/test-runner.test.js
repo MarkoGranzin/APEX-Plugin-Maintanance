@@ -45,7 +45,7 @@ describe('T-57/T-58 CLI: node start.js test', () => {
     fs.writeFileSync(path.join(tmp, 'components.json'), JSON.stringify({ items: [{ id: '1', name: 'NurNameKeinRepo', path: '' }] }));
     const out = execFileSync('node', ['start.js', 'test'], { cwd: root, env: { ...process.env, AISPP_DATA_DIR: tmp }, encoding: 'utf8' });
     expect(out).toContain('NurNameKeinRepo'); // aus dem umgelenkten Datenverzeichnis gelesen
-    expect(out).toContain('übersprungen'); // kein Repo → sauber übersprungen, kein Absturz
+    expect(out).toContain('skipped'); // kein Repo → sauber übersprungen, kein Absturz
     expect(out).not.toMatch(/vitest|Test Files|RUN v/i); // ausdrücklich NICHT die App-Unit-Tests
     fs.rmSync(tmp, { recursive: true, force: true });
   });

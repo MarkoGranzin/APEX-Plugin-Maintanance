@@ -55,7 +55,7 @@ export function renderReport(run, opts = {}) {
     const risky = licenseChanges.filter((c) => c.riskier).length;
     lines.push(`⚖️ License changes (${licenseChanges.length}${risky ? `, ${risky} riskier ⛔` : ''})`);
     for (const c of licenseChanges) {
-      lines.push(`- ${c.plugin ? c.plugin + ' · ' : ''}${c.name}: ${c.from} (${c.fromClass}) → ${c.to} (${c.toClass})${c.riskier ? '  ⛔ RISKIER — rechtlich prüfen!' : ''}`);
+      lines.push(`- ${c.plugin ? c.plugin + ' · ' : ''}${c.name}: ${c.from} (${c.fromClass}) → ${c.to} (${c.toClass})${c.riskier ? '  ⛔ RISKIER — review legally!' : ''}`);
     }
     lines.push('');
   }

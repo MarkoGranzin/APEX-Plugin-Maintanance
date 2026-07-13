@@ -246,8 +246,8 @@
     <h2>🐞 Report issue</h2>
     <p class="muted small" style="margin-top:0">Describe a problem the automated tests did not catch. The AI analyzes it, creates a <b>permanent regression test</b> (runs with every future check) and starts a rework until it passes.</p>
     <label>What is wrong? <span class="muted small">(expected vs. actual behavior)</span></label>
-    <textarea id="fbText" rows="5" placeholder="z.B. Nach dem Update werden die Karten im Kanban nicht mehr per Drag&Drop verschoben — erwartet: Karte wandert in die Zielspalte; tatsächlich: springt zurück."></textarea>
-    <label>Screenshots <span class="muted small">(optional · PNG/JPG · max 8 MB je Bild)</span></label>
+    <textarea id="fbText" rows="5" placeholder="e.g. After the update, the Kanban cards can no longer be moved via drag & drop — expected: the card moves to the target column; actual: it snaps back."></textarea>
+    <label>Screenshots <span class="muted small">(optional · PNG/JPG · max 8 MB per image)</span></label>
     <input id="fbFiles" type="file" multiple accept=".png,.jpg,.jpeg,.gif,.webp">
     <label class="chk" style="margin-top:8px"><input type="checkbox" id="fbRework" checked> start rework right away (full maintenance)</label>
     <div class="foot">
@@ -307,12 +307,12 @@
       <div id="aiCli" style="display:none">
         <label>CLI command</label><input id="aiCommand" placeholder="e.g. claude">
         <div id="aiAuthRow" class="inline" style="margin-top:8px;gap:8px;align-items:center">
-          <span id="aiAuthState" class="muted small">Login-Status wird geprüft…</span>
-          <button type="button" id="aiLoginBtn" style="display:none" onclick="openAiLogin()" title="Öffnet ein Terminal mit claude — dort den Browser-Login bestätigen">🔑 Login öffnen</button>
-          <button type="button" class="ghost" onclick="checkAiAuth()" title="Login-Status erneut prüfen">↻</button>
+          <span id="aiAuthState" class="muted small">Checking login status…</span>
+          <button type="button" id="aiLoginBtn" style="display:none" onclick="openAiLogin()" title="Opens a terminal with claude — confirm the browser login there">🔑 Open login</button>
+          <button type="button" class="ghost" onclick="checkAiAuth()" title="Re-check login status">↻</button>
         </div>
-        <label style="margin-top:8px">API key <span class="muted small">— optional, für headless/Scheduler-Läufe (sonst interaktives claude-Login)</span> <span id="aiCliKeyState" class="muted small"></span></label>
-        <input id="aiCliKey" type="password" placeholder="ANTHROPIC_API_KEY — verschlüsselt gespeichert, optional">
+        <label style="margin-top:8px">API key <span class="muted small">— optional, for headless/scheduler runs (otherwise interactive claude login)</span> <span id="aiCliKeyState" class="muted small"></span></label>
+        <input id="aiCliKey" type="password" placeholder="ANTHROPIC_API_KEY — stored encrypted, optional">
       </div>
       <div id="aiProvider" style="display:none">
         <div class="row2"><div><label>Endpoint</label><input id="aiEndpoint" placeholder="https://api.anthropic.com/v1/messages"></div><div><label>Model</label><input id="aiModel" placeholder="claude-opus-4-8"></div></div>
@@ -350,13 +350,13 @@
 
     <div class="spanel" data-tab="apex">
       <h3>APEX target <span class="muted small">— live deploy &amp; test</span></h3>
-      <div class="muted small" style="margin-bottom:8px">Zum Einspielen in eine echte APEX-App + Render-Smoke-Test. Nur Test-App/-Instanz verwenden. Passwort wird verschlüsselt gespeichert, nie geloggt.</div>
+      <div class="muted small" style="margin-bottom:8px">For deploying into a real APEX app + render smoke test. Use a test app/instance only. The password is stored encrypted, never logged.</div>
       <label>Base URL (ORDS)</label><input id="apxBaseUrl" placeholder="https://host/ords">
       <div class="row2"><div><label>Workspace</label><input id="apxWorkspace" placeholder="MYWORKSPACE"></div><div><label>App-ID</label><input id="apxAppId" placeholder="200000"></div></div>
       <div class="row2"><div><label>App-Alias (Friendly-URL)</label><input id="apxAlias" placeholder="test"></div><div><label>Login-User (DB-User)</label><input id="apxUser" placeholder="app_user"></div></div>
       <label>Password <span id="apxPassState" class="muted small"></span></label><input id="apxPass" type="password" placeholder="stored encrypted">
-      <div class="row2"><div><label>Workspace-ID</label><input id="apxWsId" placeholder="aus App-Export"></div><div><label>Parsing-Schema (owner)</label><input id="apxOwner" placeholder="WKSP_MYWORKSPACE"></div></div>
-      <div class="inline" style="margin-top:8px"><button onclick="testApexConn()">🔌 Verbindung testen</button><span id="apxConnOut" class="muted small"></span></div>
+      <div class="row2"><div><label>Workspace-ID</label><input id="apxWsId" placeholder="from app export"></div><div><label>Parsing schema (owner)</label><input id="apxOwner" placeholder="WKSP_MYWORKSPACE"></div></div>
+      <div class="inline" style="margin-top:8px"><button onclick="testApexConn()">🔌 Test connection</button><span id="apxConnOut" class="muted small"></span></div>
     </div>
 
     <div class="foot">
@@ -367,7 +367,7 @@
 </div>
 
 <div class="toast" id="toast"></div>
-<div id="busyBanner"><span id="busyBannerTxt">⏳ Aktion läuft — Eingaben gesperrt, bitte warten…</span><button class="cancelbtn" id="cancelBtn" onclick="cancelRunning()" title="Laufenden Lauf abbrechen — Kindprozesse werden beendet und Änderungen zurückgerollt">⏹ Abbrechen</button></div>
+<div id="busyBanner"><span id="busyBannerTxt">⏳ Action running — inputs locked, please wait…</span><button class="cancelbtn" id="cancelBtn" onclick="cancelRunning()" title="Cancel the running run — child processes are terminated and changes rolled back">⏹ Cancel</button></div>
 
 <!-- F-29: Clone-/Lauf-Overlay nach „Save" (Repo klonen + Mock bauen) -->
 <div class="overlay" id="busyOverlay" hidden>
@@ -421,7 +421,7 @@ function rebuiltBadge(c){
 function notRepairableBadge(c){
   if(!c || !c.notRepairable) return '';
   const r = typeof c.notRepairable==='object' ? (c.notRepairable.reason||'') : '';
-  return ` <span class="badge" title="${esc(r||'Automatisch nicht reparierbar — manuelle Migration nötig')}" style="color:#f85149;border-color:#f8514966">⛔ not auto-repairable</span>`;
+  return ` <span class="badge" title="${esc(r||'Not auto-repairable — manual migration required')}" style="color:#f85149;border-color:#f8514966">⛔ not auto-repairable</span>`;
 }
 // Empfohlene Lib-Aktionen je Komponente (T-114/T-119): update / replace (Nachfolger) / redevelop (tote Lib, slice-weise neu).
 function libActionBadge(c){
@@ -474,7 +474,7 @@ function setBusy(id, on){ if(on) BUSY.add(id); else BUSY.delete(id); applySpin(i
 // werden alle .lockable-Bereiche (Tabelle, Drawer, Kopf-Buttons) nicht-interaktiv + ein Banner erscheint.
 let _extraBusy=0;
 function syncBusyLock(){ const on = BUSY.size>0 || _extraBusy>0; document.body.classList.toggle('busy-lock', on); if(on) closeRowMenu(); }
-function guardBusy(){ if(BUSY.size>0 || _extraBusy>0){ toast('⏳ Bitte warten — eine Aktion läuft'); return false; } return true; }
+function guardBusy(){ if(BUSY.size>0 || _extraBusy>0){ toast('⏳ Please wait — an action is running'); return false; } return true; }
 // F-29: serverseitig laufende Komponenten pollen und Spinner entsprechend setzen
 async function pollRunning(){
   try{
@@ -502,22 +502,22 @@ function updateBusyBanner(){
   document.body.classList.toggle('has-run', SRUN.size>0);
   const txt = $('busyBannerTxt'), btn = $('cancelBtn');
   if(!txt||!btn) return;
-  if(!id){ txt.textContent='⏳ Aktion läuft — Eingaben gesperrt, bitte warten…'; return; }
+  if(!id){ txt.textContent='⏳ Action running — inputs locked, please wait…'; return; }
   const c = ALL.find(x=>x.id===id); const name = c? c.name : '';
   const step = SSTEP.get(id);
-  if(SCANCEL.has(id)){ txt.textContent = `⏹ Abbruch läuft${name?` — ${name}`:''}… (Kindprozesse beenden, Rollback)`; btn.disabled=true; btn.textContent='⏳ Bricht ab…'; }
-  else { txt.textContent = `⏳ ${step? step : 'Aktion läuft'}${name?` — ${name}`:''}`; btn.disabled=false; btn.textContent='⏹ Abbrechen'; }
+  if(SCANCEL.has(id)){ txt.textContent = `⏹ Cancelling${name?` — ${name}`:''}… (terminating child processes, rollback)`; btn.disabled=true; btn.textContent='⏳ Cancelling…'; }
+  else { txt.textContent = `⏳ ${step? step : 'Action running'}${name?` — ${name}`:''}`; btn.disabled=false; btn.textContent='⏹ Cancel'; }
 }
 async function cancelRunning(){
   const id = runningId();
-  if(!id){ toast('Kein laufender Lauf'); return; }
+  if(!id){ toast('No running run'); return; }
   const c = ALL.find(x=>x.id===id); const name = c? c.name : id;
-  if(!confirm(`Laufenden Lauf von „${name}" abbrechen?\nDie Kindprozesse (claude/Playwright) werden beendet und bereits angewandte Änderungen zurückgerollt.`)) return;
+  if(!confirm(`Cancel the running run for “${name}”?\nThe child processes (claude/Playwright) are terminated and already-applied changes are rolled back.`)) return;
   try{
     const r = await api('POST', `/api/components/${id}/cancel`);
-    if(r && r.cancelled){ SCANCEL.add(id); updateBusyBanner(); toast(`⏹ Abbruch angefordert (${r.killed||0} Prozess(e) beendet)`); }
-    else toast(r&&r.reason? `Kein Abbruch: ${r.reason}` : 'Kein laufender Lauf');
-  }catch(e){ toast('Abbruch fehlgeschlagen: '+(e&&e.message||e)); }
+    if(r && r.cancelled){ SCANCEL.add(id); updateBusyBanner(); toast(`⏹ Cancel requested (${r.killed||0} process(es) terminated)`); }
+    else toast(r&&r.reason? `Not cancelled: ${r.reason}` : 'No running run');
+  }catch(e){ toast('Cancel failed: '+(e&&e.message||e)); }
 }
 // Datei-Download aus In-Memory-Inhalt (vorher 4× dupliziert: SBOM/Log/Testplan/Coded-Test)
 function saveBlob(name, content, type){
@@ -618,7 +618,7 @@ async function load(){
 
 async function openDetail(id){
   let c; try{ c = await api('GET','/api/components/'+id); }
-  catch(e){ toast('Detail nicht ladbar — läuft der Dienst? ('+(e.message||e)+')'); return; }
+  catch(e){ toast('Cannot load detail — is the service running? ('+(e.message||e)+')'); return; }
   current = c;
   $('dNameTxt').textContent = current.name;
   const libDot = c.libWarning ? ` <span style="color:${c.libWarning.vulnerable?'#f85149':'#d29922'}">●</span>` : '';
@@ -1026,10 +1026,10 @@ async function runMaintain(){
       else mig=`<div class="finding"><b>⛔ Migration not adopted (rolled back)</b> — ${esc(m.reason||(m.gate&&m.gate.summary)||'not green as before')}</div>`+((m.regressions||[]).map(x=>`<div class="finding medium">↩ ${esc(x.scenario)}: ${esc(x.was||'passed')} → ${esc(x.now||'failed')}</div>`).join(''));
     }
     let apx='';
-    if(r.apexLive){ const a=r.apexLive; apx=`<div class="${a.ok?'note':'finding'}"><b>${a.ok?'✅':'⛔'} In APEX geprüft (Seite ${esc(a.pageId)}):</b> ${a.rendered?'gerendert':'nicht bestätigt'}${a.url?` — <a href="${esc(a.url)}" target="_blank" rel="noopener" style="color:var(--accent)">Seite öffnen ↗</a>`:''}</div>`; }
+    if(r.apexLive){ const a=r.apexLive; apx=`<div class="${a.ok?'note':'finding'}"><b>${a.ok?'✅':'⛔'} Verified in APEX (page ${esc(a.pageId)}):</b> ${a.rendered?'rendered':'not confirmed'}${a.url?` — <a href="${esc(a.url)}" target="_blank" rel="noopener" style="color:var(--accent)">Open page ↗</a>`:''}</div>`; }
     $('reviewOut').innerHTML = `<div class="note"><b>🧰 Maintenance done:</b> ${esc(r.before)} → ${esc(r.after)}${r.rebuilt?' · 🚀 rebuilt':''}</div>` + mig + apx
-      + (r.steps||[]).map(s=>`<div class="finding low"><b>${esc(s.step)}</b> ${esc(s.step==='apex-live'?((s.ok?'✓ gerendert':'nicht bestätigt')+(s.url?' — '+s.url:'')):(s.summary||s.status||s.reason||(s.error?('Error: '+s.error):JSON.stringify(s))))}</div>`).join('');
-    toast(r.apexLive?(r.apexLive.ok?`✅ Gepflegt + in APEX gerendert (Seite ${r.apexLive.pageId})`:'Gepflegt, APEX-Render nicht bestätigt'):(r.migration&&r.migration.adopted?'Migrated to latest (verified)':'Full maintenance done'));
+      + (r.steps||[]).map(s=>`<div class="finding low"><b>${esc(s.step)}</b> ${esc(s.step==='apex-live'?((s.ok?'✓ rendered':'not confirmed')+(s.url?' — '+s.url:'')):(s.summary||s.status||s.reason||(s.error?('Error: '+s.error):JSON.stringify(s))))}</div>`).join('');
+    toast(r.apexLive?(r.apexLive.ok?`✅ Maintained + rendered in APEX (page ${r.apexLive.pageId})`:'Maintained, APEX render not confirmed'):(r.migration&&r.migration.adopted?'Migrated to latest (verified)':'Full maintenance done'));
   }catch(e){ $('reviewOut').innerHTML=`<div class="finding">${esc(e.message)}</div>`; toast('Error: '+e.message); }
   finally{ setBusy(id,false); }
 }
@@ -1368,21 +1368,21 @@ function toggleAi(){ const k=$('aiKind').value; $('aiCli').style.display=k==='cl
 // B-62/GUI: Login-Status der claude-CLI anzeigen (nur Ablaufdaten, keine Secrets) + Login-Terminal öffnen.
 async function checkAiAuth(){
   const el=$('aiAuthState'), btn=$('aiLoginBtn'); if(!el) return;
-  el.textContent='Login-Status wird geprüft…'; btn.style.display='none';
+  el.textContent='Checking login status…'; btn.style.display='none';
   try{
     const r=await api('GET','/api/ai/auth');
-    if(!r.applicable){ el.textContent='(kein CLI-Backend gewählt)'; return; }
-    if(r.method==='api-key'){ el.innerHTML='✅ <b>API-Key aktiv</b> — läuft headless, Login nicht nötig'; el.style.color='var(--green,#3fb950)'; return; }
-    if(r.loggedIn){ el.innerHTML=`✅ <b>eingeloggt</b>${r.validUntil?` — gültig bis ${new Date(r.validUntil).toLocaleString()}`:''}`; el.style.color='var(--green,#3fb950)'; }
-    else { el.innerHTML=`⛔ <b>NICHT eingeloggt</b> — ${esc(r.reason||'Login nötig')} → KI-Läufe (Mock/Fix) schlagen fehl`; el.style.color='#f85149'; btn.style.display='inline-block'; }
-  }catch(e){ el.textContent='Status nicht prüfbar: '+(e&&e.message||e); }
+    if(!r.applicable){ el.textContent='(no CLI backend selected)'; return; }
+    if(r.method==='api-key'){ el.innerHTML='✅ <b>API key active</b> — runs headless, no login needed'; el.style.color='var(--green,#3fb950)'; return; }
+    if(r.loggedIn){ el.innerHTML=`✅ <b>logged in</b>${r.validUntil?` — valid until ${new Date(r.validUntil).toLocaleString()}`:''}`; el.style.color='var(--green,#3fb950)'; }
+    else { el.innerHTML=`⛔ <b>NOT logged in</b> — ${esc(r.reason||'login required')} → AI runs (mock/fix) will fail`; el.style.color='#f85149'; btn.style.display='inline-block'; }
+  }catch(e){ el.textContent='Status not checkable: '+(e&&e.message||e); }
 }
 async function openAiLogin(){
   try{
     const r=await api('POST','/api/ai/login');
-    if(r.ok) toast('🔑 Terminal geöffnet — dort den Browser-Login bestätigen (falls nötig /login eingeben). Danach hier ↻ drücken.');
-    else toast('Login-Terminal fehlgeschlagen: '+(r.error||'?'));
-  }catch(e){ toast('Login-Terminal fehlgeschlagen: '+(e&&e.message||e)); }
+    if(r.ok) toast('🔑 Terminal opened — confirm the browser login there (enter /login if needed). Then press ↻ here.');
+    else toast('Login terminal failed: '+(r.error||'?'));
+  }catch(e){ toast('Login terminal failed: '+(e&&e.message||e)); }
 }
 function updateSchedHint(){ const m={'0 3 * * 1':'weekly Mon 03:00','0 3 * * *':'daily 03:00','0 * * * *':'hourly','*/15 * * * *':'every 15 minutes'}; $('schedHint').textContent=m[$('schedule').value.trim()]?('· '+m[$('schedule').value.trim()]):''; }
 async function testAi(){
@@ -1427,7 +1427,7 @@ async function testApexConn(){
     // erst speichern (damit der Test die aktuellen Werte nutzt), dann testen
     await api('PUT','/api/apex-target',{ baseUrl:$('apxBaseUrl').value.trim(), workspace:$('apxWorkspace').value.trim(), appId:$('apxAppId').value.trim(), alias:$('apxAlias').value.trim(), loginUser:$('apxUser').value.trim(), workspaceId:$('apxWsId').value.trim(), owner:$('apxOwner').value.trim(), pass: $('apxPass').value || undefined });
     const r=await api('POST','/api/apex-target/test',{});
-    $('apxConnOut').textContent = r.ok?'✅ Login ok (App Builder erreicht)':('⛔ '+(r.error||'Login fehlgeschlagen'));
+    $('apxConnOut').textContent = r.ok?'✅ Login ok (App Builder reached)':('⛔ '+(r.error||'Login failed'));
     await loadSettings();
   }catch(e){ $('apxConnOut').textContent='Error: '+e.message; }
 }
@@ -1443,19 +1443,19 @@ function apexTestUrl(c){
 function openApexTestPage(){
   const url = apexTestUrl(current);
   if(url) window.open(url,'_blank','noopener');
-  else toast('Noch nicht in APEX — wird beim nächsten Full-maintenance-Lauf eingespielt.');
+  else toast('Not in APEX yet — will be deployed on the next full-maintenance run.');
 }
 // Setup-JSON („Rezept") aus der Analyse erzeugen, anzeigen + herunterladen (read-only).
 async function apexSetup(){
   const c = current; if(!c) return;
-  toast('Setup-JSON erzeugen…');
+  toast('Generating setup JSON…');
   try{
     const r = await fetch(`/api/components/${c.id}/apex-setup`);
     const j = await r.json();
     if(!r.ok){ toast('Error: '+(j.error||r.statusText)); return; }
     const pi = j.testPage&&j.testPage.pageItem?j.testPage.pageItem.name:'—';
-    const src = j.testPage&&j.testPage.source?'ja':'nein';
-    toast(`🧩 ${j.plugin.internalName}: Region ${j.plugin.regionSourceType}, Item ${pi}, Quelle ${src}, ${j.fileUrls.js.length} JS/${j.fileUrls.css.length} CSS`);
+    const src = j.testPage&&j.testPage.source?'yes':'no';
+    toast(`🧩 ${j.plugin.internalName}: Region ${j.plugin.regionSourceType}, Item ${pi}, Source ${src}, ${j.fileUrls.js.length} JS/${j.fileUrls.css.length} CSS`);
     saveBlob(`${(c.name||'plugin').toLowerCase().replace(/[^a-z0-9.-]+/g,'-')}.apex-setup.json`, JSON.stringify(j,null,2), 'application/json');
   }catch(e){ toast('Error: '+e.message); }
 }
