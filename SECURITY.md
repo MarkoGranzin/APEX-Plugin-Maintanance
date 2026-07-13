@@ -23,8 +23,8 @@ Within that model the following hardening is in place.
 - Secrets are **never logged** and only shown masked. Short secrets are fully masked (no
   head/tail reveal).
 - `.mcp.json`, `data/`, `.env*` and key material are **git-ignored** and were never committed
-  (verified against the full history). Use `.mcp.json.example` as a placeholder template and
-  keep credentials in environment variables (`${VAR}`).
+  (verified against the full history). Keep credentials in environment variables (`${VAR}`)
+  referenced from your local, untracked `.mcp.json`.
 - Git push tokens are injected only into a one-time push URL, never written to `.git/config`.
 - The optional AI CLI **headless key** is stored AES-256-GCM encrypted (via the secret store), never
   logged, and injected only into the spawned `claude` child process' environment (`ANTHROPIC_API_KEY`)

@@ -32,12 +32,17 @@ coverage/
 
 # --- Machine-local / tooling configuration ---
 .mcp.json
+.mcp.json.example
 # local Claude Code config (incl. project skills like devhub) — not versioned
 .claude/
+# Claude Code project instructions (dev-workflow meta, references internal devhub)
+CLAUDE.md
+
+# --- Project-internal planning export (devhub) — not part of the shipped tool ---
+devhub/
 
 # --- Demo scratch (cloned repo + generated harness) ---
-.demo/repo/
-.demo/harness/
+.demo/
 
 # --- Secrets / environment ---
 .env
@@ -74,3 +79,6 @@ qa.log
 .DS_Store
 Thumbs.db
 desktop.ini
+
+# --- Unused sample fixtures (not referenced by tests) ---
+examples/
