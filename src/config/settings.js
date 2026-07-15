@@ -17,6 +17,9 @@ export function createSettings(initial = {}) {
     scheduleEnabled: initial.scheduleEnabled ?? false, // automatischer Lauf an/aus
     allowPush: initial.allowPush ?? false, // SICHERHEIT: Push zum Remote nur, wenn explizit erlaubt (T-76)
     autoRepair: initial.autoRepair ?? false, // nach Erkennung automatisch reparieren (Check → volle Pflege) (T-83)
+    // T-163: Opt-in — unmaintained Libs im Lauf OHNE separate Approve-Aktion ersetzen/nachbauen (interface-
+    // erhaltend, works-as-before-verifiziert). Default AUS: der Ersatz braucht sonst explizite Extra-Zustimmung.
+    autoReplaceUnmaintained: initial.autoReplaceUnmaintained ?? false,
     smtp: initial.smtp ?? { host: '', port: 587, secure: false, user: '', from: '' }, // Mailversand
     aiBackend: initial.aiBackend ?? { kind: 'cli', command: 'claude' },
     // T-134: Ziel-APEX-App für „Live einspielen & testen" (F-31). Passwort NUR verschlüsselt im SecretStore

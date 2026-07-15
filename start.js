@@ -44,6 +44,7 @@ import { runUiTests, runUiTestsDetailed, abortUiChildren } from './src/test/run-
 import { abortAiChildren } from './src/ai/backend.js';
 import { captureBaseline, compareToBaseline } from './src/service/baseline.js';
 import { redevelopComponent } from './src/service/redev.js';
+import { replaceConsentGate } from './src/service/lib-replace.js';
 import { generateAiMock, writeMock, refineMock, mockInputFingerprint, MOCK_SPEC_VERSION, runMockSelfTests, pluginInterface, refreshMockLibs } from './src/test/mock.js';
 import { acceptanceFromSelfTest, writeAcceptance, readAcceptance, acceptanceFeatureFile, acceptanceToDevhub, compareAcceptance, normalizeInterface } from './src/service/acceptance.js';
 import { redevelopDeadLib, buildSliceRebuildPrompt } from './src/service/redev-slices.js';
@@ -426,7 +427,19 @@ function cmdServe(portArg) {
     const r = await maintainComponent(store, store.get(id), maintainOpts);
     bail(); // B-59
     const breaking = (r.steps || []).filter((s) => s.step === 'migrate' && s.skipped);
-    if (breaking.length && r.skipped !== true) {
+    // T-163: Ersatz/Nachbau UNMAINTAINED Libs (migrate-Schritte mit `replace`) ist ein großer, riskanter
+    // Eingriff und läuft NICHT still im Full-/geplanten Lauf — er braucht EXPLIZITE Extra-Zustimmung:
+    // pro Lauf (opts.consentReplace, z.B. GUI-„Approve & replace") ODER Opt-in (Setting/Komponente).
+    // Ohne Zustimmung wird der Vorschlag nur GEMELDET (interface-erhaltend, „wie zuvor"-verifiziert),
+    // nicht ausgeführt. Sichere/Major-Only-Migrationen (ohne `replace`) bleiben ungegated.
+    const replaceConsent = opts.consentReplace === true || settings.autoReplaceUnmaintained === true || !!store.get(id).allowUnmaintainedReplace;
+    const cg = replaceConsentGate(r.steps, { consent: replaceConsent });
+    if (cg.needsConsent) {
+      r.migration = {
+        skipped: true, consentRequired: true, proposals: cg.proposals,
+        reason: `Replacing/rebuilding unmaintained ${cg.proposals.map((p) => p.lib).join(', ')} needs your approval — interface-preserving (${cg.proposals.map((p) => (p.strategy === 'replace' ? `→ ${p.to}` : 'MIT self-build')).join(', ')}), verified as before. Approve to proceed.`,
+      };
+    } else if (breaking.length && r.skipped !== true) {
       if (!hasPlaywright) r.migration = { skipped: true, reason: 'Playwright not installed — needed for the verified migration (Tests tab → Install Playwright)' };
       else if (ai.kind === 'stub') r.migration = { skipped: true, reason: 'No AI backend — needed for the migration (Settings → Test connection)' };
       else {
@@ -1021,7 +1034,10 @@ function cmdServe(portArg) {
 
     // Vollständige Pflege (manuell = automatisch) — eine Orchestrierung (T-66) → async
     if (p.startsWith('/api/components/') && p.endsWith('/maintain') && req.method === 'POST') return withComponent(async (c, id) => {
-      const r = await fullMaintain(store.get(id)); // fullMaintain managt RUNNING selbst (auch für autonome Läufe)
+      const body = await readBody(req).catch(() => ({}));
+      // T-163: { consentReplace:true } = explizite Extra-Zustimmung, unmaintained Libs in DIESEM Lauf zu
+      // ersetzen/nachzubauen (GUI-„Approve & replace"). Ohne das nur Vorschlag (consentRequired).
+      const r = await fullMaintain(store.get(id), { consentReplace: body?.consentReplace === true }); // fullMaintain managt RUNNING selbst
       return json(res, r, r?.error ? 400 : 200);
     });
 

@@ -86,6 +86,7 @@ export async function metaApiHandler(method, pathname, body, ctx) {
       scheduleEnabled: !!settings.scheduleEnabled,
       allowPush: !!settings.allowPush,
       autoRepair: !!settings.autoRepair,
+      autoReplaceUnmaintained: !!settings.autoReplaceUnmaintained, // T-163 Opt-in (Default AUS)
       smtp: settings.smtp,
       aiBackend: aiBackendView(settings),
       apexTarget: settings.apexTarget, // T-134 (nicht-geheime APEX-Ziel-Konfig; Passwort separat via secretStore)
@@ -101,6 +102,7 @@ export async function metaApiHandler(method, pathname, body, ctx) {
         if (body?.scheduleEnabled != null) settings.scheduleEnabled = !!body.scheduleEnabled;
         if (body?.allowPush != null) settings.allowPush = !!body.allowPush;
         if (body?.autoRepair != null) settings.autoRepair = !!body.autoRepair;
+        if (body?.autoReplaceUnmaintained != null) settings.autoReplaceUnmaintained = !!body.autoReplaceUnmaintained; // T-163
         return { status: 200, body: view() };
       } catch (err) {
         return { status: 400, body: { error: String(err?.message ?? err) } };

@@ -42,6 +42,24 @@ export function suggestReplacement(name, deps = {}) {
 }
 
 /**
+ * T-163 — Zustimmungs-Tor für den Ersatz/Nachbau UNMAINTAINED Libs. Der Austausch einer nicht mehr
+ * gepflegten Lib (permissiver Nachfolger ODER MIT-Self-Build, beide interface-erhaltend) ist ein großer,
+ * riskanter Eingriff und darf NICHT still im Full-/geplanten Lauf passieren — er braucht eine explizite
+ * Extra-Zustimmung (Approve-Aktion pro Lauf ODER Opt-in-Setting). Reine Funktion: bewertet die migrate-
+ * Schritte eines Laufs und meldet, ob (und wofür) Zustimmung fehlt. Sichere Updates/Major-Only-Migrationen
+ * (ohne `replace`) fallen NICHT unter das Tor.
+ * @param {Array<{step?:string,replace?:boolean,name?:string,to?:string|null,strategy?:string,reason?:string}>} migrateSteps
+ * @param {{consent?:boolean}} [opts] consent = Extra-Zustimmung erteilt (Approve/Setting)
+ * @returns {{needsConsent:boolean, proposals:Array<{lib:string,to:string|null,strategy:'replace'|'self-build',interfacePreserving:true,reason?:string}>}}
+ */
+export function replaceConsentGate(migrateSteps, opts = {}) {
+  const proposals = (migrateSteps ?? [])
+    .filter((s) => s && s.step === 'migrate' && s.replace)
+    .map((s) => ({ lib: s.name, to: s.to ?? null, strategy: s.to ? 'replace' : 'self-build', interfacePreserving: true, reason: s.reason }));
+  return { needsConsent: proposals.length > 0 && !opts.consent, proposals };
+}
+
+/**
  * Ersatz-Plan für eine erkannte Lib-Liste: je unmaintained Lib entweder ein permissiver Nachfolger
  * (strategy 'replace') oder, wenn keiner bekannt ist, ein Self-Build-Hinweis (strategy 'self-build').
  * @param {Array<{name:string,version?:string,unmaintained?:boolean,status?:string}>} libs @param {{classify?:Function}} [deps]

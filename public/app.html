@@ -294,6 +294,8 @@
       <label>Working directory (each repo gets its own subdirectory here)</label>
       <input id="workDir" placeholder="./workspace">
       <div class="muted small" style="margin-top:12px">Auto-repair (check → full maintenance) and push to remote are always on. Outward-facing pushes still ask for a confirmation when you click Upload.</div>
+      <label class="chk" style="margin-top:12px"><input type="checkbox" id="autoReplaceUnmaintained"><span>Auto-replace unmaintained libraries without asking</span></label>
+      <div class="muted small">Off by default: replacing/rebuilding an unmaintained library (interface-preserving successor or MIT self-build) is a big change and needs your explicit approval per run. Turn this on to let maintenance do it automatically (still adopted only if it works as before).</div>
     </div>
 
     <div class="spanel" data-tab="ai">
@@ -1010,18 +1012,23 @@ async function addLib(){
   try{ await api('POST',`/api/components/${current.id}/libraries`,{name,version,source}); await openDetail(current.id); toast('Library added'); }
   catch(e){ toast('Error: '+e.message); }
 }
-async function runMaintain(){
+async function runMaintain(consentReplace){
   if(!current) return;
   const id=current.id; setBusy(id,true); $('reviewOut').innerHTML='<div class="muted small">Full maintenance running (check → review → fix → updates → re-test)…</div>';
   try{
-    const r = await api('POST',`/api/components/${id}/maintain`,{});
+    // T-163: consentReplace=true = explizite Extra-Zustimmung, unmaintained Libs in diesem Lauf zu ersetzen/nachzubauen.
+    const r = await api('POST',`/api/components/${id}/maintain`,{consentReplace:!!consentReplace});
     if(r.error){ $('reviewOut').innerHTML=`<div class="finding">${esc(r.error)}</div>`; return; }
     if(r.skipped){ $('reviewOut').innerHTML=`<div class="finding medium">Skipped: ${esc(r.reason||'')}</div>`; return; }
     await openDetail(id); load();
     let mig='';
     if(r.migration){
       const m=r.migration;
-      if(m.adopted) mig=`<div class="note"><b style="color:#3fb950">🚀 Migrated to latest — verified as before</b> · ${esc(m.migration||'')}${m.upload&&m.upload.prUrl?` — <a href="${esc(m.upload.prUrl)}" target="_blank" rel="noopener" style="color:var(--accent)">PR ↗</a>`:''}</div>`;
+      if(m.consentRequired){
+        const props=(m.proposals||[]).map(p=>`<li><b>${esc(p.lib)}</b> → ${p.strategy==='replace'?('replace with <code>'+esc(p.to||'')+'</code>'):'MIT self-build'} <span class="muted small">(same external interface, verified as before)</span></li>`).join('');
+        mig=`<div class="finding medium"><b>⚠ Approval needed — replace/rebuild unmaintained library</b><ul style="margin:6px 0 8px 18px">${props}</ul><button class="primary" onclick="runMaintain(true)">✅ Approve &amp; replace</button> <span class="muted small">runs the interface-preserving replacement; adopted only if it still works as before, otherwise rolled back</span></div>`;
+      }
+      else if(m.adopted) mig=`<div class="note"><b style="color:#3fb950">🚀 Migrated to latest — verified as before</b> · ${esc(m.migration||'')}${m.upload&&m.upload.prUrl?` — <a href="${esc(m.upload.prUrl)}" target="_blank" rel="noopener" style="color:var(--accent)">PR ↗</a>`:''}</div>`;
       else if(m.skipped) mig=`<div class="finding medium">↪ Migration skipped — ${esc(m.reason||'')}</div>`;
       else mig=`<div class="finding"><b>⛔ Migration not adopted (rolled back)</b> — ${esc(m.reason||(m.gate&&m.gate.summary)||'not green as before')}</div>`+((m.regressions||[]).map(x=>`<div class="finding medium">↩ ${esc(x.scenario)}: ${esc(x.was||'passed')} → ${esc(x.now||'failed')}</div>`).join(''));
     }
@@ -1346,6 +1353,7 @@ async function loadSettings(){
 function openSettings(){
   const s = settingsCache, ai = s.aiBackend||{kind:'stub'}, sm = s.smtp||{};
   $('workDir').value = s.workDir||'';
+  $('autoReplaceUnmaintained').checked = !!s.autoReplaceUnmaintained; // T-163 Opt-in
   $('aiKind').value = ai.kind||'stub'; $('aiCommand').value=ai.command||''; $('aiEndpoint').value=ai.endpoint||''; $('aiModel').value=ai.model||''; $('aiKey').value=''; $('aiKeyState').textContent=ai.hasKey?'(key stored)':''; $('aiTestOut').textContent='';
   $('aiCliKey').value=''; $('aiCliKeyState').textContent=ai.hasKey?'(key stored — headless aktiv)':''; window._aiHasKey=!!ai.hasKey;
   $('schedEnabled').checked=!!s.scheduleEnabled; $('schedule').value=s.schedule||''; updateSchedHint();
@@ -1414,7 +1422,7 @@ async function saveSettingsAll(){
     const ai = { kind:$('aiKind').value, command:$('aiCommand').value.trim()||undefined, endpoint:$('aiEndpoint').value.trim()||undefined, model:$('aiModel').value.trim()||undefined, secretRef:((window._aiHasKey||aiNewKey)?'ai-key':undefined) };
     const smtp = { host:$('smtpHost').value.trim(), port:Number($('smtpPort').value)||587, secure:$('smtpSecure').checked, user:$('smtpUser').value.trim(), from:$('smtpFrom').value.trim() };
     const recipients = $('recipients').value.split(',').map(x=>x.trim()).filter(Boolean);
-    await api('PUT','/api/settings',{ workDir:$('workDir').value.trim(), aiBackend:ai, smtp, recipients, schedule:$('schedule').value.trim(), scheduleEnabled:$('schedEnabled').checked });
+    await api('PUT','/api/settings',{ workDir:$('workDir').value.trim(), aiBackend:ai, smtp, recipients, schedule:$('schedule').value.trim(), scheduleEnabled:$('schedEnabled').checked, autoReplaceUnmaintained:$('autoReplaceUnmaintained').checked });
     if(aiNewKey) await api('POST','/api/ai/key',{key:aiNewKey}); // B-62: Provider- oder CLI-Headless-Key
     if($('smtpPass').value) await api('POST','/api/smtp/pass',{pass:$('smtpPass').value});
     await api('PUT','/api/apex-target',{ baseUrl:$('apxBaseUrl').value.trim(), workspace:$('apxWorkspace').value.trim(), appId:$('apxAppId').value.trim(), alias:$('apxAlias').value.trim(), loginUser:$('apxUser').value.trim(), workspaceId:$('apxWsId').value.trim(), owner:$('apxOwner').value.trim(), pass: $('apxPass').value || undefined });
