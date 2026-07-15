@@ -16,8 +16,8 @@ const ALGO = 'aes-256-gcm';
 
 /** Verschlüsselt einen Klartext. @returns {{salt,iv,tag,data}} (alles base64) */
 export function encryptSecret(plaintext, passphrase) {
-  if (plaintext == null) throw new Error('Kein Secret übergeben');
-  if (!passphrase) throw new Error('Master-Key fehlt');
+  if (plaintext == null) throw new Error('No secret provided');
+  if (!passphrase) throw new Error('Master key missing');
   const salt = crypto.randomBytes(16);
   const iv = crypto.randomBytes(12);
   const key = crypto.scryptSync(passphrase, salt, 32);
@@ -33,14 +33,14 @@ export function encryptSecret(plaintext, passphrase) {
 
 /** Entschlüsselt; wirft bei falschem Master-Key (GCM-Auth schlägt fehl). */
 export function decryptSecret(blob, passphrase) {
-  if (!passphrase) throw new Error('Master-Key fehlt');
+  if (!passphrase) throw new Error('Master key missing');
   const key = crypto.scryptSync(passphrase, Buffer.from(blob.salt, 'base64'), 32);
   const decipher = crypto.createDecipheriv(ALGO, key, Buffer.from(blob.iv, 'base64'));
   decipher.setAuthTag(Buffer.from(blob.tag, 'base64'));
   try {
     return Buffer.concat([decipher.update(Buffer.from(blob.data, 'base64')), decipher.final()]).toString('utf8');
   } catch {
-    throw new Error('Entschlüsselung fehlgeschlagen (falscher Master-Key?)');
+    throw new Error('Decryption failed (wrong master key?)');
   }
 }
 

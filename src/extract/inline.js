@@ -90,7 +90,7 @@ export function extractInlineJs(sql, sqlFile) {
     const absEnd = call.argStart + span.end;
 
     if (!evaled.ok) {
-      unsafe.push({ reason: `${callName}: dynamisch zusammengesetztes JS — nicht eindeutig auflösbar`, location: { sqlFile, absStart, absEnd } });
+      unsafe.push({ reason: `${callName}: dynamically assembled JS — not unambiguously resolvable`, location: { sqlFile, absStart, absEnd } });
       return;
     }
 

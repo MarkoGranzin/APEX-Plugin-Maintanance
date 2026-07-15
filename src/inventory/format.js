@@ -38,7 +38,7 @@ export function detectFormat(artifact) {
       format: FORMAT.EXPORT,
       testPath: TEST_PATH.INSTANCE,
       status: 'ok',
-      reason: 'APEX-Export erkannt (wwv_flow_api/create_plugin/f4000).',
+      reason: 'APEX export detected (wwv_flow_api/create_plugin/f4000).',
     };
   }
 
@@ -48,7 +48,7 @@ export function detectFormat(artifact) {
       format: FORMAT.SOURCE,
       testPath: TEST_PATH.INSTANCE_FREE,
       status: 'ok',
-      reason: 'Getrennte .sql/.js/.css-Quelldateien ohne Export-Wrapper.',
+      reason: 'Separate .sql/.js/.css source files without export wrapper.',
     };
   }
 

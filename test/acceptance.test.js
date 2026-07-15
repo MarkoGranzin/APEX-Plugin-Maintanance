@@ -91,13 +91,13 @@ describe('F-30 T-116 Akzeptanz-Vertrag aus der Mock-Charakterisierung', () => {
     const c = acceptanceFromSelfTest(stGreen, { name: 'Widget' });
     const scen = acceptanceToScenarios(c, { name: 'Widget' });
     expect(scen.length).toBe(c.total + 2); // + „funktioniert nativ wie zuvor" (Kopf) + „rendert echt"
-    expect(scen[0].title).toMatch(/funktioniert nativ wie zuvor/); // T-124: natives Funktionieren ist Kopf-Kriterium
-    expect(scen[1].title).toMatch(/rendert echte Ausgabe/);
+    expect(scen[0].title).toMatch(/works natively as before/); // T-124: natives Funktionieren ist Kopf-Kriterium
+    expect(scen[1].title).toMatch(/renders real output/);
     const s = scen.find((x) => x.title.includes('renders 12 nodes'));
     expect(s).toBeTruthy();
-    expect(s.gherkin).toMatch(/Angenommen/);
-    expect(s.gherkin).toMatch(/Wenn/);
-    expect(s.gherkin).toMatch(/Dann renders 12 nodes/);
+    expect(s.gherkin).toMatch(/Given/);
+    expect(s.gherkin).toMatch(/When/);
+    expect(s.gherkin).toMatch(/Then renders 12 nodes/);
     // Form passt 1:1 zu set_tests (title + gherkin Strings)
     expect(scen.every((x) => typeof x.title === 'string' && typeof x.gherkin === 'string')).toBe(true);
   });
@@ -105,9 +105,9 @@ describe('F-30 T-116 Akzeptanz-Vertrag aus der Mock-Charakterisierung', () => {
   it('T-120 acceptanceFeatureFile: exportierbare .feature mit Funktionalität + Szenarien', () => {
     const c = acceptanceFromSelfTest(stGreen, { name: 'Widget' });
     const f = acceptanceFeatureFile(c, { name: 'Widget' });
-    expect(f).toMatch(/Funktionalität: Widget/);
-    expect(f).toMatch(/Szenario:/);
-    expect(f).toMatch(/Angenommen das Plugin "Widget"/);
+    expect(f).toMatch(/Feature: Widget/);
+    expect(f).toMatch(/Scenario:/);
+    expect(f).toMatch(/Given the plugin "Widget"/);
     expect(f).toMatch(/works as before/i);
   });
 

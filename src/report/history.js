@@ -18,7 +18,7 @@ export function createHistory(initial = []) {
  * @param {{id:string, at?:string, status:'green'|'red'|'partial', steps?:object[], updated?:object[], failures?:object[], prRefs?:any[]}} run
  */
 export function recordRun(history, run) {
-  if (!run?.id) throw new Error('Lauf braucht eine id');
+  if (!run?.id) throw new Error('Run requires an id');
   if (history.runs.some((r) => r.id === run.id)) {
     // Idempotenz: derselbe Lauf wird nicht doppelt gespeichert (Crash/Neustart)
     return history;

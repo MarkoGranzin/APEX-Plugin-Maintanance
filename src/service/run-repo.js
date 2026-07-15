@@ -164,9 +164,9 @@ export function scanRepo(repoDir, opts = {}) {
     allRisks.push(...risks);
     for (const u of scan.updates) if (u.outdated) updatesFlat.push({ artifact: art.name, ...u });
     if (bundle.status === 'extraktion-unsicher') {
-      failures.push({ artifact: art.name, reason: 'extraktion-unsicher → manueller Eingriff' });
+      failures.push({ artifact: art.name, reason: 'extraktion-unsicher → manual intervention' });
     } else if (!staticRes.lint.ok) {
-      failures.push({ artifact: art.name, reason: 'Lint-Fehler: ' + staticRes.lint.findings.map((f) => f.message).join('; ') });
+      failures.push({ artifact: art.name, reason: 'Lint error: ' + staticRes.lint.findings.map((f) => f.message).join('; ') });
     }
 
     detail.push({
@@ -201,7 +201,7 @@ export function scanRepo(repoDir, opts = {}) {
   const libsArr = [...libsMap.values()];
   for (const l of libsArr.filter((x) => x.vulnerable)) {
     log.push({ artifact: '(SBOM)', agent: 'Security', file: `${l.name}@${l.version}`, result: `verwundbare Abhängigkeit: ${l.vuln ?? 'bekannt'}${l.fixedFrom ? ` (fix ab ${l.fixedFrom})` : ''}`, severity: 'high' });
-    failures.push({ artifact: `${l.name}@${l.version}`, reason: `verwundbare Bibliothek (${l.vuln ?? 'bekannt'})` });
+    failures.push({ artifact: `${l.name}@${l.version}`, reason: `vulnerable library (${l.vuln ?? 'bekannt'})` });
   }
   for (const l of libsArr.filter((x) => x.unmaintained && !x.vulnerable)) {
     log.push({ artifact: '(SBOM)', agent: 'Security', file: `${l.name}@${l.version}`, result: `nicht gepflegt: ${l.reason}`, severity: 'medium' });

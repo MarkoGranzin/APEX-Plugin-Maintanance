@@ -70,13 +70,13 @@ export async function rebuildSlices(contract, deps = {}) {
   const { implementSlice, runSelfTests, adopt, rollback, name, deadLib } = deps;
   const maxRounds = deps.maxRounds ?? 2;
   const log = deps.log || (() => {});
-  if (!contract || !(contract.criteria || []).length) return { ok: false, reason: 'kein Akzeptanz-Vertrag', license: null, slices: [] };
+  if (!contract || !(contract.criteria || []).length) return { ok: false, reason: 'no acceptance contract', license: null, slices: [] };
 
   // 1) Lizenz-Gate für die gewählte Technologie — ist sie rechtlich nicht sauber, gar nicht erst bauen.
   const gate = licenseGate(deps.license, { classify: deps.classify });
-  if (deps.license != null && !gate.allowed) { log(`Lizenz-Gate: ${gate.reason} → Abbruch`); return { ok: false, reason: 'license rejected: ' + gate.reason, license: gate, slices: [] }; }
+  if (deps.license != null && !gate.allowed) { log(`License gate: ${gate.reason} → abort`); return { ok: false, reason: 'license rejected: ' + gate.reason, license: gate, slices: [] }; }
 
-  if (typeof implementSlice !== 'function' || typeof runSelfTests !== 'function') return { ok: false, reason: 'implementSlice/runSelfTests fehlen', license: gate, slices: [] };
+  if (typeof implementSlice !== 'function' || typeof runSelfTests !== 'function') return { ok: false, reason: 'implementSlice/runSelfTests missing', license: gate, slices: [] };
 
   // 2) Je Slice: implementieren → gegen die Slice-Kriterien prüfen → adopt/rollback, bis grün oder Limit.
   const slices = planSlices(contract);
@@ -113,8 +113,8 @@ export async function rebuildSlices(contract, deps = {}) {
 export async function redevelopDeadLib(store, comp, deps = {}) {
   const dir = comp.path;
   const contract = deps.contract ?? readAcceptance(dir);
-  if (!contract || !(contract.criteria || []).length) return { ok: false, error: 'Kein Akzeptanz-Vertrag — erst einen grünen Mock bauen.' };
-  if (typeof deps.implementSlice !== 'function' || typeof deps.runSelfTests !== 'function') return { ok: false, error: 'implementSlice/runSelfTests müssen injiziert werden (KI + Mock-Selbsttest).' };
+  if (!contract || !(contract.criteria || []).length) return { ok: false, error: 'No acceptance contract — build a green mock first.' };
+  if (typeof deps.implementSlice !== 'function' || typeof deps.runSelfTests !== 'function') return { ok: false, error: 'implementSlice/runSelfTests must be injected (AI + mock self-test).' };
 
   // Toten Lib bestimmen: erste Lib, deren Entscheidung „replace" ist (kein sicheres Update / nicht gepflegt).
   const libs = (store?.get?.(comp.id)?.libs) ?? comp.libs ?? [];

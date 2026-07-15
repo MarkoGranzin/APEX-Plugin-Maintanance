@@ -19,7 +19,7 @@ describe('T-22 Umgebungswahl', () => {
   it('apex.*-Shim deckt Aufruf nicht ab → meldet Shim unvollständig, markiert B-Pfad', () => {
     const r = chooseTestEnv({ apexCalls: ['apex.theme.experimentalThing'] });
     expect(r.env).toBe(ENV.PLAYWRIGHT);
-    expect(r.reason).toMatch(/Shim unvollständig/);
+    expect(r.reason).toMatch(/shim incomplete/);
     expect(r.shimIncomplete).toContain('apex.theme.experimentalThing');
   });
 });

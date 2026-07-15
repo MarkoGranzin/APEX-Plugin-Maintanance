@@ -26,8 +26,8 @@ export function createTransport(smtp, pass) {
  */
 export async function sendReportMail(report, opts) {
   const recipients = opts.recipients ?? [];
-  if (!recipients.length) throw new Error('Keine Empfänger konfiguriert');
-  if (!opts.transport && !opts.smtp?.host) throw new Error('Kein SMTP-Host konfiguriert');
+  if (!recipients.length) throw new Error('No recipients configured');
+  if (!opts.transport && !opts.smtp?.host) throw new Error('No SMTP host configured');
   const t = opts.transport ?? createTransport(opts.smtp, opts.pass);
   const info = await t.sendMail({
     from: opts.smtp?.from || opts.smtp?.user || 'aisp@local',

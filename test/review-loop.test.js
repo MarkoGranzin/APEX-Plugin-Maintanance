@@ -64,6 +64,6 @@ describe('T-115 Doppel-Review + Rework-Schleife', () => {
   it('fehlende Agenten → klarer Fehler', async () => {
     const r = await dualReviewRework({}, { securityReview: async () => ({ ok: true }) });
     expect(r.pass).toBe(false);
-    expect(r.error).toMatch(/Review-Agenten/);
+    expect(r.error).toMatch(/review agents/i);
   });
 });

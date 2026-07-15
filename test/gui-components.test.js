@@ -57,6 +57,16 @@ describe('T-33 View-Model & Aktionen', () => {
     expect(vm[0]).toMatchObject({ name: 'Slider', type: 'template_component', formatBadge: 'APEX-SQL-Export', status: 'ok', changeSummary: 'jquery 3.4.1 → 3.7.1' });
   });
 
+  it('Übersicht liefert source (Repo-Zuordnung) — sonst hält listengetriebene Logik jedes Plugin für „kein Repo"', () => {
+    const s = newStore();
+    s.add({ name: 'Flow', type: 'plugin', format: 'export', status: 'handlungsbedarf', source: 'https://github.com/org/flow', visibility: 'öffentlich' });
+    const vm = overviewViewModel(s);
+    expect(vm[0]).toMatchObject({ source: 'https://github.com/org/flow', visibility: 'öffentlich' });
+    // ohne Repo: source falsy (Banner/Filter dürfen dann ehrlich „kein Repo" annehmen)
+    s.add({ name: 'NoRepo', type: 'plugin' });
+    expect(overviewViewModel(s).find((c) => c.name === 'NoRepo').source).toBeFalsy();
+  });
+
   it('Übersicht liefert mockUrl/mockMode für den „Open mock"-Button (F-29)', () => {
     const s = newStore();
     s.add({ name: 'Flow', type: 'plugin', format: 'export', status: 'ok' });

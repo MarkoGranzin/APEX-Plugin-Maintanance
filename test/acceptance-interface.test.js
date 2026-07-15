@@ -34,19 +34,19 @@ describe('T-126 Schnittstelle exakt im Akzeptanz-Vertrag/.feature', () => {
   it('.feature beschreibt die Schnittstelle exakt (Abschnitt + Parameter + voller JSON-Default + Szenario)', () => {
     const c = acceptanceFromSelfTest(stGreen, { name: 'ApexFlowChart', interface: rawInterface });
     const f = acceptanceFeatureFile(c, { name: 'ApexFlowChart' });
-    expect(f).toMatch(/Schnittstelle \(APEX-Plugin-Parameter/);
+    expect(f).toMatch(/Interface \(APEX plugin parameters/);
     expect(f).toContain('Diagramm-Typ [STRING]');
     expect(f).toContain('Flussdiagramm=flow | Orgchart=org');
     expect(f).toContain(JSON_DEFAULT);                 // JSON-Default ungekürzt in der .feature
-    expect(f).toMatch(/Schnittstelle \(Parameter\/Konfiguration\) bleibt exakt erhalten/);
+    expect(f).toMatch(/interface \(parameters\/configuration\) is preserved exactly/);
   });
 
   it('acceptanceToScenarios enthält ein devhub-taugliches Schnittstellen-Szenario, das jeden Parameter aufzählt', () => {
     const c = acceptanceFromSelfTest(stGreen, { name: 'ApexFlowChart', interface: rawInterface });
     const scen = acceptanceToScenarios(c, { name: 'ApexFlowChart' });
-    const s = scen.find((x) => /Schnittstelle .* bleibt exakt erhalten/.test(x.title));
+    const s = scen.find((x) => /interface .* is preserved exactly/.test(x.title));
     expect(s).toBeTruthy();
-    expect(s.gherkin).toMatch(/Parameter "Diagramm-Typ" \[STRING\]/);
+    expect(s.gherkin).toMatch(/parameter "Diagramm-Typ" \[STRING\]/);
     expect(s.gherkin).toContain(JSON_DEFAULT);
   });
 
@@ -61,6 +61,6 @@ describe('T-126 Schnittstelle exakt im Akzeptanz-Vertrag/.feature', () => {
   it('ohne interface → kein Schnittstellen-Abschnitt (rückwärtskompatibel)', () => {
     const c = acceptanceFromSelfTest(stGreen, { name: 'X' });
     expect(c.interface).toBe(null);
-    expect(acceptanceFeatureFile(c, { name: 'X' })).not.toMatch(/Schnittstelle \(APEX/);
+    expect(acceptanceFeatureFile(c, { name: 'X' })).not.toMatch(/Interface \(APEX/);
   });
 });

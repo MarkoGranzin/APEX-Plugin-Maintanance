@@ -46,12 +46,12 @@ describe('T-73 runUiTests', () => {
   it('ohne Playwright → ran:false mit Anleitung', async () => {
     const r = await runUiTests(comp(), { pluginUrl: 'http://x', specsDir: path.join(tmp, 'd'), hasPlaywright: false });
     expect(r.ran).toBe(false);
-    expect(r.reason).toMatch(/Playwright nicht installiert/);
+    expect(r.reason).toMatch(/Playwright not installed/);
   });
 
   it('ohne Specs → ran:false', async () => {
     const r = await runUiTests({ name: 'P', codedTests: [] }, { pluginUrl: 'http://x', specsDir: path.join(tmp, 'e'), hasPlaywright: true });
     expect(r.ran).toBe(false);
-    expect(r.reason).toMatch(/Coded-UI-Tests/);
+    expect(r.reason).toMatch(/coded UI tests/i);
   });
 });

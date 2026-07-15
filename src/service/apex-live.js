@@ -51,13 +51,13 @@ export async function deployAndTest(o = {}, deps = {}) {
   };
   const t = o.target || {};
   const appId = o.appId ?? t.appId;
-  if (!o.exportFile || !d.exists(o.exportFile)) return { ok: false, error: 'Plugin-Export nicht gefunden (Repo/Datei prüfen).' };
-  if (!t.baseUrl || !t.workspace || !t.user || !t.pass) return { ok: false, error: 'APEX-Verbindung unvollständig (baseUrl/workspace/user/Passwort).' };
-  if (!appId) return { ok: false, error: 'Ziel-App-ID fehlt.' };
+  if (!o.exportFile || !d.exists(o.exportFile)) return { ok: false, error: 'Plugin export not found (check repo/file).' };
+  if (!t.baseUrl || !t.workspace || !t.user || !t.pass) return { ok: false, error: 'APEX connection incomplete (baseUrl/workspace/user/password).' };
+  if (!appId) return { ok: false, error: 'Target app ID missing.' };
 
   const exportSql = d.readFile(o.exportFile);
   const an = d.analyzePlugin(exportSql);
-  if (!an.internalName) return { ok: false, error: 'Plugin-Name im Export nicht gefunden.' };
+  if (!an.internalName) return { ok: false, error: 'Plugin name not found in the export.' };
   const pageId = o.pageId ?? 20000;
 
   // Analyse → Setup-Manifest („Rezept"). Die Einrichtung läuft AUSSCHLIESSLICH über setupFromManifest —

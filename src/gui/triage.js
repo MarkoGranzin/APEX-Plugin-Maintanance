@@ -25,7 +25,7 @@ export function artifactCard(art) {
     name: art.name,
     formatBadge: FORMAT_BADGE[art.format] ?? 'unklar',
     testPath: art.testPath ?? '—',
-    maturity: art.maturity ?? (art.format === FORMAT.UNCLEAR ? 'noch nicht testbar' : 'nur Snapshot'),
+    maturity: art.maturity ?? (art.format === FORMAT.UNCLEAR ? 'noch nicht testbar' : 'snapshot only'),
     needsDecision: needsDecision(art),
   };
 }
@@ -74,5 +74,5 @@ export function triageViewModel(artifacts, activeRisks = []) {
  */
 export function correctFormat(art, format) {
   const testPath = format === FORMAT.EXPORT ? TEST_PATH.INSTANCE : format === FORMAT.SOURCE ? TEST_PATH.INSTANCE_FREE : null;
-  return { ...art, format, testPath, status: 'ok', maturity: 'nur Snapshot' };
+  return { ...art, format, testPath, status: 'ok', maturity: 'snapshot only' };
 }

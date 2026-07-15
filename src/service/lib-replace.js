@@ -17,13 +17,13 @@ import { classifyLicense } from '../sbom/licenses.js';
  * note: API-Migrationshinweis für den KI-Agenten · runtime: false = Build-/Test-Tooling (kein Laufzeit-Swap im Mock).
  */
 export const REPLACEMENTS = {
-  moment: { to: 'dayjs', license: 'MIT', cdn: 'https://cdn.jsdelivr.net/npm/dayjs@1/dayjs.min.js', note: 'dayjs hat eine moment-ähnliche, immutable API: dayjs(input).format(...), .add()/.subtract(). Für nicht-ISO-Parsing das CustomParseFormat-Plugin laden.', runtime: true },
-  momentjs: { to: 'dayjs', license: 'MIT', cdn: 'https://cdn.jsdelivr.net/npm/dayjs@1/dayjs.min.js', note: 'dayjs hat eine moment-ähnliche, immutable API: dayjs(input).format(...). Für nicht-ISO-Parsing CustomParseFormat-Plugin laden.', runtime: true },
-  mxgraph: { to: '@maxgraph/core', license: 'Apache-2.0', cdn: 'https://cdn.jsdelivr.net/npm/@maxgraph/core/dist/maxgraph.umd.min.js', note: 'maxGraph ist der offizielle Nachfolger von mxGraph (gleiche Architektur). mx*-Klassen → @maxgraph/core-Exporte (z.B. mxGraph→Graph, mxClient→…). Aufrufstellen entsprechend umstellen.', runtime: true },
-  mxclient: { to: '@maxgraph/core', license: 'Apache-2.0', cdn: 'https://cdn.jsdelivr.net/npm/@maxgraph/core/dist/maxgraph.umd.min.js', note: 'mxClient → @maxgraph/core (offizieller Nachfolger).', runtime: true },
-  jsonpath: { to: 'jsonpath-plus', license: 'MIT', cdn: 'https://cdn.jsdelivr.net/npm/jsonpath-plus/dist/index-browser-umd.cjs', note: 'jsonpath-plus: JSONPath({ path, json }) statt jsonpath.query(json, path). Drop-in-nah.', runtime: true },
-  request: { to: 'node-fetch', license: 'MIT', cdn: null, note: 'Im Browser native fetch(); in Node node-fetch. request(opts,cb) → fetch(url,opts).then(r=>r.json()).', runtime: true },
-  protractor: { to: 'playwright', license: 'Apache-2.0', cdn: null, note: 'E2E-Test-Runner — Specs auf @playwright/test migrieren (kein Laufzeit-Swap).', runtime: false },
+  moment: { to: 'dayjs', license: 'MIT', cdn: 'https://cdn.jsdelivr.net/npm/dayjs@1/dayjs.min.js', note: 'dayjs has a moment-like, immutable API: dayjs(input).format(...), .add()/.subtract(). For non-ISO parsing, load the CustomParseFormat plugin.', runtime: true },
+  momentjs: { to: 'dayjs', license: 'MIT', cdn: 'https://cdn.jsdelivr.net/npm/dayjs@1/dayjs.min.js', note: 'dayjs has a moment-like, immutable API: dayjs(input).format(...). For non-ISO parsing, load the CustomParseFormat plugin.', runtime: true },
+  mxgraph: { to: '@maxgraph/core', license: 'Apache-2.0', cdn: 'https://cdn.jsdelivr.net/npm/@maxgraph/core/dist/maxgraph.umd.min.js', note: 'maxGraph is the official successor to mxGraph (same architecture). mx* classes → @maxgraph/core exports (e.g. mxGraph→Graph, mxClient→…). Adjust the call sites accordingly.', runtime: true },
+  mxclient: { to: '@maxgraph/core', license: 'Apache-2.0', cdn: 'https://cdn.jsdelivr.net/npm/@maxgraph/core/dist/maxgraph.umd.min.js', note: 'mxClient → @maxgraph/core (official successor).', runtime: true },
+  jsonpath: { to: 'jsonpath-plus', license: 'MIT', cdn: 'https://cdn.jsdelivr.net/npm/jsonpath-plus/dist/index-browser-umd.cjs', note: 'jsonpath-plus: JSONPath({ path, json }) instead of jsonpath.query(json, path). Near drop-in.', runtime: true },
+  request: { to: 'node-fetch', license: 'MIT', cdn: null, note: 'In the browser use native fetch(); in Node use node-fetch. request(opts,cb) → fetch(url,opts).then(r=>r.json()).', runtime: true },
+  protractor: { to: 'playwright', license: 'Apache-2.0', cdn: null, note: 'E2E test runner — migrate specs to @playwright/test (no runtime swap).', runtime: false },
 };
 
 /**
@@ -53,7 +53,7 @@ export function planReplacements(libs, deps = {}) {
     if (!isUnmaint) continue;
     const rep = suggestReplacement(l.name, deps);
     if (rep) out.push({ ...rep, version: l.version });
-    else out.push({ from: l.name, to: null, strategy: 'self-build', version: l.version, note: 'Kein bekannter permissiver Nachfolger — Minimal-Ersatz (MIT) nur für die genutzte Funktionalität selbst bauen.' });
+    else out.push({ from: l.name, to: null, strategy: 'self-build', version: l.version, note: 'No known permissive successor — build a minimal replacement (MIT) yourself for just the used functionality.' });
   }
   return out;
 }

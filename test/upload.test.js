@@ -44,7 +44,7 @@ describe('T-76 uploadFix', () => {
     const { git } = mkGit([]);
     const r = await uploadFix({ path: '/x', source: 'https://github.com/o/r' }, { git, push: true });
     expect(r.ok).toBe(false);
-    expect(r.reason).toMatch(/Keine Änderungen/);
+    expect(r.reason).toMatch(/No changes/);
   });
 
   it('Push-Fehler wird gemeldet, Commit bleibt (pushed=false)', async () => {

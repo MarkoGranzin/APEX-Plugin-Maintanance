@@ -32,16 +32,16 @@ export function recordPr(registry, key, state, prRef) {
  */
 export function decidePr(registry, key) {
   const pr = registry.prs[key];
-  if (!pr) return { action: 'create', reason: 'kein bestehender PR' };
+  if (!pr) return { action: 'create', reason: 'no existing PR' };
   switch (pr.state) {
     case PR_STATE.OPEN:
-      return { action: 'skip', reason: 'offener PR existiert — aktualisieren/überspringen', existing: pr };
+      return { action: 'skip', reason: 'open PR exists — update/skip', existing: pr };
     case PR_STATE.MERGED:
-      return { action: 'skip', reason: 'bereits erledigt (gemergt)', existing: pr };
+      return { action: 'skip', reason: 'already done (merged)', existing: pr };
     case PR_STATE.REJECTED:
-      return { action: 'skip', reason: 'abgelehnt — quittiert, nicht erneut anbieten', existing: pr };
+      return { action: 'skip', reason: 'rejected — acknowledged, do not offer again', existing: pr };
     default:
-      return { action: 'create', reason: 'unbekannter Zustand' };
+      return { action: 'create', reason: 'unknown state' };
   }
 }
 
@@ -58,5 +58,5 @@ export async function idempotentPush(registry, { artifact, lib, targetVersion },
   }
   const prRef = await push({ artifact, lib, targetVersion, branch: key });
   recordPr(registry, key, PR_STATE.OPEN, prRef);
-  return { pushed: true, key, reason: 'neuer PR erzeugt', prRef };
+  return { pushed: true, key, reason: 'new PR created', prRef };
 }

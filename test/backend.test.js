@@ -55,13 +55,13 @@ describe('T-11 Provider + API-Key', () => {
 
   it('ungültiger Key: testConnection meldet Fehler UND blockiert produktive Läufe', async () => {
     const be = createBackend({ kind: 'provider', endpoint: 'https://api/x', apiKey: 'SCHLECHT' }, { http: http() });
-    expect(await be.testConnection()).toMatchObject({ ok: false, error: 'Ungültiger API-Key' });
-    await expect(be.complete('x')).rejects.toThrow(/Ungültiger API-Key|blockiert/);
+    expect(await be.testConnection()).toMatchObject({ ok: false, error: 'Invalid API key' });
+    await expect(be.complete('x')).rejects.toThrow(/Invalid API key|blocked/);
   });
 
   it('fehlender Key blockiert produktiven Lauf', async () => {
     const be = createBackend({ kind: 'provider', endpoint: 'https://api/x' }, { http: http() });
-    await expect(be.complete('x')).rejects.toThrow(/Kein API-Key|blockiert/);
+    await expect(be.complete('x')).rejects.toThrow(/No API key|blocked/);
   });
 
   it('gültiger Key liefert Antwort', async () => {
@@ -74,7 +74,7 @@ describe('T-11 Umschalten', () => {
   it('createBackend wählt das konfigurierte Backend', () => {
     expect(createBackend({ kind: 'cli', command: 'c' }).kind).toBe('cli');
     expect(createBackend({ kind: 'provider', endpoint: 'e' }).kind).toBe('provider');
-    expect(() => createBackend({ kind: 'unbekannt' })).toThrow(/Unbekanntes KI-Backend/);
+    expect(() => createBackend({ kind: 'unbekannt' })).toThrow(/Unknown AI backend/);
   });
 });
 
@@ -96,7 +96,7 @@ describe('B-33 cliBackend: handlungsfaehige Meldung bei nicht auffindbarer CLI',
   it('wirft eine klare Meldung statt rohem Shell-Text (ENOENT/nicht gefunden)', async () => {
     const spawn = async () => { throw new Error('Der Befehl "claude" ist entweder falsch geschrieben oder konnte nicht gefunden werden.'); };
     const be = createBackend({ kind: 'cli', command: 'nixgibtsda' }, { spawn, resolveCommand: (c) => c });
-    await expect(be.complete('hi')).rejects.toThrow(/nicht aufrufbar|Umgebung/i);
+    await expect(be.complete('hi')).rejects.toThrow(/not callable|environment/i);
   });
 });
 

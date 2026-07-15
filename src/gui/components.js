@@ -29,6 +29,11 @@ export function overviewViewModel(store) {
     name: c.name,
     type: c.type,
     repo: c.repo ?? null,
+    // Ohne source hielt jede listengetriebene Logik (z.B. runAll → Auto-repair-Filter
+    // `list.filter(c=>c.source…)`) JEDES Plugin für „kein Repo" → action-needed-Plugins wurden
+    // beim „Check all" nie repariert. source (+ visibility) gehören daher ins Overview-VM.
+    source: c.source ?? null,
+    visibility: c.visibility ?? null,
     formatBadge: FORMAT_BADGE[c.format] ?? 'unklar',
     status: c.status,
     critical: c.critical,
@@ -72,7 +77,7 @@ export function openDirectory(targetPath, opts = {}) {
   const platform = opts.platform ?? process.platform;
   const builder = OPENERS[platform] ?? OPENERS.linux;
   const [cmd, args] = builder(targetPath);
-  if (!targetPath) return { ok: false, error: 'kein Pfad' };
+  if (!targetPath) return { ok: false, error: 'no path' };
   try {
     (opts.spawn ?? defaultSpawn)(cmd, args);
     return { ok: true, command: `${cmd} ${args.join(' ')}` };
@@ -104,7 +109,7 @@ export function defaultGather(component) {
  */
 export function manualReview(store, id, opts = {}) {
   const component = store.get(id);
-  if (!component) return { error: 'Komponente nicht gefunden' };
+  if (!component) return { error: 'component not found' };
   const gather = opts.gather ?? defaultGather;
   const change = gather(component);
   if (!change.assets || change.assets.length === 0) {

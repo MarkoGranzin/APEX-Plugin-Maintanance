@@ -22,7 +22,7 @@ import path from 'node:path';
  */
 export function detectRepoKind(source) {
   if (!source || typeof source !== 'string') {
-    throw new Error('Repo-Quelle (URL oder Pfad) fehlt');
+    throw new Error('Repo source (URL or path) missing');
   }
   const s = source.trim();
   if (/^https?:\/\//i.test(s)) return 'https';
@@ -44,7 +44,7 @@ export function detectRepoKind(source) {
  * @returns {Repo}
  */
 export function addRepo(cfg) {
-  if (!cfg?.name) throw new Error('Repo-Name fehlt');
+  if (!cfg?.name) throw new Error('Repo name missing');
   const kind = detectRepoKind(cfg.source);
   return new Repo({
     name: cfg.name,

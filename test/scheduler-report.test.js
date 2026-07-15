@@ -34,7 +34,7 @@ describe('SMTP-Report', () => {
     expect(sent[0].subject).toBe('S');
   });
   it('ohne Empfänger → Fehler', async () => {
-    await expect(sendReportMail({ subject: 'S', body: 'B' }, { recipients: [], transport: { sendMail: async () => ({}) } })).rejects.toThrow(/Empfänger/);
+    await expect(sendReportMail({ subject: 'S', body: 'B' }, { recipients: [], transport: { sendMail: async () => ({}) } })).rejects.toThrow(/recipients/i);
   });
   it('setSmtp übernimmt Host/Port/secure', () => {
     const s = createSettings();

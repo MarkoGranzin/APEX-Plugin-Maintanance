@@ -62,7 +62,7 @@ export function createBackend(config = {}, deps = {}) {
     case 'stub':
       return stubBackend(config.behavior);
     default:
-      throw new Error(`Unbekanntes KI-Backend: ${config.kind}`);
+      throw new Error(`Unknown AI backend: ${config.kind}`);
   }
 }
 
@@ -183,7 +183,7 @@ export function cliBackend(config, deps = {}) {
         const msg = String(err?.message ?? err);
         // „claude nicht gefunden"-Klasse handlungsfähig melden (statt roher Shell-Text) → landet in mockNote/Badge.
         if (/ENOENT|not recognized|nicht gefunden|not found|falsch geschrieben|konnte nicht gefunden/i.test(msg)) {
-          throw new Error(`AI CLI "${cmd}" nicht aufrufbar — den Dienst aus einer Umgebung starten, in der „claude" läuft (oder den vollen Pfad in den Einstellungen setzen); danach den Mock neu bauen.`);
+          throw new Error(`AI CLI "${cmd}" not callable — start the service from an environment where "claude" runs (or set the full path in settings); then rebuild the mock.`);
         }
         throw err;
       }
@@ -207,10 +207,10 @@ export function cliBackend(config, deps = {}) {
  */
 export function assertSafeEndpoint(endpoint) {
   let u;
-  try { u = new URL(String(endpoint)); } catch { throw new Error('AI-Provider-Endpoint ist keine gültige URL'); }
-  if (u.protocol !== 'https:' && u.protocol !== 'http:') throw new Error(`AI-Provider-Endpoint muss http(s) sein, nicht ${u.protocol}`);
+  try { u = new URL(String(endpoint)); } catch { throw new Error('AI provider endpoint is not a valid URL'); }
+  if (u.protocol !== 'https:' && u.protocol !== 'http:') throw new Error(`AI provider endpoint must be http(s), not ${u.protocol}`);
   const isLocal = /^(localhost|127\.0\.0\.1|\[?::1\]?)$/i.test(u.hostname);
-  if (u.protocol !== 'https:' && !isLocal) throw new Error('AI-Provider-Endpoint muss https nutzen (sonst würde der API-Key im Klartext übertragen)');
+  if (u.protocol !== 'https:' && !isLocal) throw new Error('AI provider endpoint must use https (otherwise the API key would be transmitted in clear text)');
   return u;
 }
 
@@ -218,7 +218,7 @@ export function assertSafeEndpoint(endpoint) {
 export function providerBackend(config, deps = {}) {
   const http = deps.http ?? defaultHttp;
   const auth = () => {
-    if (!config.apiKey) throw new Error('Kein API-Key gesetzt — produktiver Lauf blockiert');
+    if (!config.apiKey) throw new Error('No API key set — production run blocked');
     return { Authorization: `Bearer ${config.apiKey}`, 'Content-Type': 'application/json' };
   };
   return {
@@ -232,18 +232,18 @@ export function providerBackend(config, deps = {}) {
         body: JSON.stringify({ model: config.model, prompt, ...(opts.params ?? {}) }),
       });
       if (res.status === 401 || res.status === 403) {
-        throw new Error('Ungültiger API-Key — produktiver Lauf blockiert');
+        throw new Error('Invalid API key — production run blocked');
       }
-      if (res.status >= 400) throw new Error(`Provider-Fehler ${res.status}`);
+      if (res.status >= 400) throw new Error(`Provider error ${res.status}`);
       return String(res.body?.text ?? res.body ?? '').trim();
     },
     async testConnection() {
       try {
-        if (!config.apiKey) return { ok: false, error: 'Kein API-Key gesetzt' };
+        if (!config.apiKey) return { ok: false, error: 'No API key set' };
         assertSafeEndpoint(config.endpoint);
         const res = await http(config.endpoint, { method: 'GET', headers: auth() });
-        if (res.status === 401 || res.status === 403) return { ok: false, error: 'Ungültiger API-Key' };
-        if (res.status >= 400) return { ok: false, error: `Provider-Fehler ${res.status}` };
+        if (res.status === 401 || res.status === 403) return { ok: false, error: 'Invalid API key' };
+        if (res.status >= 400) return { ok: false, error: `Provider error ${res.status}` };
         return { ok: true, model: config.model };
       } catch (err) {
         return { ok: false, error: String(err?.message ?? err) };

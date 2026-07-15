@@ -23,7 +23,7 @@ export function runComponentTests(components, deps = {}) {
 
   for (const comp of components ?? []) {
     if (!exists(comp.path)) {
-      results.push({ name: comp.name, verdict: 'skipped', reason: 'kein Repo zugeordnet' });
+      results.push({ name: comp.name, verdict: 'skipped', reason: 'no repo assigned' });
       continue;
     }
     const r = scan(comp.path);

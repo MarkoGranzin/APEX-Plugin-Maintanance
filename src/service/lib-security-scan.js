@@ -31,7 +31,7 @@ export function securityScanLib(lib = {}, deps = {}) {
   const eolFor = deps.unmaintainedReason ?? unmaintainedReason;
 
   if (!name || !version || version === 'unbekannt') {
-    return { scanned: false, verdict: 'unknown', securityRisk: false, severity: 'none', advisory: null, fixAvailable: false, fixedFrom: null, reason: 'Name/Version unbekannt → nicht bewertbar' };
+    return { scanned: false, verdict: 'unknown', securityRisk: false, severity: 'none', advisory: null, fixAvailable: false, fixedFrom: null, reason: 'Name/version unknown → not assessable' };
   }
 
   // 1) Bereits am Lib markierte Verwundbarkeit (aus dem retire-Scan) hat Vorrang.
@@ -52,16 +52,16 @@ export function securityScanLib(lib = {}, deps = {}) {
       advisory: adv.vuln ?? 'bekannte Schwachstelle',
       fixAvailable,
       fixedFrom: adv.fixedFrom ?? null,
-      reason: `bekanntes Security-Advisory ${adv.vuln ?? ''}`.trim() + (adv.fixedFrom ? ` (behoben ab ${adv.fixedFrom} → Update behebt es)` : ' (kein Fix bekannt → Ersatz nötig)'),
+      reason: `known security advisory ${adv.vuln ?? ''}`.trim() + (adv.fixedFrom ? ` (fixed from ${adv.fixedFrom} → update resolves it)` : ' (no fix known → replacement required)'),
     };
   }
 
   // 3) EOL/nicht gepflegt = Sicherheitsrelevanz: es kommen keine Security-Fixes mehr.
   const eol = lib.unmaintained || lib.status === 'nicht gepflegt' ? (lib.reason ?? eolFor(name) ?? 'nicht gepflegt') : eolFor(name);
   if (eol) {
-    return { scanned: true, verdict: 'security-risk', securityRisk: true, severity: 'high', advisory: null, fixAvailable: false, fixedFrom: null, reason: `nicht gepflegt/EOL — keine Security-Fixes mehr: ${eol}` };
+    return { scanned: true, verdict: 'security-risk', securityRisk: true, severity: 'high', advisory: null, fixAvailable: false, fixedFrom: null, reason: `unmaintained/EOL — no more security fixes: ${eol}` };
   }
 
   // 4) Kein bekanntes Advisory, gepflegt → nur veralteter Code.
-  return { scanned: true, verdict: 'code-only', securityRisk: false, severity: 'none', advisory: null, fixAvailable: true, fixedFrom: null, reason: 'kein bekanntes Security-Advisory für diese Version → nur veralteter Code (Qualitäts-Update genügt)' };
+  return { scanned: true, verdict: 'code-only', securityRisk: false, severity: 'none', advisory: null, fixAvailable: true, fixedFrom: null, reason: 'no known security advisory for this version → merely outdated code (a quality update suffices)' };
 }

@@ -33,7 +33,7 @@ export function managedPaths(c, o) {
   const skipped = [];
   if (c.path) {
     if (isUnder(c.path, o.workDir) || isUnder(c.path, o.dataDir)) list.push(c.path); // verwalteter Repo-Klon (inkl. .maintenance/mock)
-    else skipped.push({ path: c.path, reason: 'externes/lokales Repo — nicht gelöscht' });
+    else skipped.push({ path: c.path, reason: 'external/local repo — not deleted' });
   }
   list.push(path.join(o.dataDir, 'logs', slug));            // Prüfprotokolle (F-22)
   list.push(path.join(o.dataDir, 'ui-tests', slug));         // Coded-UI-Test-Specs

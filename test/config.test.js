@@ -19,7 +19,7 @@ describe('T-12 Secrets verschlüsselt', () => {
 
   it('falscher Master-Key schlägt fehl', () => {
     const blob = encryptSecret('geheim', 'richtig');
-    expect(() => decryptSecret(blob, 'falsch')).toThrow(/fehlgeschlagen/);
+    expect(() => decryptSecret(blob, 'falsch')).toThrow(/failed/);
   });
 
   it('Anzeige ist maskiert', () => {
@@ -37,7 +37,7 @@ describe('T-12 Einstellungen konfigurierbar', () => {
     const s = createSettings();
     addRepo(s, { name: 'r1', source: 'https://x/y.git', secretRef: 'gh-token' });
     expect(s.repos).toHaveLength(1);
-    expect(() => addRepo(s, { name: 'r1', source: 'https://x/y.git' })).toThrow(/existiert bereits/);
+    expect(() => addRepo(s, { name: 'r1', source: 'https://x/y.git' })).toThrow(/already exists/);
     removeRepo(s, 'r1');
     expect(s.repos).toHaveLength(0);
   });
@@ -46,14 +46,14 @@ describe('T-12 Einstellungen konfigurierbar', () => {
     const s = createSettings();
     setRecipients(s, ['a@b.de', 'c@d.com']);
     expect(s.recipients).toHaveLength(2);
-    expect(() => setRecipients(s, ['kaputt'])).toThrow(/ungültige E-Mail/);
+    expect(() => setRecipients(s, ['kaputt'])).toThrow(/invalid email/i);
   });
 
   it('Zeitplan validieren (Cron 5 Felder)', () => {
     const s = createSettings();
     setSchedule(s, '0 4 * * 1');
     expect(s.schedule).toBe('0 4 * * 1');
-    expect(() => setSchedule(s, 'jeden tag')).toThrow(/Ungültiger Cron/);
+    expect(() => setSchedule(s, 'jeden tag')).toThrow(/Invalid cron/);
   });
 
   it('KI-Backend konfigurierbar, Repos referenzieren nur secretRef (kein Key)', () => {

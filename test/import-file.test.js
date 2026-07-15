@@ -63,11 +63,11 @@ describe('T-144 importFromFiles — Plugin aus Dateien (kein Git)', () => {
 
   it('ohne Dateien → Fehler', () => {
     const r = importFromFiles(makeStore(), { files: [] }, realDeps());
-    expect(r.error).toMatch(/Keine Dateien/);
+    expect(r.error).toMatch(/No files/);
   });
 
   it('Pfad-Traversal / fremde Endung → abgelehnt', () => {
-    expect(importFromFiles(makeStore(), { files: [{ name: '../evil.sql', content: 'x' }] }, realDeps()).error).toMatch(/Dateiname/);
-    expect(importFromFiles(makeStore(), { files: [{ name: 'plugin.exe', content: 'x' }] }, realDeps()).error).toMatch(/Dateiname|\.sql/);
+    expect(importFromFiles(makeStore(), { files: [{ name: '../evil.sql', content: 'x' }] }, realDeps()).error).toMatch(/file name/i);
+    expect(importFromFiles(makeStore(), { files: [{ name: 'plugin.exe', content: 'x' }] }, realDeps()).error).toMatch(/file name|\.sql/i);
   });
 });

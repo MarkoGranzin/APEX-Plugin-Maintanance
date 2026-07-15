@@ -106,7 +106,7 @@ export async function applyVendoredUpdates(dir, libs, deps = {}) {
     const abs = path.join(dir, rel);
     try {
       const content = await fetchFile(npmPackageName(lib.name), lib.latest);
-      if (!content || typeof content !== 'string') throw new Error('leerer Download');
+      if (!content || typeof content !== 'string') throw new Error('empty download');
       if (fs.existsSync(abs)) backups.set(abs, fs.readFileSync(abs, 'utf8'));
       // Steht die ALTE Version im Dateinamen (z.B. lz-string-1.0.2.js), muss die Datei auf die neue Version
       // umbenannt werden — sonst liest die SBOM-Erkennung die Version weiter aus dem Namen und der Status

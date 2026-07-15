@@ -87,7 +87,7 @@ const TOOLS = [
       const realFile = fs.realpathSync(path.resolve(a.exportFile));
       const relF = path.relative(realBase, realFile);
       if (relF.startsWith('..' + path.sep) || relF === '..' || path.isAbsolute(relF)) {
-        return { ok: false, error: `Export-Datei liegt außerhalb des erlaubten Verzeichnisses (${realBase}). Mit APEX_EXPORT_BASE erweitern.` };
+        return { ok: false, error: `Export file is outside the allowed directory (${realBase}). Extend with APEX_EXPORT_BASE.` };
       }
       const pluginName = parsePluginName(fs.readFileSync(realFile, 'utf8'));
       const r = await runSqlcl(buildInstallScript({ exportFile: realFile, workspace, appId, baseDir: realBase }));
@@ -129,7 +129,7 @@ const TOOLS = [
       const opts = { ...derived, ...a, appId, pageId, workspaceId: ENV.workspaceId, owner: ENV.owner, release: ENV.release,
         // explizit übergebene attributes überschreiben die abgeleiteten
         attributes: a.attributes || derived.attributes };
-      if (!opts.pluginInternalName) return { ok: false, error: 'pluginInternalName oder exportFile nötig.' };
+      if (!opts.pluginInternalName) return { ok: false, error: 'pluginInternalName or exportFile required.' };
       const sql = buildTestPageSql(opts);
       if (a.dryRun) return { ok: true, dryRun: true, analysis: derived._analysis, sql };
       const chromium = await loadChromium();
@@ -228,14 +228,14 @@ const TOOLS = [
         // App-internen Plug-in-Import ansteuern (verifizierter Pfad, moderne Friendly-URLs, Session bleibt durch Klicks erhalten):
         // App-Kachel (fb_flow_id=appId) → Shared Components → Plug-ins → Import.
         const appTile = page.locator(`a[href*="fb_flow_id=${appId}"]`);
-        if (!(await appTile.count())) { const shot = path.join(os.tmpdir(), 'apex-noapp.png'); await page.screenshot({ path: shot }).catch(() => {}); return { ok: false, steps, error: `App ${appId} nicht in der Apps-Liste gefunden (Workspace/App-ID prüfen).`, screenshot: shot }; }
+        if (!(await appTile.count())) { const shot = path.join(os.tmpdir(), 'apex-noapp.png'); await page.screenshot({ path: shot }).catch(() => {}); return { ok: false, steps, error: `App ${appId} not found in the apps list (check workspace/app ID).`, screenshot: shot }; }
         await appTile.first().click(); await page.waitForLoadState('networkidle').catch(() => {}); await page.waitForTimeout(1000); steps.push({ step: 'open-app', appId: Number(appId) });
         await clickFirst(page, [page.getByRole('link', { name: /shared components/i }), page.getByText(/shared components/i)]); steps.push({ step: 'shared-components' });
         await clickFirst(page, [page.getByRole('link', { name: /^plug-?ins$/i }), page.getByText(/^plug-?ins$/i)]); steps.push({ step: 'plug-ins' });
         await clickFirst(page, [page.getByRole('link', { name: /^import$/i }), page.getByRole('button', { name: /^import$/i }), page.getByText(/^import$/i)]); steps.push({ step: 'import', url: page.url() });
         const file = page.locator('input[type="file"]');
         try { await file.first().waitFor({ state: 'attached', timeout: 15000 }); }
-        catch { const shot = path.join(os.tmpdir(), 'apex-import-noupload.png'); await page.screenshot({ path: shot }).catch(() => {}); return { ok: false, steps, error: 'Plug-in-Import-Upload-Feld nicht gefunden — Navigation weicht ab (Screenshot/Schritt-Log prüfen).', screenshot: shot }; }
+        catch { const shot = path.join(os.tmpdir(), 'apex-import-noupload.png'); await page.screenshot({ path: shot }).catch(() => {}); return { ok: false, steps, error: 'Plug-in import upload field not found — navigation differs (check screenshot/step log).', screenshot: shot }; }
         await file.first().setInputFiles(path.resolve(a.exportFile)); steps.push({ step: 'file-selected', file: path.basename(a.exportFile) });
         // Wizard: die PRIMÄRE Aktion (a-Button--hot = Next → Next → Install Plug-in) durchklicken.
         for (let i = 0; i < 6; i++) {

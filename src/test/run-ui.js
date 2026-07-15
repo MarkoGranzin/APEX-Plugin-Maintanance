@@ -108,15 +108,15 @@ export function parsePlaywrightJson(out) {
 export async function runUiTestsDetailed(component, deps = {}) {
   const url = deps.pluginUrl || component?.uiTestUrl || process.env.PLUGIN_URL || '';
   const specs = (component?.codedTests || []).filter((t) => /\.ui\.spec\.js$/i.test(t.name));
-  if (!specs.length) return { ran: false, reason: 'Keine Coded-UI-Tests vorhanden — erst „▶ Prüfen" ausführen.' };
-  if (!url) return { ran: false, reason: 'Keine Test-URL gesetzt — Seite mit dem eingebundenen Plugin angeben (Feld „UI-Test-URL").' };
-  if (deps.hasPlaywright === false) return { ran: false, reason: 'Playwright nicht installiert — einmalig: npm i -D @playwright/test && npx playwright install chromium' };
+  if (!specs.length) return { ran: false, reason: 'No coded UI tests available — run "▶ Check" first.' };
+  if (!url) return { ran: false, reason: 'No test URL set — provide a page with the embedded plugin (field "UI test URL").' };
+  if (deps.hasPlaywright === false) return { ran: false, reason: 'Playwright not installed — one-off: npm i -D @playwright/test && npx playwright install chromium' };
 
   const dir = deps.specsDir;
   fs.mkdirSync(dir, { recursive: true });
   // B-48: unsichere Specs vor dem Ausführen aussortieren; B-44: nur den Basename schreiben.
   const { safe, blocked } = partitionSafeSpecs(specs);
-  if (!safe.length) return { ran: false, reason: `Alle Coded-UI-Specs von der Sicherheitsprüfung blockiert: ${blocked.map((b) => `${b.name} (${b.reason})`).join('; ')}` };
+  if (!safe.length) return { ran: false, reason: `All coded UI specs blocked by the safety check: ${blocked.map((b) => `${b.name} (${b.reason})`).join('; ')}` };
   for (const s of safe) fs.writeFileSync(path.join(dir, path.basename(s.name)), s.content);
   const exec = deps.exec ?? defaultExec;
   const { code, stdout, stderr } = await exec('npx', ['playwright', 'test', '--reporter=json'], {
@@ -133,17 +133,17 @@ export async function runUiTestsDetailed(component, deps = {}) {
 export async function runUiTests(component, deps = {}) {
   const url = deps.pluginUrl || component?.uiTestUrl || process.env.PLUGIN_URL || '';
   const specs = (component?.codedTests || []).filter((t) => /\.ui\.spec\.js$/i.test(t.name));
-  if (!specs.length) return { ran: false, reason: 'Keine Coded-UI-Tests vorhanden — erst „▶ Prüfen" ausführen.' };
-  if (!url) return { ran: false, reason: 'Keine Test-URL gesetzt — Seite mit dem eingebundenen Plugin angeben (Feld „UI-Test-URL").' };
+  if (!specs.length) return { ran: false, reason: 'No coded UI tests available — run "▶ Check" first.' };
+  if (!url) return { ran: false, reason: 'No test URL set — provide a page with the embedded plugin (field "UI test URL").' };
   if (deps.hasPlaywright === false) {
-    return { ran: false, reason: 'Playwright nicht installiert — einmalig: npm i -D @playwright/test && npx playwright install chromium' };
+    return { ran: false, reason: 'Playwright not installed — one-off: npm i -D @playwright/test && npx playwright install chromium' };
   }
 
   const dir = deps.specsDir;
   fs.mkdirSync(dir, { recursive: true });
   // B-48: unsichere Specs aussortieren; B-44: nur den Basename schreiben.
   const { safe, blocked } = partitionSafeSpecs(specs);
-  if (!safe.length) return { ran: false, reason: `Alle Coded-UI-Specs von der Sicherheitsprüfung blockiert: ${blocked.map((b) => `${b.name} (${b.reason})`).join('; ')}` };
+  if (!safe.length) return { ran: false, reason: `All coded UI specs blocked by the safety check: ${blocked.map((b) => `${b.name} (${b.reason})`).join('; ')}` };
   for (const s of safe) fs.writeFileSync(path.join(dir, path.basename(s.name)), s.content);
 
   const exec = deps.exec ?? defaultExec;

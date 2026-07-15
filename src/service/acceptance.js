@@ -125,25 +125,25 @@ export function acceptanceToScenarios(contract, opts = {}) {
   const name = opts.name || contract?.name || 'plugin';
   const out = [];
   // KOPF-Kriterium: das Plugin muss NATIV wie zuvor funktionieren — der Maßstab für Migration UND Selbst-Fix.
-  out.push({ title: `${name}: funktioniert nativ wie zuvor`, gherkin: `Angenommen das Plugin "${name}" wird in seiner echten (nativen) Umgebung geladen\nWenn es initialisiert wird\nDann läuft es ohne JS-Fehler und liefert dieselbe sichtbare Funktion wie vor der Pflege (alle Sichten/Features wie im Original)` });
+  out.push({ title: `${name}: works natively as before`, gherkin: `Given the plugin "${name}" is loaded in its real (native) environment\nWhen it is initialized\nThen it runs without JS errors and provides the same visible functionality as before maintenance (all views/features as in the original)` });
   if (contract?.renderedRequired) {
-    out.push({ title: `${name}: rendert echte Ausgabe`, gherkin: `Angenommen das Plugin "${name}" ist geladen\nWenn es initialisiert\nDann erzeugt es echte sichtbare Ausgabe (kein leerer/Fehler-Zustand)` });
+    out.push({ title: `${name}: renders real output`, gherkin: `Given the plugin "${name}" is loaded\nWhen it initializes\nThen it produces real visible output (no empty/error state)` });
   }
   // T-126: Schnittstelle exakt als eigenes Szenario — Migration/Neuentwicklung muss sie 1:1 erhalten.
   const iface = contract?.interface?.attributes || [];
   if (iface.length) {
     const lines = iface.map((a) => {
-      let l = `Und Parameter "${a.name}"${a.type ? ` [${a.type}]` : ''}`;
-      if (a.allowedValues?.length) l += ` erlaubt: ${a.allowedValues.join(' | ')}`;
-      if (a.default) l += ` — Default: ${a.default}`;
+      let l = `And parameter "${a.name}"${a.type ? ` [${a.type}]` : ''}`;
+      if (a.allowedValues?.length) l += ` allowed: ${a.allowedValues.join(' | ')}`;
+      if (a.default) l += ` — default: ${a.default}`;
       return l;
     });
     out.push({
-      title: `${name}: Schnittstelle (Parameter/Konfiguration) bleibt exakt erhalten`,
+      title: `${name}: interface (parameters/configuration) is preserved exactly`,
       gherkin: [
-        `Angenommen das Plugin "${name}" wird mit denselben APEX-Attributen/JSON-Parametern aufgerufen wie vor der Pflege`,
-        `Wenn die migrierte/neu entwickelte Version geladen wird`,
-        `Dann akzeptiert sie exakt dieselben ${iface.length} Parameter (Name, Typ, erlaubte Werte, Default)`,
+        `Given the plugin "${name}" is called with the same APEX attributes/JSON parameters as before maintenance`,
+        `When the migrated/newly developed version is loaded`,
+        `Then it accepts exactly the same ${iface.length} parameters (name, type, allowed values, default)`,
         ...lines,
       ].join('\n'),
     });
@@ -152,7 +152,7 @@ export function acceptanceToScenarios(contract, opts = {}) {
     const view = c.view || 'default';
     out.push({
       title: `${view}: ${c.feature}`.slice(0, 120),
-      gherkin: `Angenommen das Plugin "${name}" ist in der Sicht "${view}" geladen\nWenn die Sicht gerendert und bedient wird\nDann ${c.feature}`,
+      gherkin: `Given the plugin "${name}" is loaded in the view "${view}"\nWhen the view is rendered and operated\nThen ${c.feature}`,
     });
   }
   return out;
@@ -163,14 +163,14 @@ function interfaceBlock(contract) {
   const iface = contract?.interface?.attributes || [];
   if (!iface.length) return '';
   const out = [
-    `# ── Schnittstelle (APEX-Plugin-Parameter / Konfiguration) — muss EXAKT erhalten bleiben ──`,
-    `# ${iface.length} Parameter:`,
+    `# ── Interface (APEX plugin parameters / configuration) — must be preserved EXACTLY ──`,
+    `# ${iface.length} parameters:`,
   ];
   for (const a of iface) {
     out.push(`#   • ${a.name}${a.type ? ` [${a.type}]` : ''}`);
-    if (a.allowedValues?.length) out.push(`#       erlaubte Werte: ${a.allowedValues.join(' | ')}`);
-    if (a.default) out.push(`#       Default: ${a.default}`);
-    if (a.help) out.push(`#       Hilfe: ${a.help}`);
+    if (a.allowedValues?.length) out.push(`#       allowed values: ${a.allowedValues.join(' | ')}`);
+    if (a.default) out.push(`#       default: ${a.default}`);
+    if (a.help) out.push(`#       help: ${a.help}`);
   }
   out.push('');
   return out.join('\n') + '\n';
@@ -181,15 +181,15 @@ export function acceptanceFeatureFile(contract, opts = {}) {
   const name = opts.name || contract?.name || 'plugin';
   const scen = acceptanceToScenarios(contract, { name });
   const head = [
-    `# Akzeptanz-Vertrag für ${name} — "works as before"`,
-    `# Automatisch aus der Mock-Charakterisierung abgeleitet (technologieunabhängig).`,
-    `# ${contract?.views ?? '?'} Sicht(en), ${contract?.total ?? scen.length} Kriterium/Kriterien${contract?.interface?.count ? `, ${contract.interface.count} Schnittstellen-Parameter` : ''}${contract?.capturedAt ? `, Stand ${contract.capturedAt}` : ''}.`,
+    `# Acceptance contract for ${name} — "works as before"`,
+    `# Automatically derived from the mock characterization (technology-independent).`,
+    `# ${contract?.views ?? '?'} view(s), ${contract?.total ?? scen.length} criterion/criteria${contract?.interface?.count ? `, ${contract.interface.count} interface parameters` : ''}${contract?.capturedAt ? `, as of ${contract.capturedAt}` : ''}.`,
     '',
     interfaceBlock(contract),
-    `Funktionalität: ${name} — Akzeptanzkriterien (Migration/Neuentwicklung muss alle erfüllen)`,
+    `Feature: ${name} — acceptance criteria (migration/redevelopment must satisfy all)`,
     '',
   ].join('\n');
-  const body = scen.map((s) => `  Szenario: ${s.title}\n` + s.gherkin.split('\n').map((l) => '    ' + l).join('\n')).join('\n\n');
+  const body = scen.map((s) => `  Scenario: ${s.title}\n` + s.gherkin.split('\n').map((l) => '    ' + l).join('\n')).join('\n\n');
   return head + body + '\n';
 }
 

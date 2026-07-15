@@ -27,14 +27,14 @@ export function cliAuthState({ hasApiKey = false, readFile, exists, home, now } 
   const file = path.join(home ?? os.homedir(), '.claude', '.credentials.json');
   const ex = exists ?? ((f) => fs.existsSync(f));
   const rd = readFile ?? ((f) => fs.readFileSync(f, 'utf8'));
-  if (!ex(file)) return { method: 'oauth', loggedIn: false, validUntil: null, reason: 'nie eingeloggt (keine Credentials-Datei)' };
+  if (!ex(file)) return { method: 'oauth', loggedIn: false, validUntil: null, reason: 'never logged in (no credentials file)' };
   let o;
   try { o = JSON.parse(rd(file)).claudeAiOauth || {}; }
-  catch { return { method: 'oauth', loggedIn: false, validUntil: null, reason: 'Credentials-Datei nicht lesbar' }; }
+  catch { return { method: 'oauth', loggedIn: false, validUntil: null, reason: 'Credentials file not readable' }; }
   // eingeloggt, solange Access ODER Refresh noch gültig ist (Access wird per Refresh erneuert)
   const best = Math.max(Number(o.expiresAt) || 0, Number(o.refreshTokenExpiresAt) || 0);
   if (best > nowMs) return { method: 'oauth', loggedIn: true, validUntil: new Date(best).toISOString(), reason: null };
-  return { method: 'oauth', loggedIn: false, validUntil: null, reason: best ? `Login abgelaufen am ${new Date(best).toISOString()}` : 'kein Token' };
+  return { method: 'oauth', loggedIn: false, validUntil: null, reason: best ? `Login expired on ${new Date(best).toISOString()}` : 'no token' };
 }
 
 export function resolveAiBackend(settings, secretStore, deps = {}) {

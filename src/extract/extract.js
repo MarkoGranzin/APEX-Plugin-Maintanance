@@ -84,7 +84,7 @@ function namedArgExpr(argsText, argName) {
  * @returns {{ok:true, text:string} | {ok:false, reason:string}}
  */
 function evalContentExpr(expr) {
-  if (!expr) return { ok: false, reason: 'kein p_file_content gefunden' };
+  if (!expr) return { ok: false, reason: 'no p_file_content found' };
 
   // Fall 1: einzelnes String-Literal
   const lit = expr.match(/^'((?:[^']|'')*)'$/);
@@ -94,26 +94,26 @@ function evalContentExpr(expr) {
   if (/g_varchar2_table\s*\(/i.test(expr)) {
     const inner = findCalls(expr, 'g_varchar2_table')[0]?.argsText ?? '';
     const chunks = [...inner.matchAll(/'((?:[^']|'')*)'/g)].map((c) => unquote(c[1]));
-    if (chunks.length === 0) return { ok: false, reason: 'g_varchar2_table ohne literale Chunks' };
+    if (chunks.length === 0) return { ok: false, reason: 'g_varchar2_table without literal chunks' };
     // Falls auch nicht-literale Argumente enthalten sind → unsicher
     const onlyLiterals = inner.replace(/'(?:[^']|'')*'/g, '').replace(/[\s,]/g, '') === '';
-    if (!onlyLiterals) return { ok: false, reason: 'g_varchar2_table enthält nicht-literale Bestandteile' };
+    if (!onlyLiterals) return { ok: false, reason: 'g_varchar2_table contains non-literal parts' };
     return decodeChunks(chunks);
   }
 
   // Fall 3: Bezeichner/Funktionsaufruf/Konkatenation → dynamisch, nicht raten
-  return { ok: false, reason: 'p_file_content ist dynamisch/nicht-literal — nicht eindeutig auflösbar' };
+  return { ok: false, reason: 'p_file_content is dynamic/non-literal — not unambiguously resolvable' };
 }
 
 function decodeChunks(chunks) {
   const joined = chunks.join('');
   if (!isLikelyBase64(joined)) {
-    return { ok: false, reason: 'Inhalt ist kein dekodierbares base64' };
+    return { ok: false, reason: 'content is not decodable base64' };
   }
   try {
     return { ok: true, text: Buffer.from(joined, 'base64').toString('utf8') };
   } catch {
-    return { ok: false, reason: 'base64-Dekodierung fehlgeschlagen' };
+    return { ok: false, reason: 'base64 decoding failed' };
   }
 }
 

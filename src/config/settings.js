@@ -52,15 +52,15 @@ export function setSmtp(settings, cfg = {}) {
 }
 
 export function setWorkDir(settings, dir) {
-  if (!dir || typeof dir !== 'string') throw new Error('Arbeitsverzeichnis fehlt');
+  if (!dir || typeof dir !== 'string') throw new Error('Working directory missing');
   settings.workDir = dir.trim();
   return settings;
 }
 
 export function addRepo(settings, repo) {
-  if (!repo?.name || !repo?.source) throw new Error('Repo braucht name und source');
+  if (!repo?.name || !repo?.source) throw new Error('Repo requires name and source');
   if (settings.repos.some((r) => r.name === repo.name)) {
-    throw new Error(`Repo "${repo.name}" existiert bereits`);
+    throw new Error(`Repo "${repo.name}" already exists`);
   }
   settings.repos.push({ name: repo.name, source: repo.source, secretRef: repo.secretRef ?? null });
   return settings;
@@ -74,7 +74,7 @@ export function removeRepo(settings, name) {
 export function setRecipients(settings, recipients) {
   const list = (recipients ?? []).filter((e) => /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(e));
   if (list.length !== (recipients ?? []).length) {
-    throw new Error('Mindestens eine ungültige E-Mail-Adresse');
+    throw new Error('At least one invalid email address');
   }
   settings.recipients = list;
   return settings;
@@ -82,14 +82,14 @@ export function setRecipients(settings, recipients) {
 
 export function setSchedule(settings, cron) {
   if (!/^[\d*\/,\-\s]+$/.test(cron) || cron.trim().split(/\s+/).length !== 5) {
-    throw new Error('Ungültiger Cron-Ausdruck (5 Felder erwartet)');
+    throw new Error('Invalid cron expression (5 fields expected)');
   }
   settings.schedule = cron.trim();
   return settings;
 }
 
 export function setAiBackend(settings, cfg) {
-  if (!['cli', 'provider', 'stub'].includes(cfg?.kind)) throw new Error('Ungültiges KI-Backend');
+  if (!['cli', 'provider', 'stub'].includes(cfg?.kind)) throw new Error('Invalid AI backend');
   settings.aiBackend = cfg;
   return settings;
 }

@@ -182,18 +182,18 @@ export async function redevelopComponent(store, comp, deps = {}) {
   const haveContract = !!(contract && (contract.criteria || []).length && typeof deps.runMockSelfTests === 'function');
   const haveBaseline = !!(baseline && baseline.scenarios?.length);
   if (!haveBaseline && !haveContract) {
-    return { error: 'Weder Baseline noch Akzeptanz-Vertrag — erst „Capture baseline" ausführen oder einen grünen Mock erzeugen.' };
+    return { error: 'Neither baseline nor acceptance contract — run "Capture baseline" first or create a green mock.' };
   }
   const migrate = deps.migrate ?? defaultMigrate;
   const ai = deps.ai;
   if (migrate === defaultMigrate && (!ai || ai.kind === 'stub')) {
-    return { error: 'Kein KI-Backend konfiguriert — für die Migration nötig (Einstellungen → KI).' };
+    return { error: 'No AI backend configured — required for the migration (Settings → AI).' };
   }
 
   // 1) Migrieren (schreibt Dateien, hält Backups)
   let mig;
   try { mig = await migrate(store, comp, deps); }
-  catch (e) { return { error: 'Migration fehlgeschlagen: ' + (e?.message ?? e) }; }
+  catch (e) { return { error: 'Migration failed: ' + (e?.message ?? e) }; }
   if (!mig?.changed) return { adopted: false, reason: mig?.summary || 'keine Änderung durch die Migration', migration: mig?.summary };
 
   // 1b) Review + Rework-Loop: Security/Code-Gate → KI-Fix → Re-Review (bis grün/Limit), VOR dem UI-Gate.
@@ -210,9 +210,9 @@ export async function redevelopComponent(store, comp, deps = {}) {
     // Akzeptanz-Vertrag-Gate (T-122): Mock-Selbsttest gegen den migrierten Code, mit dem eingefrorenen Soll vergleichen.
     const mockUrl = deps.mockUrl || cur.mockUrl;
     const st = await deps.runMockSelfTests(mockUrl, { timeoutMs: deps.timeoutMs });
-    if (!st || !st.ran) { if (mig.rollback) await mig.rollback(); return { adopted: false, reason: 'Akzeptanz-Gate nicht ausführbar: ' + (st?.reason || 'Mock/Playwright fehlt'), migration: mig.summary }; }
+    if (!st || !st.ran) { if (mig.rollback) await mig.rollback(); return { adopted: false, reason: 'Acceptance gate not runnable: ' + (st?.reason || 'Mock/Playwright missing'), migration: mig.summary }; }
     const acc = compareAcceptance(contract, st);
-    gate = { pass: acc.pass, acceptance: acc, regressions: [...acc.broken.map((b) => ({ scenario: `${b.view}: ${b.feature}`, reason: 'rot' })), ...acc.missing.map((m) => ({ scenario: `${m.view}: ${m.feature}`, reason: 'fehlt' })), ...(acc.renderOk ? [] : [{ scenario: 'render', reason: 'kein echtes Rendern' }])] };
+    gate = { pass: acc.pass, acceptance: acc, regressions: [...acc.broken.map((b) => ({ scenario: `${b.view}: ${b.feature}`, reason: 'rot' })), ...acc.missing.map((m) => ({ scenario: `${m.view}: ${m.feature}`, reason: 'fehlt' })), ...(acc.renderOk ? [] : [{ scenario: 'render', reason: 'no real rendering' }])] };
   } else {
     // UI-Tests gegen die Playwright-Baseline (Bestandsweg)
     const runDetailed = deps.runDetailed ?? runUiTestsDetailed;
@@ -231,13 +231,13 @@ export async function redevelopComponent(store, comp, deps = {}) {
     if (mig.rollback) await mig.rollback();
     markNotRepairable('Automatische Pflege konnte keine betroffene Lib real aktualisieren/ersetzen (kein sicherer Versions-/Tauschpfad) — manuelle Migration nötig.');
     store.addReview?.(comp.id, { kind: 'redev', pass: false, reason: 'no-op — nichts real migriert' });
-    return { adopted: false, notRepairable: true, at: now(), migration: mig.summary, gate, review, reason: 'kein wirksames Upgrade möglich — als „nicht reparierbar" markiert' };
+    return { adopted: false, notRepairable: true, at: now(), migration: mig.summary, gate, review, reason: 'no effective upgrade possible — marked as "not repairable"' };
   }
 
   if (gate.pass) {
     // 3b) T-104 — optisches Abschluss-Gate: „sieht aus wie zuvor?" KI vergleicht initialen Baseline-Screenshot
     //     mit einem frischen Screenshot des migrierten Builds. Optischer Regress = NICHT übernehmen (Rollback).
-    let visual = { ran: false, reason: 'kein Baseline-Screenshot' };
+    let visual = { ran: false, reason: 'no baseline screenshot' };
     const beforeShot = baseline?.shot;
     const shotUrl = deps.pluginUrl || cur.uiTestUrl;
     if (beforeShot && shotUrl && deps.hasPlaywright !== false && ai && ai.kind !== 'stub') {

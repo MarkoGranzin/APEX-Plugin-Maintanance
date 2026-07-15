@@ -66,6 +66,6 @@ describe('T-42 assignRepoToComponent', () => {
   it('fehlende Quelle → Fehler', async () => {
     const store = createComponentStore();
     const id = store.add({ name: 'x' }).id;
-    expect((await assignRepoToComponent(store, id, {}, { workDir })).error).toMatch(/Quelle/);
+    expect((await assignRepoToComponent(store, id, {}, { workDir })).error).toMatch(/source/i);
   });
 });

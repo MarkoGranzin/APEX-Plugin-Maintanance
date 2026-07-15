@@ -112,7 +112,7 @@ export async function metaApiHandler(method, pathname, body, ctx) {
   if (p === 'api/repos') {
     if (method === 'GET') return { status: 200, body: settings.repos };
     if (method === 'POST') {
-      if (!body?.name || !body?.source) return { status: 400, body: { error: 'name und source erforderlich' } };
+      if (!body?.name || !body?.source) return { status: 400, body: { error: 'name and source required' } };
       const res = await ctx.syncRepo({ name: body.name, source: body.source, secretRef: body.secretRef ?? null, auth: body.auth });
       if (!settings.repos.some((r) => r.name === body.name)) {
         settings.repos.push({ name: body.name, source: body.source, secretRef: body.secretRef ?? null });
@@ -133,13 +133,13 @@ export async function metaApiHandler(method, pathname, body, ctx) {
 
   // Bibliotheks-Übersicht (F-23): aggregiert Libs + setzt libWarning je Komponente
   if (p === 'api/libraries' && method === 'GET') {
-    if (!ctx.store) return { status: 500, body: { error: 'kein Store' } };
+    if (!ctx.store) return { status: 500, body: { error: 'no store' } };
     return { status: 200, body: collectLibraries(ctx.store, { scan: ctx.scan }) };
   }
 
   // Manueller Lauf über alle Komponenten (analysieren + lastChange/Status aktualisieren)
   if (p === 'api/run' && method === 'POST') {
-    if (!ctx.store) return { status: 500, body: { error: 'kein Store' } };
+    if (!ctx.store) return { status: 500, body: { error: 'no store' } };
     const res = runManaged({ store: ctx.store, scan: ctx.scan, recordRun: ctx.recordRun, repo: body?.repo, logSink: ctx.logSink, onTestPlan: ctx.onTestPlan, onSbom: ctx.onSbom });
     return { status: 200, body: res };
   }

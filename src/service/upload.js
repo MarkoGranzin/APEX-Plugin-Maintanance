@@ -15,12 +15,12 @@ import { prUrlFor } from '../run/pr-url.js';
  * @param {object} [deps] git:{status,branchCommit,push}, push:bool, branch?, message?, stamp?
  */
 export async function uploadFix(comp, deps = {}) {
-  if (!comp?.path) return { ok: false, reason: 'Kein Repo zugeordnet.' };
+  if (!comp?.path) return { ok: false, reason: 'No repo assigned.' };
   const git = deps.git;
-  if (!git) return { ok: false, reason: 'kein git verfügbar' };
+  if (!git) return { ok: false, reason: 'no git available' };
 
   const changes = await git.status(); // string[] geänderter Dateien
-  if (!changes || !changes.length) return { ok: false, reason: 'Keine Änderungen zum Hochladen — erst „Alles automatisch beheben"/„Auto-Update".' };
+  if (!changes || !changes.length) return { ok: false, reason: 'No changes to upload — run "Fix everything automatically"/"Auto-update" first.' };
 
   const branch = deps.branch || `aisp/pflege-${deps.stamp || 'run'}`;
   const message = deps.message || 'chore(aisp): automatische Pflege (Lib-Update/Fix)';

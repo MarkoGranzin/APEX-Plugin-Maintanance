@@ -26,9 +26,9 @@ describe('F-31 T-128 apex-deploy: Install-Skript & Sicherheit', () => {
     // innerhalb → ok
     expect(() => buildInstallScript({ exportFile: `${base}${path.sep}plugin.sql`, workspace: 'W', baseDir: base })).not.toThrow();
     // absoluter Pfad außerhalb → wirft
-    expect(() => buildInstallScript({ exportFile: outside, workspace: 'W', baseDir: base })).toThrow(/außerhalb/);
+    expect(() => buildInstallScript({ exportFile: outside, workspace: 'W', baseDir: base })).toThrow(/outside/);
     // ../-Ausbruch → wirft
-    expect(() => buildInstallScript({ exportFile: `${base}${path.sep}..${path.sep}evil.sql`, workspace: 'W', baseDir: base })).toThrow(/außerhalb/);
+    expect(() => buildInstallScript({ exportFile: `${base}${path.sep}..${path.sep}evil.sql`, workspace: 'W', baseDir: base })).toThrow(/outside/);
     // ohne baseDir → keine Beschränkung (rückwärtskompatibel)
     expect(() => buildInstallScript({ exportFile: outside, workspace: 'W' })).not.toThrow();
   });

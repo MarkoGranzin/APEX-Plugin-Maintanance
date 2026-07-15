@@ -24,19 +24,19 @@ export function maskConn(conn) {
  * @param {{exportFile:string, workspace:string, appId?:number|string, offset?:boolean}} o
  */
 export function buildInstallScript(o = {}) {
-  if (!o.exportFile) throw new Error('exportFile fehlt');
+  if (!o.exportFile) throw new Error('exportFile missing');
   if (!o.workspace) throw new Error('workspace fehlt');
   // B-49: exportFile landet als @"…" im SQLcl-Skript. Ein " oder Zeilenumbruch könnte aus der
   // Quotierung ausbrechen und beliebige SQLcl-Befehle einschleusen → solche Pfade ablehnen.
   const exportFile = String(o.exportFile);
-  if (/["\r\n]/.test(exportFile)) throw new Error('exportFile enthält unzulässige Zeichen (", CR/LF)');
+  if (/["\r\n]/.test(exportFile)) throw new Error('exportFile contains disallowed characters (", CR/LF)');
   // B-69: SQLcl FÜHRT exportFile via @"…" AUS. Ist ein baseDir gesetzt, muss die Datei darin liegen —
   // sonst könnte ein beliebiger System-Pfad (z.B. /tmp/evil.sql) als SQL-Skript ausgeführt werden.
   if (o.baseDir) {
     const base = path.resolve(o.baseDir);
     const rel = path.relative(base, path.resolve(base, exportFile));
     if (rel === '' || rel === '..' || rel.startsWith('..' + path.sep) || path.isAbsolute(rel)) {
-      throw new Error(`exportFile liegt außerhalb des erlaubten Verzeichnisses (${base}): ${exportFile}`);
+      throw new Error(`exportFile is outside the allowed directory (${base}): ${exportFile}`);
     }
   }
   const app = o.appId != null && String(o.appId) !== '' ? Number(o.appId) : null;
@@ -330,8 +330,8 @@ function pluginAttrLines(attributes) {
  */
 export function buildTestPageSql(o = {}) {
   const pluginName = o.pluginInternalName || o.pluginName;
-  if (!pluginName) throw new Error('pluginInternalName fehlt');
-  if (!o.appId) throw new Error('appId fehlt');
+  if (!pluginName) throw new Error('pluginInternalName missing');
+  if (!o.appId) throw new Error('appId missing');
   const pageId = Number(o.pageId ?? 9999);
   const pageName = o.pageName || `Plugin Test: ${pluginName}`;
   const version = o.version || '2024.11.30';

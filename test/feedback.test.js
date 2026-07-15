@@ -24,10 +24,10 @@ describe('T-147 Fehler-Report → Regressionstest → Rework', () => {
   });
 
   it('saveFeedback: lehnt Traversal/fremde Endung/leeren Text/leeres Bild ab', () => {
-    expect(saveFeedback(dir, { text: '' }).error).toMatch(/Fehlerbeschreibung/);
-    expect(saveFeedback(dir, { text: 'x', images: [{ name: '../evil.png', data: PNG }] }).error).toMatch(/Screenshot-Name/);
-    expect(saveFeedback(dir, { text: 'x', images: [{ name: 'x.exe', data: PNG }] }).error).toMatch(/Screenshot-Name/);
-    expect(saveFeedback(dir, { text: 'x', images: [{ name: 'x.png', data: '' }] }).error).toMatch(/leer/);
+    expect(saveFeedback(dir, { text: '' }).error).toMatch(/Issue description/);
+    expect(saveFeedback(dir, { text: 'x', images: [{ name: '../evil.png', data: PNG }] }).error).toMatch(/screenshot name/i);
+    expect(saveFeedback(dir, { text: 'x', images: [{ name: 'x.exe', data: PNG }] }).error).toMatch(/screenshot name/i);
+    expect(saveFeedback(dir, { text: 'x', images: [{ name: 'x.png', data: '' }] }).error).toMatch(/empty/i);
   });
 
   it('Prompt enthält Report-Text, Screenshot-Pfade und vorhandene Spec-Namen (keine Duplikate)', () => {
@@ -55,8 +55,8 @@ describe('T-147 Fehler-Report → Regressionstest → Rework', () => {
     const store = mkStore();
     const c = store.add({ name: 'K', path: dir });
     const fb = { text: 'x', stamp: 's', imagePaths: [] };
-    expect((await createFeedbackTest(store, store.get(c.id), fb, { ai: { kind: 'cli', complete: async () => 'keine ahnung' } })).error).toMatch(/brauchbaren/);
-    expect((await createFeedbackTest(store, store.get(c.id), fb, { ai: { kind: 'stub', complete: async () => SPEC } })).error).toMatch(/KI-Backend/);
+    expect((await createFeedbackTest(store, store.get(c.id), fb, { ai: { kind: 'cli', complete: async () => 'keine ahnung' } })).error).toMatch(/usable Playwright test/i);
+    expect((await createFeedbackTest(store, store.get(c.id), fb, { ai: { kind: 'stub', complete: async () => SPEC } })).error).toMatch(/AI backend/);
     expect(store.get(c.id).codedTests ?? []).toHaveLength(0);
   });
 

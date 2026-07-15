@@ -68,7 +68,7 @@ describe('F-28 T-93 redevelopComponent (Spec-gesicherte Migration)', () => {
     const store = mkStore();
     const id = store.add({ name: 'P', path: '/repo' }).id;
     const r = await redevelopComponent(store, store.get(id), { migrate: async () => ({ changed: true }) });
-    expect(r.error).toMatch(/Baseline|Akzeptanz/);
+    expect(r.error).toMatch(/baseline|acceptance/i);
   });
 
   // T-122: Akzeptanz-Vertrag-Gate — Plugin OHNE Playwright-Baseline migrierbar (gegatet am Mock-Selbsttest)
@@ -113,7 +113,7 @@ describe('F-28 T-93 redevelopComponent (Spec-gesicherte Migration)', () => {
     });
     expect(r.adopted).toBe(false);
     expect(rolledBack).toBe(true);
-    expect(r.reason).toMatch(/Akzeptanz-Gate nicht ausführbar/);
+    expect(r.reason).toMatch(/Acceptance gate not runnable/i);
   });
 
   it('B-25: grünes Gate aber KEIN realer Lib-Tausch → nicht adopted, als notRepairable markiert + stale rebuilt geräumt', async () => {

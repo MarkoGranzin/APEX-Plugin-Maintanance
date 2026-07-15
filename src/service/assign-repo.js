@@ -22,8 +22,8 @@ import { slug } from '../util/slug.js';
  */
 export async function assignRepoToComponent(store, id, spec, deps = {}) {
   const comp = store.get(id);
-  if (!comp) return { error: 'Komponente nicht gefunden' };
-  if (!spec?.source) return { error: 'Repo-Quelle (URL/Pfad) fehlt' };
+  if (!comp) return { error: 'Component not found' };
+  if (!spec?.source) return { error: 'Repo source (URL/path) missing' };
 
   const workDir = deps.workDir ?? './workspace';
   const internal = spec.visibility === 'intern';

@@ -25,10 +25,10 @@ export function lint(bundle) {
       continue;
     }
     if (/\beval\s*\(/.test(asset.code)) {
-      findings.push({ asset: asset.name, rule: 'no-eval', severity: 'warn', message: 'eval() verwendet' });
+      findings.push({ asset: asset.name, rule: 'no-eval', severity: 'warn', message: 'eval() used' });
     }
     if (/\bwith\s*\(/.test(asset.code)) {
-      findings.push({ asset: asset.name, rule: 'no-with', severity: 'warn', message: 'with-Statement verwendet' });
+      findings.push({ asset: asset.name, rule: 'no-with', severity: 'warn', message: 'with statement used' });
     }
   }
   return { ok: findings.every((f) => f.severity !== 'error'), findings };

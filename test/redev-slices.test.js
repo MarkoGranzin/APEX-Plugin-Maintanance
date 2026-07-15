@@ -122,7 +122,7 @@ describe('F-30 T-117 slice-weise Neuentwicklung', () => {
     it('ohne Akzeptanz-Vertrag → error', async () => {
       const r = await redevelopDeadLib(mkStore(), { id: '1', name: 'X', path: 'x' }, { contract: { criteria: [] }, implementSlice: async () => {}, runSelfTests: async () => green });
       expect(r.ok).toBe(false);
-      expect(r.error).toMatch(/Akzeptanz-Vertrag/);
+      expect(r.error).toMatch(/acceptance contract/i);
     });
 
     it('Fehlschlag → rollbackAll wird aufgerufen', async () => {

@@ -56,7 +56,7 @@ describe('T-21 Robustheit', () => {
   it('Syntaxfehler bricht nicht, sondern meldet Parse-Fehler', () => {
     const r = analyzeJs('function ( {');
     expect(r.ok).toBe(false);
-    expect(r.error).toMatch(/Parse-Fehler/);
+    expect(r.error).toMatch(/Parse error/);
   });
 
   it('memberPath baut gepunkteten Pfad', () => {

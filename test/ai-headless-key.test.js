@@ -37,11 +37,11 @@ describe('GUI-Login-Check: cliAuthState (nur Ablaufdaten, keine Secrets)', () =>
   it('beide Tokens abgelaufen → NICHT eingeloggt mit Ablauf-Grund', () => {
     const r = cliAuthState(deps({ expiresAt: 0, refreshTokenExpiresAt: NOW - 5000 }));
     expect(r.loggedIn).toBe(false);
-    expect(r.reason).toMatch(/abgelaufen/);
+    expect(r.reason).toMatch(/expired/);
   });
   it('keine Credentials-Datei → nie eingeloggt', () => {
     const r = cliAuthState({ now: () => NOW, home: '/h', exists: () => false });
     expect(r.loggedIn).toBe(false);
-    expect(r.reason).toMatch(/nie eingeloggt/);
+    expect(r.reason).toMatch(/never logged in/);
   });
 });

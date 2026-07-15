@@ -60,7 +60,7 @@ export function analyzeJs(code) {
       sourceType: 'script',
     });
   } catch (err) {
-    return { ok: false, error: `Parse-Fehler: ${err.message}` };
+    return { ok: false, error: `Parse error: ${err.message}` };
   }
 
   const entryPoints = new Set();

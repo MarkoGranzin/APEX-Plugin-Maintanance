@@ -21,16 +21,16 @@ describe('Security-Review-Fixes', () => {
 
   it('B-43: resolveWithin verweigert Ausbruch aus rootDir', () => {
     const root = os.tmpdir();
-    expect(() => resolveWithin(root, '../evil.js')).toThrow(/verlässt/);
-    expect(() => resolveWithin(root, '..')).toThrow(/verlässt/);
+    expect(() => resolveWithin(root, '../evil.js')).toThrow(/leaves/);
+    expect(() => resolveWithin(root, '..')).toThrow(/leaves/);
     // absoluter Pfad auf anderem Laufwerk / Root
-    expect(() => resolveWithin(root, process.platform === 'win32' ? 'Z:\\evil' : '/etc/passwd')).toThrow(/verlässt/);
+    expect(() => resolveWithin(root, process.platform === 'win32' ? 'Z:\\evil' : '/etc/passwd')).toThrow(/leaves/);
     // legitimer relativer Pfad bleibt erlaubt
     expect(() => resolveWithin(root, 'sub/dir/file.js')).not.toThrow();
   });
 
   it('B-43: reinjectAsset schreibt nicht außerhalb des Repos (Default-FS)', () => {
-    expect(() => reinjectAsset({ type: 'file', path: '../../evil.js' }, 'x', { rootDir: os.tmpdir() })).toThrow(/verlässt/);
+    expect(() => reinjectAsset({ type: 'file', path: '../../evil.js' }, 'x', { rootDir: os.tmpdir() })).toThrow(/leaves/);
   });
 
   it('B-68: Symlink im Repo, der nach außen zeigt, wird als Ausbruch erkannt (realpath)', () => {
@@ -55,7 +55,7 @@ describe('Security-Review-Fixes', () => {
   });
 
   it('B-49: buildInstallScript lehnt exportFile mit Quote/Zeilenumbruch ab', () => {
-    expect(() => buildInstallScript({ exportFile: 'a" \n@/etc/evil.sql "', workspace: 'W' })).toThrow(/unzulässige/);
+    expect(() => buildInstallScript({ exportFile: 'a" \n@/etc/evil.sql "', workspace: 'W' })).toThrow(/disallowed/);
     const script = buildInstallScript({ exportFile: '/tmp/x.sql', workspace: 'W' });
     expect(script).toContain('@"/tmp/x.sql"');
   });
@@ -110,7 +110,7 @@ describe('Security-Review-Fixes', () => {
     const component = { uiTestUrl: 'http://x/mock', codedTests: [{ name: 'evil.ui.spec.js', content: "require('child_process').execSync('whoami')" }] };
     const r = await runUiTests(component, { specsDir: fs.mkdtempSync(path.join(os.tmpdir(), 'b48-')), hasPlaywright: true, exec: async () => { execCalled = true; return { code: 0, stdout: '', stderr: '' }; } });
     expect(r.ran).toBe(false);
-    expect(r.reason).toMatch(/Sicherheitsprüfung blockiert/);
+    expect(r.reason).toMatch(/blocked by the safety check/);
     expect(execCalled).toBe(false); // nie ausgeführt
   });
 });

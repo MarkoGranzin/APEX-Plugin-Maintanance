@@ -39,7 +39,7 @@ describe('T-20 Inline-JS Extraktion', () => {
     const { inline, unsafe } = extractInlineJs(sql, 'r.sql');
     expect(inline).toHaveLength(0);
     expect(unsafe).toHaveLength(1);
-    expect(unsafe[0].reason).toMatch(/dynamisch/);
+    expect(unsafe[0].reason).toMatch(/dynamically/);
   });
 });
 

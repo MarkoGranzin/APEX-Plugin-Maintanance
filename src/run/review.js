@@ -22,13 +22,13 @@ const atLeast = (sev, threshold) => RANK[sev] >= RANK[threshold];
 // ---------------- Security (T-29) ----------------
 
 const SECURITY_RULES = [
-  { rule: 'xss-innerHTML', re: /\.(inner|outer)HTML\s*=/, severity: 'high', msg: 'Zuweisung an innerHTML/outerHTML — XSS-Risiko (escapen oder textContent nutzen)' },
-  { rule: 'xss-insertAdjacentHTML', re: /\.insertAdjacentHTML\s*\(/, severity: 'medium', msg: 'insertAdjacentHTML — XSS-Risiko bei ungeprüftem Input' },
-  { rule: 'xss-document-write', re: /document\.write(ln)?\s*\(/, severity: 'high', msg: 'document.write — XSS-/Injektionsrisiko' },
-  { rule: 'code-injection-eval', re: /\beval\s*\(/, severity: 'high', msg: 'eval() — Code-Injektion' },
-  { rule: 'code-injection-function', re: /\bnew\s+Function\s*\(/, severity: 'high', msg: 'new Function() — Code-Injektion' },
-  { rule: 'hardcoded-secret', re: /(ghp_[A-Za-z0-9]{16,}|sk-[A-Za-z0-9]{16,}|AKIA[0-9A-Z]{16}|-----BEGIN [A-Z ]*PRIVATE KEY-----)/, severity: 'critical', msg: 'Hartkodiertes Secret im Code' },
-  { rule: 'js-url', re: /['"]javascript:/i, severity: 'medium', msg: 'javascript:-URL — potenzielle Injektion' },
+  { rule: 'xss-innerHTML', re: /\.(inner|outer)HTML\s*=/, severity: 'high', msg: 'Assignment to innerHTML/outerHTML — XSS risk (escape or use textContent)' },
+  { rule: 'xss-insertAdjacentHTML', re: /\.insertAdjacentHTML\s*\(/, severity: 'medium', msg: 'insertAdjacentHTML — XSS risk with unchecked input' },
+  { rule: 'xss-document-write', re: /document\.write(ln)?\s*\(/, severity: 'high', msg: 'document.write — XSS/injection risk' },
+  { rule: 'code-injection-eval', re: /\beval\s*\(/, severity: 'high', msg: 'eval() — code injection' },
+  { rule: 'code-injection-function', re: /\bnew\s+Function\s*\(/, severity: 'high', msg: 'new Function() — code injection' },
+  { rule: 'hardcoded-secret', re: /(ghp_[A-Za-z0-9]{16,}|sk-[A-Za-z0-9]{16,}|AKIA[0-9A-Z]{16}|-----BEGIN [A-Z ]*PRIVATE KEY-----)/, severity: 'critical', msg: 'Hardcoded secret in code' },
+  { rule: 'js-url', re: /['"]javascript:/i, severity: 'medium', msg: 'javascript: URL — potential injection' },
 ];
 
 /** OWASP-orientierte statische Prüfung eines Assets. */
@@ -54,7 +54,7 @@ export function securityReview(change, opts = {}) {
     for (const f of securityScan(asset.code)) findings.push({ ...f, asset: asset.name, id: `${f.rule}:${asset.name}` });
   }
   for (const v of change.cve ?? []) {
-    findings.push({ rule: 'vulnerable-dependency', severity: 'high', asset: v.lib, id: `cve:${v.lib}@${v.version}`, message: `Verwundbare Lib ${v.lib}@${v.version} (${v.vuln})` });
+    findings.push({ rule: 'vulnerable-dependency', severity: 'high', asset: v.lib, id: `cve:${v.lib}@${v.version}`, message: `Vulnerable lib ${v.lib}@${v.version} (${v.vuln})` });
   }
   if (opts.reviewer) {
     for (const f of opts.reviewer(change) ?? []) findings.push({ severity: 'medium', ...f, id: f.id ?? `agent:${f.rule ?? 'finding'}:${f.asset ?? ''}` });
@@ -67,10 +67,10 @@ export function securityReview(change, opts = {}) {
 // ---------------- Code-Qualität (T-30) ----------------
 
 const QUALITY_PATTERNS = [
-  { rule: 'loose-end-todo', re: /\b(TODO|FIXME|XXX|HACK)\b/, severity: 'medium', msg: 'Lose Enden: TODO/FIXME/XXX/HACK im Code' },
-  { rule: 'loose-end-debugger', re: /\bdebugger\b/, severity: 'medium', msg: 'debugger-Statement verblieben' },
-  { rule: 'loose-end-empty-catch', re: /catch\s*\([^)]*\)\s*\{\s*\}/, severity: 'medium', msg: 'Leerer catch-Block (verschluckter Fehler)' },
-  { rule: 'console-log', re: /console\.(log|debug)\s*\(/, severity: 'low', msg: 'console.log/debug verblieben' },
+  { rule: 'loose-end-todo', re: /\b(TODO|FIXME|XXX|HACK)\b/, severity: 'medium', msg: 'Loose ends: TODO/FIXME/XXX/HACK in code' },
+  { rule: 'loose-end-debugger', re: /\bdebugger\b/, severity: 'medium', msg: 'leftover debugger statement' },
+  { rule: 'loose-end-empty-catch', re: /catch\s*\([^)]*\)\s*\{\s*\}/, severity: 'medium', msg: 'Empty catch block (swallowed error)' },
+  { rule: 'console-log', re: /console\.(log|debug)\s*\(/, severity: 'low', msg: 'leftover console.log/debug' },
 ];
 
 /** Heuristik + AST-Prüfung eines Assets auf Qualität/lose Enden. */
@@ -96,7 +96,7 @@ export function qualityScan(code, opts = {}) {
   });
   for (const name of declared.keys()) {
     if ((usage.get(name) ?? 0) <= 1) {
-      findings.push({ rule: 'unused-variable', severity: 'medium', message: `Unbenutzte Variable: ${name}` });
+      findings.push({ rule: 'unused-variable', severity: 'medium', message: `Unused variable: ${name}` });
     }
   }
 
@@ -115,7 +115,7 @@ export function qualityScan(code, opts = {}) {
       LogicalExpression() { dp++; }, CatchClause() { dp++; },
     });
     if (dp > maxComplexity) {
-      findings.push({ rule: 'complexity', severity: 'medium', message: `Funktion zu komplex (Score ${dp} > ${maxComplexity})` });
+      findings.push({ rule: 'complexity', severity: 'medium', message: `Function too complex (score ${dp} > ${maxComplexity})` });
     }
   }
 

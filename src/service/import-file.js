@@ -27,18 +27,18 @@ const ALLOWED = /\.(sql|js|css|json|md|txt)$/i; // Plugin-Export + typische Asse
  */
 export function importFromFiles(store, payload, deps = {}) {
   const files = (payload?.files || []).filter((f) => f && typeof f.name === 'string' && typeof f.content === 'string');
-  if (!files.length) return { error: 'Keine Dateien übergeben.' };
+  if (!files.length) return { error: 'No files provided.' };
   // Nur sichere Dateinamen (kein Verzeichnis-Traversal, nur erlaubte Endungen).
   for (const f of files) {
     // Kein Verzeichnis-Anteil erlaubt (basename === name) → kein Traversal; nur erlaubte Endungen.
-    if (path.basename(f.name) !== f.name || /[/\\]/.test(f.name) || !ALLOWED.test(f.name)) return { error: `Ungültiger oder nicht erlaubter Dateiname: ${f.name}` };
+    if (path.basename(f.name) !== f.name || /[/\\]/.test(f.name) || !ALLOWED.test(f.name)) return { error: `Invalid or disallowed file name: ${f.name}` };
   }
   const sqlFile = files.find((f) => SQL_RE.test(f.name));
-  if (!sqlFile) return { error: 'Kein Plugin-Export dabei — mindestens eine .sql-Datei ist nötig.' };
+  if (!sqlFile) return { error: 'No plugin export included — at least one .sql file is required.' };
 
   const name = (payload.name && payload.name.trim()) || path.basename(sqlFile.name).replace(SQL_RE, '');
-  if (!name) return { error: 'Kein Name ableitbar.' };
-  if (!deps.workDir) return { error: 'Arbeitsverzeichnis nicht konfiguriert.' };
+  if (!name) return { error: 'No name derivable.' };
+  if (!deps.workDir) return { error: 'Working directory not configured.' };
 
   const dir = repoCheckoutDir(deps.workDir, slug(name));
   deps.mkdir(dir);

@@ -33,7 +33,7 @@ export function resolveWithin(rootDir, p) {
   const realAbs = path.join(realpathSafe(probe), path.relative(probe, abs));
   const rel = path.relative(realRoot, realAbs);
   if (rel === '' || rel === '..' || rel.startsWith('..' + path.sep) || path.isAbsolute(rel)) {
-    throw new Error(`Pfad verlässt das Repo-Verzeichnis: ${p}`);
+    throw new Error(`Path leaves the repo directory: ${p}`);
   }
   return realAbs;
 }
@@ -69,7 +69,7 @@ export function replacePluginFileContent(sql, fileName, newBase64) {
     const absEnd = call.argStart + i;
     return sql.slice(0, absStart) + `'${newBase64}'` + sql.slice(absEnd);
   }
-  throw new Error(`create_plugin_file für "${fileName}" nicht gefunden`);
+  throw new Error(`create_plugin_file for "${fileName}" not found`);
 }
 
 /**
@@ -87,7 +87,7 @@ export function reinjectAsset(origin, newCode, opts = {}) {
 
   // 'extraktion-unsicher' → nie automatisch zurückschreiben
   if (opts.bundleStatus === 'extraktion-unsicher' || origin == null) {
-    return { written: false, manualNeeded: true, reason: 'Quelle extraktion-unsicher — manueller Eingriff nötig' };
+    return { written: false, manualNeeded: true, reason: 'Source extraction-unsafe — manual intervention required' };
   }
 
   if (origin.type === 'file') {
@@ -113,5 +113,5 @@ export function reinjectAsset(origin, newCode, opts = {}) {
     return { written: true, target: origin.sqlFile };
   }
 
-  return { written: false, manualNeeded: true, reason: `Unbekannte Herkunft: ${origin.type}` };
+  return { written: false, manualNeeded: true, reason: `Unknown origin: ${origin.type}` };
 }

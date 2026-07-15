@@ -55,7 +55,7 @@ describe('T-138 setupFromManifest: JSON → APEX (standalone/wiederverwendbar)',
   it('unvollständige Verbindung → klarer Fehler, kein Browser', async () => {
     const r = await setupFromManifest(manifest, { baseUrl: 'x', workspace: 'w' }, {}, fakeDeps());
     expect(r.ok).toBe(false);
-    expect(r.error).toMatch(/Verbindung|Passwort/i);
+    expect(r.error).toMatch(/Connection|password/i);
   });
 
   it('pageId-Override sticht manifest.testPage.id', async () => {
@@ -142,7 +142,7 @@ describe('T-138 setupFromManifest: JSON → APEX (standalone/wiederverwendbar)',
     };
     const r = await setupFromManifest(procManifest, connection, {}, fakeDeps());
     expect(r.ok).toBe(false);
-    expect(r.testPage.error).toMatch(/nicht automatisiert/i);
+    expect(r.testPage.error).toMatch(/not yet automated/i);
     expect(r.render.rendered).toBe(false);
   });
 

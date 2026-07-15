@@ -30,7 +30,7 @@ export function chooseTestEnv(analysis) {
     return {
       env: ENV.PLAYWRIGHT,
       usesInstance: true,
-      reason: `echte apex.*-Runtime nötig (${runtime.join(', ')})`,
+      reason: `real apex.* runtime required (${runtime.join(', ')})`,
       fixed: FIXED,
     };
   }
@@ -40,7 +40,7 @@ export function chooseTestEnv(analysis) {
     return {
       env: ENV.PLAYWRIGHT,
       usesInstance: true,
-      reason: 'apex.*-Shim unvollständig → Playwright nötig',
+      reason: 'apex.* shim incomplete → Playwright required',
       fixed: FIXED,
       shimIncomplete: uncovered,
     };
@@ -49,6 +49,6 @@ export function chooseTestEnv(analysis) {
   return {
     env: ENV.JSDOM,
     usesInstance: false,
-    reason: 'nur DOM/Shim-abgedeckte apex.*-Aufrufe',
+    reason: 'only DOM/shim-covered apex.* calls',
   };
 }

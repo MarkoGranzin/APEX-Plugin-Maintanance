@@ -20,11 +20,11 @@ import path from 'node:path';
  * @returns {Promise<{ok:boolean, path?:string, error?:string}>}
  */
 export async function captureShot(url, outPath, deps = {}) {
-  if (!url || !outPath) return { ok: false, error: 'url/outPath fehlt' };
+  if (!url || !outPath) return { ok: false, error: 'url/outPath missing' };
   let launch = deps.launch;
   if (!launch) {
     try { const pw = await import('@playwright/test'); launch = () => pw.chromium.launch(); }
-    catch { return { ok: false, error: 'Playwright nicht installiert' }; }
+    catch { return { ok: false, error: 'Playwright not installed' }; }
   }
   let browser;
   try {

@@ -27,8 +27,8 @@ const MAX_IMG_BYTES = 8_000_000;
 export function saveFeedback(dir, fb = {}, deps = {}) {
   const now = deps.now ?? (() => new Date().toISOString());
   const text = String(fb.text || '').trim();
-  if (!text) return { error: 'Fehlerbeschreibung fehlt.' };
-  if (!dir) return { error: 'Kein Repo-Verzeichnis.' };
+  if (!text) return { error: 'Issue description missing.' };
+  if (!dir) return { error: 'No repo directory.' };
   const stamp = now().replace(/[-:T.Z]/g, '').slice(0, 14);
   const fbDir = path.join(dir, '.maintenance', 'feedback', stamp);
   fs.mkdirSync(fbDir, { recursive: true });
@@ -36,10 +36,10 @@ export function saveFeedback(dir, fb = {}, deps = {}) {
   for (const img of fb.images ?? []) {
     const name = String(img?.name || '');
     // kein Pfad-Anteil, nur Bild-Endungen (gleiche Guards wie der Datei-Import, T-144)
-    if (path.basename(name) !== name || /[/\\]/.test(name) || !IMG_RE.test(name)) return { error: `Ungültiger Screenshot-Name: ${name}` };
+    if (path.basename(name) !== name || /[/\\]/.test(name) || !IMG_RE.test(name)) return { error: `Invalid screenshot name: ${name}` };
     const buf = Buffer.from(String(img.data || ''), 'base64');
-    if (!buf.length) return { error: `Screenshot leer: ${name}` };
-    if (buf.length > MAX_IMG_BYTES) return { error: `Screenshot zu groß (max 8 MB): ${name}` };
+    if (!buf.length) return { error: `Screenshot empty: ${name}` };
+    if (buf.length > MAX_IMG_BYTES) return { error: `Screenshot too large (max 8 MB): ${name}` };
     const p = path.join(fbDir, name);
     fs.writeFileSync(p, buf);
     imagePaths.push(p);
@@ -82,7 +82,7 @@ Return ONLY the JavaScript code of the spec file (no Markdown, no explanation).`
  */
 export async function createFeedbackTest(store, comp, fb, deps = {}) {
   const ai = deps.ai;
-  if (!ai || ai.kind === 'stub' || typeof ai.complete !== 'function') return { error: 'KI-Backend nötig für die Analyse (Settings → Test connection).' };
+  if (!ai || ai.kind === 'stub' || typeof ai.complete !== 'function') return { error: 'AI backend required for the analysis (Settings → Test connection).' };
   const cur = store.get(comp.id) || comp;
   const existing = (cur.codedTests || []).map((t) => t.name);
   const prompt = buildFeedbackTestPrompt(comp.name, fb, { mockUrl: deps.mockUrl, existing });
@@ -90,7 +90,7 @@ export async function createFeedbackTest(store, comp, fb, deps = {}) {
   try { raw = String(await ai.complete(prompt, {})); } catch (e) { return { error: 'AI error: ' + (e?.message ?? e) }; }
   const code = raw.replace(/```[a-z]*\n?/gi, '').replace(/```/g, '').trim();
   if (!/@playwright\/test/.test(code) || !/\btest\s*\(/.test(code) || !/\bexpect\s*\(/.test(code)) {
-    return { error: 'KI lieferte keinen brauchbaren Playwright-Test — bitte Report präzisieren und erneut senden.', raw: code.slice(0, 400) };
+    return { error: 'The AI did not return a usable Playwright test — please refine the report and resend.', raw: code.slice(0, 400) };
   }
   const specName = `feedback-${fb.stamp}.ui.spec.js`;
   const testsDir = path.join(comp.path, '.maintenance', 'tests');

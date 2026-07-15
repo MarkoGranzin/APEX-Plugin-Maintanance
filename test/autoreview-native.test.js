@@ -65,7 +65,7 @@ describe('T-124 Native-Guard + T-125 kritischer Code im Selbst-Fix', () => {
 
   it('T-124: „funktioniert nativ wie zuvor" ist Kopf-Akzeptanzkriterium der Anforderungen', () => {
     const scen = acceptanceToScenarios({ renderedRequired: true, criteria: [{ view: 'default', feature: 'rendert 12 Knoten' }] }, { name: 'P' });
-    expect(scen[0].title).toMatch(/funktioniert nativ wie zuvor/i);
-    expect(scen[0].gherkin).toMatch(/ohne JS-Fehler/i);
+    expect(scen[0].title).toMatch(/works natively as before/i);
+    expect(scen[0].gherkin).toMatch(/without JS errors/i);
   });
 });

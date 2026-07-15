@@ -44,7 +44,7 @@ export function createScheduler({ runJob }) {
       if (running.has(repo)) {
         if (!queues.has(repo)) queues.set(repo, []);
         queues.get(repo).push(meta);
-        return { accepted: true, queued: true, reason: 'Lauf läuft bereits — eingereiht' };
+        return { accepted: true, queued: true, reason: 'Run already in progress — queued' };
       }
       const p = execute(repo, meta);
       return { accepted: true, queued: false, done: p };

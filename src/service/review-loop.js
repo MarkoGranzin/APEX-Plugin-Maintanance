@@ -28,7 +28,7 @@ export async function dualReviewRework(target, deps = {}) {
   const maxRounds = deps.maxRounds ?? 2;
   const log = deps.log || (() => {});
   if (typeof securityReview !== 'function' || typeof codeReview !== 'function') {
-    return { pass: false, rounds: 0, votes: {}, history: [], error: 'zwei Review-Agenten (securityReview, codeReview) nötig' };
+    return { pass: false, rounds: 0, votes: {}, history: [], error: 'two review agents (securityReview, codeReview) required' };
   }
   const history = [];
   let lastVotes = {};

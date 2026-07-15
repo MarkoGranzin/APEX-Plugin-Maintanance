@@ -15,7 +15,7 @@ describe('T-26 PR-Dedup & Idempotenz', () => {
     const res = await idempotentPush(reg, { artifact: 'A', lib: 'X', targetVersion: '2.1' }, () => { pushed = true; return 'PR-2'; });
     expect(res.pushed).toBe(false);
     expect(pushed).toBe(false);
-    expect(res.reason).toMatch(/offener PR/);
+    expect(res.reason).toMatch(/open PR/);
   });
 
   it('abgelehnter PR wird nicht erneut vorgeschlagen', () => {

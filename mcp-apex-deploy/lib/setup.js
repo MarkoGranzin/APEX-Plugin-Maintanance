@@ -26,7 +26,7 @@ export async function setupFromManifest(manifest, connection, o = {}, deps = {})
   if (!m.plugin || !m.plugin.internalName) return { ok: false, error: 'Manifest ohne plugin.internalName.' };
   const c = connection || {};
   if (!c.baseUrl || !c.workspace || !c.user || !c.pass || !c.appId) {
-    return { ok: false, error: 'Verbindung unvollständig (baseUrl/workspace/user/Passwort/appId).' };
+    return { ok: false, error: 'Connection incomplete (baseUrl/workspace/user/password/appId).' };
   }
   const cfg = { baseUrl: c.baseUrl, workspace: c.workspace, user: c.user, pass: c.pass };
   const pageId = Number(o.pageId ?? m.testPage?.id ?? 20000);
@@ -39,7 +39,7 @@ export async function setupFromManifest(manifest, connection, o = {}, deps = {})
     .map((a) => ({ prompt: a.prompt, value: clean(a.default) }));
 
   const chromium = await d.loadChromium(o.cwd || process.cwd());
-  if (!chromium) return { ok: false, error: 'Playwright nicht installiert — Setup nicht möglich.' };
+  if (!chromium) return { ok: false, error: 'Playwright not installed — setup not possible.' };
   const browser = await chromium.launch({ headless: true });
   const result = { ok: false, plugin: m.plugin.internalName, appId: Number(c.appId), pageId };
   try {
@@ -69,14 +69,14 @@ export async function setupFromManifest(manifest, connection, o = {}, deps = {})
     const kind = m.plugin?.kind || m.testPage?.setupKind || 'region';
     const automated = ['region', 'item', 'dynamic-action', 'template-component'];
     if (!automated.includes(kind)) {
-      result.testPage = { ok: false, setupKind: kind, error: `Testseiten-Aufbau für Typ „${kind}" (${m.plugin?.pluginType || '?'}) ist noch nicht automatisiert — automatisiert sind aktuell ${automated.map((k) => `„${k}"`).join(', ')}. Das Plugin wurde installiert${result.fileUrls ? ' und die File-URLs gesetzt' : ''}.` };
-      result.render = { rendered: false, note: `Kein Auto-Render für Typ „${kind}".` };
+      result.testPage = { ok: false, setupKind: kind, error: `Test-page setup for type "${kind}" (${m.plugin?.pluginType || '?'}) is not yet automated — currently automated: ${automated.map((k) => `"${k}"`).join(', ')}. The plugin was installed${result.fileUrls ? ' and the file URLs were set' : ''}.` };
+      result.render = { rendered: false, note: `No auto-render for type "${kind}".` };
       return result;
     }
     const pdPage = await browser.newPage();
     const pdLogin = await d.uiLogin(pdPage, cfg);
     if (!pdLogin.ok) {
-      result.testPage = { ok: false, error: 'Login für Page-Designer-Schritt fehlgeschlagen.' };
+      result.testPage = { ok: false, error: 'Login for the Page Designer step failed.' };
     } else if (kind === 'item') {
       const itemName = m.testPage?.item?.name || `P${pageId}_ITEM`;
       const hostRegionName = m.testPage?.item?.hostRegion || 'Host';
