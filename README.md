@@ -111,7 +111,7 @@ full description. Only *Full maintenance now* carries a label — it is the prim
 | 🔍 | Manual review | Security + quality gate. Read‑only. |
 | 🔄 | Rebuild requirements | Re‑derive the acceptance requirements from the mock self‑test. |
 | 🧩 | Setup‑JSON | Build the APEX setup recipe (JSON) from the analysis and download it. |
-| 🧬 | Re‑develop | Dead library without successor → slice‑wise re‑development against the acceptance contract. |
+| 🧬 | Re‑develop | Dead library without an obligation‑free equivalent successor → rewritten from the interfaces (slice‑wise, against the acceptance contract). |
 | ⬆ | Update libs to latest | Safe updates applied directly; breaking ones offer a force option or verified migration. |
 | 📤 | Upload (branch + PR) | Commit changes on a **new** branch, push, and show the PR/MR link. **Asks for confirmation.** |
 | 🚀 | Deploy to APEX & live‑test | Install into the configured APEX app, build a test page, headless render check. Needs the APEX connection in *Settings*. |
@@ -127,7 +127,9 @@ summary of the AI/automatic changes from the last run.
 Per‑plugin SBOM and library health. The health bar and the `unmaintained / outdated /
 current` counters summarise the component. Each library is a card with its installed and
 latest version, status, license, a **Source ↗** link, and — where relevant — a note such as
-*"replace with @maxgraph/core (Apache‑2.0, attribution) — done automatically on maintenance"*.
+*"adapter to dayjs (MIT, no obligations) — only an adapter is written, plugin code stays
+unchanged (needs approval)"* or *"no obligation‑free equivalent successor → rewritten from
+the interfaces (MIT) on maintenance (needs approval)"*.
 **Check online (version & age)** refreshes against npm; **SBOM (CycloneDX)** downloads the bill
 of materials.
 
@@ -185,6 +187,16 @@ check → web lib‑check → freeze baseline (before)
 
 Breaking (major) updates and dead/unmaintained libraries aren't swapped blindly — they go
 through an AI migration + the works‑as‑before gate and are adopted only after review.
+
+**Unmaintained libraries need your approval** before anything is replaced or rebuilt. The
+rule: if a **commercially free, obligation‑free** (MIT/ISC/0BSD — attribution already counts
+as an obligation) and **functionally equivalent** successor exists, only an **adapter** is
+written — it exposes exactly the old API surface the plugin uses, and the plugin's own code
+stays untouched. Otherwise the used capability is **rewritten from the characterized
+interfaces** (own MIT code, obligation‑free helpers only). Each run proposes the plan and
+waits for **Approve & replace** — or enable *Settings → General → Auto‑replace unmaintained
+libraries* to skip the per‑run question. Either way the result is adopted only if it still
+works as before, otherwise it is rolled back.
 
 ## Safety & security
 

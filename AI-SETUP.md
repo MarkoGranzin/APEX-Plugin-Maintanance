@@ -55,6 +55,7 @@ Open **⚙ Settings**; it has tabs. Fill them in this order:
 
 ### General
 - **Working directory** — where each repo is cloned into its own subdirectory. Default `./workspace`. Keep it unless the human wants another location.
+- **Auto-replace unmaintained libraries** — default **off**: replacing/rebuilding an unmaintained library needs the human's per-run approval. Leave it off unless the human explicitly asks for full autonomy.
 
 ### AI backend (required)
 - **Backend:** `Local CLI` (recommended when `claude` is logged in) **or** `Provider + API key`.
@@ -95,6 +96,7 @@ Open a plugin (click its row → drawer) and use the icon actions:
 
 - **▶ Check** — scan: libraries, SBOM, risks, test plan.
 - **🧰 Full maintenance** — the full pipeline: sync → check → review → auto-fix → safe library updates → **works-as-before gate** (baseline mock vs. updated libs; rolls back on regression) → re-test → (if APEX target set) deploy + render smoke test → report. This is the one button that leaves a plugin "maintained and verified as before".
+  - **Unmaintained libraries are never replaced silently.** The run proposes a plan and waits for approval (**Approve & replace** in the result panel). The rule: an alternative library is only used if it is commercially free, **obligation-free** (MIT/ISC/0BSD — attribution counts as an obligation) and functionally equivalent — then only an **adapter** is written (old API surface preserved, plugin code untouched). Otherwise the capability is **rewritten from the characterized interfaces** (own MIT code). Tell the human about pending proposals instead of approving on their behalf — unless they have explicitly turned on *Settings → General → Auto-replace unmaintained libraries*.
 - **Open mock** — the AI-built characterization page (review artifact).
 - **APEX test page** — opens the deployed live test page (deploy happens automatically inside Full maintenance).
 - **🐞 Report issue** — describe a bug the tests missed; the AI turns it into a permanent regression test and reworks until green.
