@@ -17,7 +17,7 @@ describe('T-29 Security-Review (OWASP)', () => {
     expect(r.blocking[0].rule).toBe('vulnerable-dependency');
   });
   it('hartkodiertes Secret → kritisch', () => {
-    const r = securityReview({ assets: [{ name: 'c.js', code: 'const t = "ghp_abcdefghijklmnopqrstuvwx";' }] });
+    const r = securityReview({ assets: [{ name: 'c.js', code: 'const t = "ghp_abcdefghijklmnopqrstuvwx";' }] }); // pragma: allowlist secret (fake token fixture for detection test, not a real secret)
     expect(r.blocking.some((f) => f.severity === 'critical')).toBe(true);
   });
   it('saubere Änderung → Gate grün', () => {
