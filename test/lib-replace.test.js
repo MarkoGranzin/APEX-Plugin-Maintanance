@@ -2,24 +2,24 @@ import { describe, it, expect } from 'vitest';
 import { REPLACEMENTS, suggestReplacement, planReplacements, replaceConsentGate } from '../src/service/lib-replace.js';
 
 describe('Unmaintained → permissiver Ersatz', () => {
-  it('schlägt gepflegten Nachfolger nur bei kommerziell-OK-Lizenz vor', () => {
+  it('T-164: pflichtenfreier, gleichwertiger Nachfolger → Adapter-Vorschlag', () => {
     const moment = suggestReplacement('moment');
     expect(moment.to).toBe('dayjs');
     expect(moment.license).toBe('MIT');
     expect(moment.licenseInfo.commercialOk).toBe(true);
     expect(moment.attribution).toBe(false); // MIT → keine Pflichten
+    expect(moment.approach).toBe('adapter'); // nur der Adapter wird geschrieben
     expect(moment.cdn).toMatch(/dayjs/);
   });
 
-  it('Apache-Nachfolger ist erlaubt, aber als attribution markiert', () => {
-    const mx = suggestReplacement('mxgraph');
-    expect(mx.to).toBe('@maxgraph/core');
-    expect(mx.licenseInfo.commercialOk).toBe(true);
-    expect(mx.attribution).toBe(true); // Apache-2.0 → Attributionspflicht, aber kein Copyleft
+  it('T-164: Attribution ist eine PFLICHT → Apache-Nachfolger ist KEINE zulässige Alternative (kein Adapter-Pfad)', () => {
+    // Regel: Alternative nur wenn kommerziell frei UND pflichtenfrei UND gleichwertig.
+    expect(suggestReplacement('mxgraph')).toBeNull();   // @maxgraph/core ist Apache-2.0 (Attributionspflicht)
+    expect(suggestReplacement('protractor')).toBeNull(); // playwright ist Apache-2.0
   });
 
   it('case-insensitiv + unbekannte Lib → null', () => {
-    expect(suggestReplacement('MXGRAPH').to).toBe('@maxgraph/core');
+    expect(suggestReplacement('MOMENT').to).toBe('dayjs');
     expect(suggestReplacement('irgendwas-fremdes')).toBeNull();
     expect(suggestReplacement('')).toBeNull();
   });
@@ -30,27 +30,39 @@ describe('Unmaintained → permissiver Ersatz', () => {
     expect(got).toBeNull();
   });
 
-  it('alle Registry-Einträge sind kommerziell nutzbar (kein Copyleft)', () => {
+  it('T-164: NUR pflichtenfreie + gleichwertige Registry-Einträge sind vorschlagbar', () => {
     for (const name of Object.keys(REPLACEMENTS)) {
       const r = suggestReplacement(name);
-      expect(r, `${name} sollte vorschlagbar sein`).not.toBeNull();
-      expect(r.licenseInfo.obligations).not.toBe('copyleft');
+      if (r) {
+        expect(r.licenseInfo.obligations, `${name}: Adapter-Pfad nur pflichtenfrei`).toBe('none');
+        expect(REPLACEMENTS[name].equivalent, `${name}: Adapter-Pfad nur bei Gleichwertigkeit`).toBe(true);
+      }
     }
+    // Stichproben: MIT+equivalent vorschlagbar, Apache (Pflicht) nicht
+    expect(suggestReplacement('jsonpath')).not.toBeNull();
+    expect(suggestReplacement('mxclient')).toBeNull();
   });
 
-  it('planReplacements: unmaintained → replace; ohne Nachfolger → self-build; gepflegte ignoriert', () => {
+  it('planReplacements: pflichtenfrei → Adapter; Pflichten-Nachfolger/kein Nachfolger → Interface-Neubau', () => {
     const plan = planReplacements([
       { name: 'moment', version: '2.29.0', unmaintained: true },
+      { name: 'mxgraph', version: '3.9.12', status: 'nicht gepflegt' }, // Nachfolger existiert, aber Apache → Pflicht
       { name: 'angularjs', version: '1.8.0', status: 'nicht gepflegt' }, // kein Nachfolger in Registry
       { name: 'three', version: '0.116.0' }, // gepflegt → ignoriert
     ]);
-    expect(plan).toHaveLength(2);
+    expect(plan).toHaveLength(3);
     const moment = plan.find((p) => p.from === 'moment');
     expect(moment.strategy).toBe('replace');
+    expect(moment.approach).toBe('adapter');
     expect(moment.to).toBe('dayjs');
+    const mx = plan.find((p) => p.from === 'mxgraph');
+    expect(mx.strategy).toBe('self-build');
+    expect(mx.approach).toBe('rewrite');
+    expect(mx.to).toBeNull();
+    expect(mx.rejected).toMatchObject({ to: '@maxgraph/core', license: 'Apache-2.0' }); // ehrlich benannt, warum kein Adapter
     const ng = plan.find((p) => p.from === 'angularjs');
     expect(ng.strategy).toBe('self-build');
-    expect(ng.to).toBeNull();
+    expect(ng.rejected).toBeNull();
   });
 });
 

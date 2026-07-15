@@ -14,31 +14,34 @@ import { classifyLicense } from '../sbom/licenses.js';
 /**
  * Bekannte gepflegte Nachfolger für unmaintained Libs (Name → Ersatz).
  * to: Paket/Lib-Name · license: SPDX des Nachfolgers · cdn: offizielles Browser-Bundle (für realen Lib-Load) ·
- * note: API-Migrationshinweis für den KI-Agenten · runtime: false = Build-/Test-Tooling (kein Laufzeit-Swap im Mock).
+ * note: API-Migrationshinweis für den KI-Agenten · runtime: false = Build-/Test-Tooling (kein Laufzeit-Swap im Mock) ·
+ * equivalent: true = macht funktional DASSELBE, nur etwas anders (Adapter genügt; T-164-Regel).
  */
 export const REPLACEMENTS = {
-  moment: { to: 'dayjs', license: 'MIT', cdn: 'https://cdn.jsdelivr.net/npm/dayjs@1/dayjs.min.js', note: 'dayjs has a moment-like, immutable API: dayjs(input).format(...), .add()/.subtract(). For non-ISO parsing, load the CustomParseFormat plugin.', runtime: true },
-  momentjs: { to: 'dayjs', license: 'MIT', cdn: 'https://cdn.jsdelivr.net/npm/dayjs@1/dayjs.min.js', note: 'dayjs has a moment-like, immutable API: dayjs(input).format(...). For non-ISO parsing, load the CustomParseFormat plugin.', runtime: true },
-  mxgraph: { to: '@maxgraph/core', license: 'Apache-2.0', cdn: 'https://cdn.jsdelivr.net/npm/@maxgraph/core/dist/maxgraph.umd.min.js', note: 'maxGraph is the official successor to mxGraph (same architecture). mx* classes → @maxgraph/core exports (e.g. mxGraph→Graph, mxClient→…). Adjust the call sites accordingly.', runtime: true },
-  mxclient: { to: '@maxgraph/core', license: 'Apache-2.0', cdn: 'https://cdn.jsdelivr.net/npm/@maxgraph/core/dist/maxgraph.umd.min.js', note: 'mxClient → @maxgraph/core (official successor).', runtime: true },
-  jsonpath: { to: 'jsonpath-plus', license: 'MIT', cdn: 'https://cdn.jsdelivr.net/npm/jsonpath-plus/dist/index-browser-umd.cjs', note: 'jsonpath-plus: JSONPath({ path, json }) instead of jsonpath.query(json, path). Near drop-in.', runtime: true },
-  request: { to: 'node-fetch', license: 'MIT', cdn: null, note: 'In the browser use native fetch(); in Node use node-fetch. request(opts,cb) → fetch(url,opts).then(r=>r.json()).', runtime: true },
-  protractor: { to: 'playwright', license: 'Apache-2.0', cdn: null, note: 'E2E test runner — migrate specs to @playwright/test (no runtime swap).', runtime: false },
+  moment: { to: 'dayjs', license: 'MIT', equivalent: true, cdn: 'https://cdn.jsdelivr.net/npm/dayjs@1/dayjs.min.js', note: 'dayjs has a moment-like, immutable API: dayjs(input).format(...), .add()/.subtract(). For non-ISO parsing, load the CustomParseFormat plugin.', runtime: true },
+  momentjs: { to: 'dayjs', license: 'MIT', equivalent: true, cdn: 'https://cdn.jsdelivr.net/npm/dayjs@1/dayjs.min.js', note: 'dayjs has a moment-like, immutable API: dayjs(input).format(...). For non-ISO parsing, load the CustomParseFormat plugin.', runtime: true },
+  mxgraph: { to: '@maxgraph/core', license: 'Apache-2.0', equivalent: true, cdn: 'https://cdn.jsdelivr.net/npm/@maxgraph/core/dist/maxgraph.umd.min.js', note: 'maxGraph is the official successor to mxGraph (same architecture). mx* classes → @maxgraph/core exports (e.g. mxGraph→Graph, mxClient→…).', runtime: true },
+  mxclient: { to: '@maxgraph/core', license: 'Apache-2.0', equivalent: true, cdn: 'https://cdn.jsdelivr.net/npm/@maxgraph/core/dist/maxgraph.umd.min.js', note: 'mxClient → @maxgraph/core (official successor).', runtime: true },
+  jsonpath: { to: 'jsonpath-plus', license: 'MIT', equivalent: true, cdn: 'https://cdn.jsdelivr.net/npm/jsonpath-plus/dist/index-browser-umd.cjs', note: 'jsonpath-plus: JSONPath({ path, json }) instead of jsonpath.query(json, path). Near drop-in.', runtime: true },
+  request: { to: 'node-fetch', license: 'MIT', equivalent: true, cdn: null, note: 'In the browser use native fetch(); in Node use node-fetch. request(opts,cb) → fetch(url,opts).then(r=>r.json()).', runtime: true },
+  protractor: { to: 'playwright', license: 'Apache-2.0', equivalent: true, cdn: null, note: 'E2E test runner — migrate specs to @playwright/test (no runtime swap).', runtime: false },
 };
 
 /**
- * Liefert einen LIZENZ-GEPRÜFTEN Ersatzvorschlag für eine unmaintained Lib — oder null.
- * Nur wenn der Nachfolger kommerziell nutzbar ist und KEIN Copyleft/Unbekannt hat.
+ * T-164-Regel — liefert einen Ersatzvorschlag NUR, wenn der Nachfolger als ALTERNATIVE zulässig ist:
+ * kommerziell frei UND PFLICHTENFREI (obligations 'none' — Attribution ist bereits eine Pflicht!) UND
+ * funktional gleichwertig (equivalent). Dann genügt ein ADAPTER (alte API-Oberfläche bereitstellen,
+ * Plugin-Code unangetastet). Alles andere → null = Interface-basierter Neubau (self-build/rewrite).
  * @param {string} name @param {{classify?:Function}} [deps]
- * @returns {null|{from,to,license,licenseInfo,cdn,note,runtime,attribution,strategy:'replace'}}
+ * @returns {null|{from,to,license,licenseInfo,cdn,note,runtime,attribution:false,strategy:'replace',approach:'adapter'}}
  */
 export function suggestReplacement(name, deps = {}) {
   const classify = deps.classify ?? classifyLicense;
   const e = REPLACEMENTS[String(name || '').toLowerCase()];
   if (!e) return null;
   const licenseInfo = classify(e.license);
-  if (!licenseInfo.commercialOk || licenseInfo.obligations === 'copyleft' || licenseInfo.obligations === 'unknown') return null;
-  return { from: name, to: e.to, license: e.license, licenseInfo, cdn: e.cdn ?? null, note: e.note, runtime: e.runtime !== false, attribution: licenseInfo.obligations === 'attribution', strategy: 'replace' };
+  if (!licenseInfo.commercialOk || licenseInfo.obligations !== 'none' || e.equivalent !== true) return null;
+  return { from: name, to: e.to, license: e.license, licenseInfo, cdn: e.cdn ?? null, note: e.note, runtime: e.runtime !== false, attribution: false, strategy: 'replace', approach: 'adapter' };
 }
 
 /**
@@ -71,7 +74,18 @@ export function planReplacements(libs, deps = {}) {
     if (!isUnmaint) continue;
     const rep = suggestReplacement(l.name, deps);
     if (rep) out.push({ ...rep, version: l.version });
-    else out.push({ from: l.name, to: null, strategy: 'self-build', version: l.version, note: 'No known permissive successor — build a minimal replacement (MIT) yourself for just the used functionality.' });
+    else {
+      // T-164: bekannter Nachfolger existiert, ist aber NICHT pflichtenfrei/gleichwertig → ehrlich benennen,
+      // warum der Adapter-Pfad nicht offensteht; der Weg ist der Interface-basierte Neubau (rewrite).
+      const known = REPLACEMENTS[String(l.name || '').toLowerCase()];
+      const rejected = known ? { to: known.to, license: known.license } : null;
+      out.push({
+        from: l.name, to: null, strategy: 'self-build', approach: 'rewrite', version: l.version, rejected,
+        note: rejected
+          ? `Known successor ${rejected.to} (${rejected.license}) is not obligation-free → re-implement the used interface yourself (MIT), verified against the acceptance contract.`
+          : 'No known obligation-free, equivalent successor — re-implement the used interface yourself (MIT), verified against the acceptance contract.',
+      });
+    }
   }
   return out;
 }

@@ -41,16 +41,27 @@ describe('T-66 Vollautomatische Pflege = manuelle Pflege', () => {
     expect(r.skipped).toBe(true);
   });
 
-  it('unmaintained Lib → migrate-Schritt mit permissivem Ersatz (für AI-Migration/Gate)', async () => {
+  it('unmaintained Lib → migrate-Schritt mit pflichtenfreiem Adapter-Ersatz (für AI-Migration/Gate)', async () => {
     const store = setup();
-    const scanUnmaint = () => ({ ...scanStub(), libs: [{ name: 'mxgraph', version: '4.2.2', status: 'nicht gepflegt', unmaintained: true }] });
+    const scanUnmaint = () => ({ ...scanStub(), libs: [{ name: 'moment', version: '2.29.0', status: 'nicht gepflegt', unmaintained: true }] });
+    const r = await maintainComponent(store, store.get('c1'), { ...baseDeps({}), scan: scanUnmaint, ai: { kind: 'cli' } });
+    const mig = r.steps.find((s) => s.step === 'migrate' && s.replace);
+    expect(mig).toBeTruthy();
+    expect(mig.name).toBe('moment');
+    expect(mig.to).toBe('dayjs'); // MIT, pflichtenfrei, gleichwertig → Adapter-Pfad
+    expect(mig.strategy).toBe('replace');
+    expect(store.get('c1').libs[0].replacement?.to).toBe('dayjs'); // Ersatz an Lib angehängt (GUI)
+  });
+
+  it('T-164: unmaintained Lib mit Pflichten-Nachfolger (Apache) → migrate-Schritt als Interface-Neubau (self-build)', async () => {
+    const store = setup();
+    const scanUnmaint = () => ({ ...scanStub(), libs: [{ name: 'mxgraph', version: '3.9.12', status: 'nicht gepflegt', unmaintained: true }] });
     const r = await maintainComponent(store, store.get('c1'), { ...baseDeps({}), scan: scanUnmaint, ai: { kind: 'cli' } });
     const mig = r.steps.find((s) => s.step === 'migrate' && s.replace);
     expect(mig).toBeTruthy();
     expect(mig.name).toBe('mxgraph');
-    expect(mig.to).toBe('@maxgraph/core');
-    expect(mig.strategy).toBe('replace');
-    expect(store.get('c1').libs[0].replacement?.to).toBe('@maxgraph/core'); // Ersatz an Lib angehängt (GUI)
+    expect(mig.to).toBeNull(); // @maxgraph/core ist Apache-2.0 (Attributionspflicht) → kein Adapter-Pfad
+    expect(mig.strategy).toBe('self-build');
   });
 
   it('maintainAll nutzt dieselbe Orchestrierung je Komponente', async () => {

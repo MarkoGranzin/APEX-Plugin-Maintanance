@@ -243,21 +243,29 @@ describe('F-28 T-93 redevelopComponent (Spec-gesicherte Migration)', () => {
     expect(p).toMatch(/js\/script\.js/);            // Datei
   });
 
-  it('buildMigrationPrompt: unmaintained → SELBST neu entwickeln (kein API-Mapping vorgegeben), permissiv/MIT, nie Copyleft', () => {
+  it('buildMigrationPrompt (T-164): pflichtenfreier Nachfolger → NUR Adapter; sonst Interface-Neubau, nie Copyleft', () => {
     const p = buildMigrationPrompt({ name: 'js/script.js', code: 'x' }, {
       replacements: [
-        { from: 'moment', to: 'dayjs', license: 'MIT', cdn: 'https://cdn/dayjs.js', attribution: false, strategy: 'replace' },
-        { from: 'yui', to: null, strategy: 'self-build' },
+        { from: 'moment', to: 'dayjs', license: 'MIT', cdn: 'https://cdn/dayjs.js', attribution: false, strategy: 'replace', approach: 'adapter' },
+        { from: 'yui', to: null, strategy: 'self-build', approach: 'rewrite' },
+        { from: 'mxgraph', to: null, strategy: 'self-build', approach: 'rewrite', rejected: { to: '@maxgraph/core', license: 'Apache-2.0' } },
       ],
     });
-    expect(p).toMatch(/RE-DEVELOP/);                          // neu entwickeln, nicht portieren
+    // Adapter-Pfad (moment→dayjs): alte API-Oberfläche erhalten, Plugin-Code NICHT anfassen
+    expect(p).toMatch(/Write an ADAPTER/);
+    expect(p).toMatch(/EXACTLY the API surface this plugin uses/);
+    expect(p).toMatch(/Do NOT rewrite the plugin's own code/);
+    expect(p).toMatch(/dayjs/);
+    // Neubau-Pfad (yui/mxgraph): auf Interface-Basis selbst neu, keine Mapping-Hilfe, KI entscheidet
+    expect(p).toMatch(/RE-DEVELOP/);
     expect(p).toMatch(/RE-IMPLEMENT it from scratch/);
-    expect(p).toMatch(/do not expect a 1:1 API mapping/);    // keine konkrete Mapping-Hilfe
-    expect(p).toMatch(/YOU decide the approach/);            // KI entscheidet selbst
-    expect(p).toMatch(/dayjs/);                               // permissiver Nachfolger nur als Option
-    expect(p).toMatch(/NEVER GPL\/AGPL\/LGPL\/other copyleft/); // Lizenz-Leitplanke
-    expect(p).toMatch(/self-built under MIT/);               // Self-Build-Pfad
-    expect(p).toMatch(/There is no drop-in successor; build your own/); // ohne Nachfolger
+    expect(p).toMatch(/do not expect a 1:1 API mapping/);
+    expect(p).toMatch(/YOU decide the approach/);
+    expect(p).toMatch(/no obligation-free, equivalent successor/);
+    expect(p).toMatch(/@maxgraph\/core exists, but its license Apache-2\.0 carries obligations/); // ehrlich benannt
+    // Lizenz-Leitplanken
+    expect(p).toMatch(/NEVER GPL\/AGPL\/LGPL\/other copyleft/);
+    expect(p).toMatch(/NEVER attribution-bound or copyleft code/);
   });
 
   // T-104: optisches Abschluss-Gate (AI-UI-Prüfung „sieht aus wie zuvor")

@@ -62,15 +62,20 @@ export function buildMigrationPrompt(asset, ctx = {}) {
   if (inventory.events?.length) inv.push('Interactions/events to PRESERVE (re-bind so they still work — includes drag & drop / sortable): ' + inventory.events.slice(0, 40).join(', '));
   if (inventory.fns?.length) inv.push('Functions/behaviors to keep working: ' + inventory.fns.slice(0, 40).join(', '));
   if (inventory.apexCalls?.length) inv.push('apex.* integration to keep: ' + [...new Set(inventory.apexCalls)].slice(0, 30).join(', '));
-  // Unmaintained Libs: die SOFTWARE erkennt selbst, dass sie die Funktionalität NEU ENTWICKELN muss
-  // (keine vorgegebenen API-Mappings). Die KI leitet das Verhalten aus der Charakterisierung ab und
-  // baut es neu — auf einem selbst gewählten permissiven Nachfolger ODER selbst (MIT). Nie Copyleft.
+  // T-164-Regel für unmaintained Libs — zwei klar getrennte Pfade:
+  //   a) Es gibt einen PFLICHTENFREIEN (obligations 'none'), funktional GLEICHWERTIGEN Nachfolger
+  //      → NUR ein ADAPTER wird geschrieben: er stellt exakt die vom Plugin genutzte alte API-Oberfläche
+  //      bereit (gleiche Globals/Funktionen/Signaturen), implementiert auf dem Nachfolger. Der
+  //      Plugin-Code selbst bleibt UNVERÄNDERT.
+  //   b) Sonst (kein Nachfolger / Nachfolger mit Pflichten wie Attribution) → kompletter Neubau der
+  //      genutzten Fähigkeit auf Basis der charakterisierten INTERFACES, eigener Code unter MIT.
   const repl = [];
   for (const r of replacements || []) {
-    const base = (r.strategy === 'replace' && r.to)
-      ? `A maintained, permissively-licensed successor exists (${r.to}, ${r.license}${r.attribution ? ', attribution' : ', no obligations'})${r.cdn ? ` — e.g. ${r.cdn}` : ''}; you MAY build on it OR write your own.`
-      : `There is no drop-in successor; build your own.`;
-    repl.push(`- "${r.from}" is UNMAINTAINED — recognize that it cannot just be version-bumped or mechanically API-ported. RE-DEVELOP the capability this plugin uses it for: from the characterized behavior above, RE-IMPLEMENT it from scratch so the plugin behaves and LOOKS exactly as before. ${base} YOU decide the approach and derive the entire implementation yourself — do not expect a 1:1 API mapping. License constraint: commercially usable, NO copyleft (permissive successor) or self-built under MIT.`);
+    if (r.strategy === 'replace' && r.to) {
+      repl.push(`- "${r.from}" is UNMAINTAINED, and "${r.to}" (${r.license}, no obligations) does the same job. Write an ADAPTER (shim) that exposes EXACTLY the API surface this plugin uses from "${r.from}" — same global names, functions, signatures and return shapes — implemented on top of "${r.to}"${r.cdn ? ` (e.g. ${r.cdn})` : ''}. ${r.note || ''} Do NOT rewrite the plugin's own code: it keeps calling the old names unchanged; only the library loading is swapped for the adapter.`);
+    } else {
+      repl.push(`- "${r.from}" is UNMAINTAINED and there is no obligation-free, equivalent successor${r.rejected ? ` (${r.rejected.to} exists, but its license ${r.rejected.license} carries obligations)` : ''} — RE-DEVELOP the capability this plugin uses it for: from the characterized INTERFACES/behavior above, RE-IMPLEMENT it from scratch so the plugin behaves and LOOKS exactly as before. YOU decide the approach and derive the entire implementation yourself — do not expect a 1:1 API mapping. Your own code under MIT; tiny obligation-free helpers (MIT/ISC/0BSD) are acceptable — NEVER attribution-bound or copyleft code.`);
+    }
   }
   return `You are an expert front-end engineer migrating an Oracle APEX plugin to ${target}. Migrate THIS file so the plugin keeps working on the new library versions WITHOUT changing what the user sees or can do.
 
@@ -81,7 +86,7 @@ NON-NEGOTIABLE — preserve 1:1:
 
 Library breaking changes to apply (port call sites; do not remove functionality):
 ${breaking || "(consult each library's migration guide)"}
-${repl.length ? '\nUNMAINTAINED libraries — RE-DEVELOP, do not just port (keep behavior 1:1; only commercially-usable permissive licenses, NEVER GPL/AGPL/LGPL/other copyleft):\n' + repl.join('\n') + '\n' : ''}
+${repl.length ? '\nUNMAINTAINED libraries — rule: obligation-free equivalent successor → write ONLY an adapter (plugin code untouched); otherwise rewrite from the interfaces (keep behavior 1:1; NEVER GPL/AGPL/LGPL/other copyleft):\n' + repl.join('\n') + '\n' : ''}
 ${inv.join('\n')}
 
 If something cannot be preserved perfectly, keep the closest WORKING equivalent rather than removing it. Return EXCLUSIVELY the full updated file content (no Markdown, no explanation).

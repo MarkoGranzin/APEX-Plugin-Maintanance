@@ -429,8 +429,8 @@ function notRepairableBadge(c){
 function libActionBadge(c){
   const a=c.libActions||{}; let h='';
   if(a.update) h+=` <span class="badge" style="color:#58a6ff;border-color:#58a6ff66" title="${a.update} librar(y/ies) → update to latest stable (works-as-before gate)">↻ ${a.update} update</span>`;
-  if(a.replace) h+=` <span class="badge" style="color:#d29922;border-color:#d2992266" title="${a.replace} librar(y/ies) → replace with a clean, permissively-licensed successor">♻ ${a.replace} replace</span>`;
-  if(a.redevelop) h+=` <span class="badge" style="color:#f85149;border-color:#f8514966" title="${a.redevelop} dead librar(y/ies) without successor → slice-wise re-development (F-30)">🧬 ${a.redevelop} redevelop</span>`;
+  if(a.replace) h+=` <span class="badge" style="color:#d29922;border-color:#d2992266" title="${a.replace} librar(y/ies) → obligation-free equivalent successor exists: only an adapter is written (plugin code untouched)">♻ ${a.replace} replace</span>`;
+  if(a.redevelop) h+=` <span class="badge" style="color:#f85149;border-color:#f8514966" title="${a.redevelop} dead librar(y/ies) without an obligation-free equivalent successor → rewritten from the interfaces (F-30)">🧬 ${a.redevelop} redevelop</span>`;
   return h;
 }
 // T-123: Sicherheits-Verdikt einer (veralteten) Lib sichtbar machen — RISIKO vs. nur-Code.
@@ -833,11 +833,11 @@ function libLine(l){
   const link = l.source||l.homepage||l.npm;
   const src = link ? ` · <a href="${esc(link)}" target="_blank" rel="noopener" style="color:var(--accent)">Source ↗</a>` : '';
   const manual = l.detectedBy==='manuell' ? ' <span class="badge">manual</span>' : '';
-  // Unmaintained → permissiver Ersatzvorschlag (oder MIT-Self-Build), wird bei der Pflege automatisch migriert
+  // T-164: unmaintained → pflichtenfreier gleichwertiger Nachfolger = NUR Adapter; sonst Interface-Neubau (MIT).
   const rep = l.replacement
     ? (l.replacement.to
-        ? `<div class="small" style="margin:2px 0 0 12px;color:var(--accent)">↳ replace with <b>${esc(l.replacement.to)}</b> (${esc(l.replacement.license)}${l.replacement.attribution?', attribution':', no obligations'}) — done automatically on maintenance</div>`
-        : `<div class="small" style="margin:2px 0 0 12px;color:var(--accent)">↳ no permissive successor → a minimal MIT replacement is built automatically on maintenance</div>`)
+        ? `<div class="small" style="margin:2px 0 0 12px;color:var(--accent)">↳ adapter to <b>${esc(l.replacement.to)}</b> (${esc(l.replacement.license)}, no obligations) — only an adapter is written, plugin code stays unchanged (needs approval)</div>`
+        : `<div class="small" style="margin:2px 0 0 12px;color:var(--accent)">↳ no obligation-free equivalent successor → rewritten from the interfaces (MIT) on maintenance (needs approval)</div>`)
     : '';
   // T-123: bei veralteten Libs das dedizierte Security-Verdikt zeigen (RISIKO vs. nur Code).
   const sec = (l.status==='veraltet' && l.security && l.security.scanned) ? secMark(l) : '';
@@ -1025,7 +1025,7 @@ async function runMaintain(consentReplace){
     if(r.migration){
       const m=r.migration;
       if(m.consentRequired){
-        const props=(m.proposals||[]).map(p=>`<li><b>${esc(p.lib)}</b> → ${p.strategy==='replace'?('replace with <code>'+esc(p.to||'')+'</code>'):'MIT self-build'} <span class="muted small">(same external interface, verified as before)</span></li>`).join('');
+        const props=(m.proposals||[]).map(p=>`<li><b>${esc(p.lib)}</b> → ${p.strategy==='replace'?('adapter to <code>'+esc(p.to||'')+'</code> (obligation-free equivalent — plugin code untouched)'):'rewrite from the interfaces (MIT self-build)'} <span class="muted small">(same external interface, verified as before)</span></li>`).join('');
         mig=`<div class="finding medium"><b>⚠ Approval needed — replace/rebuild unmaintained library</b><ul style="margin:6px 0 8px 18px">${props}</ul><button class="primary" onclick="runMaintain(true)">✅ Approve &amp; replace</button> <span class="muted small">runs the interface-preserving replacement; adopted only if it still works as before, otherwise rolled back</span></div>`;
       }
       else if(m.adopted) mig=`<div class="note"><b style="color:#3fb950">🚀 Migrated to latest — verified as before</b> · ${esc(m.migration||'')}${m.upload&&m.upload.prUrl?` — <a href="${esc(m.upload.prUrl)}" target="_blank" rel="noopener" style="color:var(--accent)">PR ↗</a>`:''}</div>`;

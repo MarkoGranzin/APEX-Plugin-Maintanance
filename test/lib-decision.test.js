@@ -29,10 +29,17 @@ describe('T-114 Security-Entscheid Update vs. Ersatz', () => {
     expect(d.action).toBe('replace');
   });
 
-  it('nicht gepflegt mit sauberem Nachfolger → replace/successor', () => {
+  it('nicht gepflegt mit PFLICHTENFREIEM gleichwertigem Nachfolger → replace/successor (Adapter-Pfad)', () => {
+    const d = decideLibAction({ name: 'moment', status: 'nicht gepflegt' });
+    expect(d.action).toBe('replace');
+    expect(d.path).toBe('successor'); // dayjs (MIT, pflichtenfrei) → nur Adapter
+    expect(d.replacement.approach).toBe('adapter');
+  });
+
+  it('T-164: Nachfolger mit Pflichten (Apache-Attribution) → KEIN Adapter-Pfad → replace/redevelop', () => {
     const d = decideLibAction({ name: 'mxgraph', status: 'nicht gepflegt' });
     expect(d.action).toBe('replace');
-    expect(d.path).toBe('successor'); // @maxgraph/core (Apache-2.0)
+    expect(d.path).toBe('redevelop'); // @maxgraph/core ist Apache-2.0 (Pflicht) → Interface-Neubau
   });
 
   it('nicht gepflegt OHNE Nachfolger → replace/redevelop (Dead-Lib-Neuentwicklung F-30)', () => {

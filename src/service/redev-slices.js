@@ -17,19 +17,20 @@ import { compareAcceptance, readAcceptance } from './acceptance.js';
 import { decideLibAction } from './lib-decision.js';
 
 /**
- * Lizenz-Gate für eine frei gewählte Technologie: erlaubt nur kommerziell nutzbare, NICHT-copyleft Lizenzen
- * (pflichtenfrei oder mit Attribution). Copyleft/unbekannt → abgelehnt.
+ * Lizenz-Gate für die beim Neubau verwendete Technologie. T-164-Regel: der Neubau ist EIGENER Code —
+ * zulässig sind nur kommerziell freie, PFLICHTENFREIE Bausteine (obligations 'none': MIT/ISC/0BSD …).
+ * Attribution (Apache/BSD-mit-Notice) ist bereits eine Pflicht → abgelehnt; Copyleft/unbekannt → abgelehnt.
  * @returns {{allowed:boolean, license:string, level:string, obligations:string, reason:string}}
  */
 export function licenseGate(license, deps = {}) {
   const classify = deps.classify ?? classifyLicense;
   const c = classify(license);
-  const allowed = !!c.commercialOk && (c.obligations === 'none' || c.obligations === 'attribution');
+  const allowed = !!c.commercialOk && c.obligations === 'none';
   return {
     allowed, license: c.id, level: c.level, obligations: c.obligations,
     reason: allowed
-      ? (c.obligations === 'attribution' ? 'erlaubt — Attribution beachten' : 'erlaubt — pflichtenfrei')
-      : `abgelehnt — ${c.reason}`,
+      ? 'allowed — obligation-free'
+      : `rejected — ${c.obligations === 'attribution' ? 'attribution is an obligation (not obligation-free)' : c.reason}`,
   };
 }
 
@@ -53,8 +54,8 @@ Slice = view "${slice.view}". It MUST satisfy EXACTLY these observable acceptanc
 ${crit}
 
 Rules:
-- You may use ANY technology (a maintained library, a framework, or your own code). The underlying technology does NOT matter.
-- The ONLY hard constraint is the LICENSE: anything you use must be commercially usable and free of copyleft/unknown obligations (MIT/ISC/BSD/Apache-2.0 …; NEVER GPL/LGPL/AGPL/MPL/EPL/CDDL or unknown). Prefer a permissive successor or your own MIT code.
+- Write the implementation YOURSELF, based on the observable interface criteria above — this is a REWRITE from the interfaces, not a library swap. You may use ANY technique/approach; the internal technology does NOT matter.
+- LICENSE (hard constraint): your own code under MIT; tiny obligation-free helpers (MIT/ISC/0BSD) are acceptable. NEVER anything with obligations — no attribution-bound licenses (Apache-2.0, BSD-with-notice), NEVER GPL/LGPL/AGPL/MPL/EPL/CDDL or unknown.
 - Reproduce the OBSERVABLE behaviour/appearance the criteria describe; do NOT reproduce the dead library's internal API.
 - Keep the apex.* integration and the plugin's public contract intact; the result must render real output.
 Return ONLY the implementation for this slice (no prose, no markdown fences).`;

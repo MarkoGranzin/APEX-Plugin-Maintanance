@@ -13,9 +13,11 @@ const contract = acceptanceFromSelfTest({
 });
 
 describe('F-30 T-117 slice-weise Neuentwicklung', () => {
-  it('licenseGate: permissiv erlaubt, copyleft/unbekannt abgelehnt', () => {
+  it('licenseGate (T-164): nur PFLICHTENFREI erlaubt — Attribution/Copyleft/unbekannt abgelehnt', () => {
     expect(licenseGate('MIT').allowed).toBe(true);
-    expect(licenseGate('Apache-2.0').allowed).toBe(true);      // attribution ok
+    expect(licenseGate('ISC').allowed).toBe(true);
+    expect(licenseGate('Apache-2.0').allowed).toBe(false);     // Attribution ist eine Pflicht → kein Eigenbau-Baustein
+    expect(licenseGate('Apache-2.0').reason).toMatch(/obligation/);
     expect(licenseGate('GPL-3.0').allowed).toBe(false);        // copyleft
     expect(licenseGate('LGPL-2.1').allowed).toBe(false);
     expect(licenseGate('something-weird').allowed).toBe(false); // unbekannt
@@ -28,10 +30,12 @@ describe('F-30 T-117 slice-weise Neuentwicklung', () => {
     expect(def.criteria.length).toBe(2);
   });
 
-  it('buildSliceRebuildPrompt: technologie-frei + Lizenz-Gate + nur beobachtbare Kriterien', () => {
+  it('buildSliceRebuildPrompt: Eigenbau auf Interface-Basis + pflichtenfreies Lizenz-Gate + nur beobachtbare Kriterien', () => {
     const slice = planSlices(contract).find((s) => s.view === 'default');
     const p = buildSliceRebuildPrompt(slice, contract, { name: 'Kanban', deadLib: 'mxgraph' });
-    expect(p).toMatch(/ANY technology/);
+    expect(p).toMatch(/YOURSELF/);                    // T-164: selbst schreiben, kein Lib-Tausch
+    expect(p).toMatch(/REWRITE from the interfaces/i);
+    expect(p).toMatch(/no attribution-bound licenses/); // Attribution = Pflicht → verboten
     expect(p).toMatch(/NEVER GPL\/LGPL\/AGPL/);
     expect(p).toMatch(/renders board/);
     expect(p).toMatch(/drag moves card/);
