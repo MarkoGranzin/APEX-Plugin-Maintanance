@@ -21,7 +21,8 @@ import { createScheduler } from './src/service/scheduler.js';
 import { createHistory, recordRun, listRuns } from './src/report/history.js';
 import { createSettings, setApexTarget } from './src/config/settings.js';
 import { deployAndTest, findPluginExport } from './src/service/apex-live.js';
-import { loadChromium, uiLogin, uiDeletePage, uiDeletePlugin } from './mcp-apex-deploy/lib/apex-ui.js';
+import { loadChromium, uiLogin, uiDeletePage, uiDeletePlugin, uiListApps, uiRunSql } from './mcp-apex-deploy/lib/apex-ui.js';
+import { detectApexTarget, pageRegisterResetPlan } from './src/service/apex-detect.js';
 import { purgeComponent } from './src/service/purge-component.js';
 import { importFromFiles } from './src/service/import-file.js';
 import { saveFeedback, createFeedbackTest } from './src/service/feedback.js';
@@ -669,6 +670,37 @@ function cmdServe(portArg) {
       const browser = await chromium.launch({ headless: true });
       try { const page = await browser.newPage(); const r = await uiLogin(page, { baseUrl: t.baseUrl, workspace: t.workspace, user: t.loginUser, pass }); return json(res, { ok: r.ok, error: r.error, url: r.url }); }
       catch (e) { return json(res, { ok: false, error: String(e?.message ?? e) }, 200); }
+      finally { await browser.close(); }
+    }
+    // T-165 — Detect: App-Liste + Workspace-ID/Owner direkt aus der Ziel-Instanz holen (Login →
+    // SQL Commands → Builder-Kacheln). Speichert workspaceId/owner immer; appId nur bei eindeutigem
+    // Treffer (Guardrail: nie automatisch eine App wählen). Bei echtem App-Wechsel werden die
+    // veralteten Seiten-Register zurückgesetzt (Szenario „Systemwechsel").
+    if (p === '/api/apex-target/detect' && req.method === 'POST') {
+      const body = await readBody(req).catch(() => ({}));
+      const t = settings.apexTarget || {}; let pass; try { pass = secretStore.get('apex-pass'); } catch {}
+      if (!t.baseUrl || !t.workspace || !t.loginUser || !pass) return json(res, { ok: false, error: 'APEX connection incomplete — set base URL/workspace/user/password first (password stays stored).' }, 200);
+      const chromium = await loadChromium();
+      if (!chromium) return json(res, { ok: false, error: 'Playwright not installed.' }, 200);
+      const browser = await chromium.launch({ headless: true });
+      try {
+        const page = await browser.newPage();
+        const r = await detectApexTarget(
+          { baseUrl: t.baseUrl, workspace: t.workspace, loginUser: t.loginUser, pass, appHint: body?.appHint ?? t.appId ?? t.alias },
+          { login: (cfg) => uiLogin(page, cfg), listApps: () => uiListApps(page, { baseUrl: t.baseUrl }), runSql: (sql) => uiRunSql(page, sql, { baseUrl: t.baseUrl }) },
+        );
+        if (r.ok) {
+          const oldAppId = t.appId;
+          settings.apexTarget = { ...t, workspaceId: r.workspaceId, owner: r.owner, ...(r.appId ? { appId: r.appId } : {}) };
+          const plan = pageRegisterResetPlan(store.list(), oldAppId, r.appId);
+          for (const id of plan.reset) { try { store.update(id, { apexPageId: null }); } catch { /* egal */ } }
+          if (plan.reset.length) settings.apexTarget.nextPageId = 20000;
+          saveSettings();
+          r.pageRegistersReset = plan.reset.length;
+          r.saved = { workspaceId: r.workspaceId, owner: r.owner, appId: settings.apexTarget.appId ?? null };
+        }
+        return json(res, r, 200);
+      } catch (e) { return json(res, { ok: false, error: String(e?.message ?? e) }, 200); }
       finally { await browser.close(); }
     }
     // Report jetzt senden — nur wenn SMTP & Empfänger konfiguriert sind

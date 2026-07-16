@@ -65,6 +65,59 @@ export async function uiLogin(page, cfg = {}) {
 }
 
 /**
+ * T-165 — Apps des Workspace von der App-Builder-Home lesen (Kacheln sind Links mit fb_flow_id=<id>).
+ * Erwartet eine bereits angemeldete Page. Navigiert defensiv zur Builder-Home, wenn o.baseUrl gesetzt ist.
+ * @returns {Promise<Array<{id:number, name:string}>>}
+ */
+export async function uiListApps(page, o = {}) {
+  if (o.baseUrl) {
+    await page.goto(`${String(o.baseUrl).replace(/\/$/, '')}/r/apex/app-builder/home`, { waitUntil: 'domcontentloaded', timeout: 30000 }).catch(() => {});
+    await page.waitForLoadState('networkidle', { timeout: 15000 }).catch(() => {});
+    await page.waitForTimeout(1500);
+  }
+  const seen = new Map();
+  for (const a of await page.locator('a[href*="fb_flow_id="]').all()) {
+    const href = (await a.getAttribute('href').catch(() => '')) || '';
+    const m = href.match(/fb_flow_id=(\d+)/);
+    if (!m) continue;
+    const id = Number(m[1]);
+    const label = ((await a.innerText().catch(() => '')) || '').replace(/\s+/g, ' ').trim();
+    // Pro App der aussagekräftigste Link-Text (die Kachel trägt den App-Namen, Icon-Links sind leer).
+    if (!seen.has(id) || (label && label.length > (seen.get(id) || '').length)) seen.set(id, label);
+  }
+  return [...seen.entries()].map(([id, name]) => ({ id, name: name || String(id) })).sort((a, b) => a.id - b.id);
+}
+
+/**
+ * T-165 — EIN SQL-Statement über SQL Workshop → SQL Commands ausführen und den sichtbaren Ergebnis-Text
+ * zurückgeben. Versionsrobust: der Aufrufer baut sein SQL so, dass der gesuchte Wert als eindeutig
+ * markierter String erscheint (z.B. 'AISPP|'||…) und parst ihn aus dem zurückgegebenen Text — so hängt
+ * nichts am Tabellen-Markup des Ergebnisses. Erwartet eine bereits angemeldete Page.
+ * @param {{baseUrl:string}} o
+ * @returns {Promise<{ok:boolean, text?:string, error?:string}>}
+ */
+export async function uiRunSql(page, sql, o = {}) {
+  if (!o.baseUrl) return { ok: false, error: 'baseUrl missing.' };
+  await page.goto(`${String(o.baseUrl).replace(/\/$/, '')}/r/apex/sql-commands`, { waitUntil: 'domcontentloaded', timeout: 30000 }).catch(() => {});
+  await page.waitForLoadState('networkidle', { timeout: 15000 }).catch(() => {});
+  await page.waitForTimeout(2000);
+  // Editor fokussieren (CodeMirror/Monaco/plain textarea — je nach APEX-Version) und SQL eintippen.
+  const editor = page.locator('.CodeMirror, .monaco-editor, #apexir_CODE, textarea').first();
+  if (!(await editor.count())) return { ok: false, error: 'SQL Commands editor not found (navigation differs).' };
+  await editor.click({ force: true }).catch(() => {});
+  await page.keyboard.press(process.platform === 'darwin' ? 'Meta+a' : 'Control+a').catch(() => {});
+  await page.keyboard.insertText(sql).catch(async () => { await page.keyboard.type(sql, { delay: 5 }); });
+  // Ausführen: Run-Button, sonst Ctrl+Enter.
+  const run = page.getByRole('button', { name: /^run/i });
+  if (await run.count()) await run.first().click().catch(() => {});
+  else await page.keyboard.press('Control+Enter').catch(() => {});
+  await page.waitForLoadState('networkidle', { timeout: 20000 }).catch(() => {});
+  await page.waitForTimeout(2500);
+  const text = await page.locator('body').innerText().catch(() => '');
+  return { ok: true, text };
+}
+
+/**
  * Import einer Datei über die APEX-UI (Plug-in- ODER Seiten-/Komponenten-Import). Erwartet eine bereits
  * angemeldete Page. Navigiert app-intern, lädt die Datei hoch und klickt die primäre Aktion durch.
  * @param {{appId:number|string, viaPlugins?:boolean}} o

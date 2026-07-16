@@ -358,7 +358,8 @@
       <div class="row2"><div><label>App-Alias (Friendly-URL)</label><input id="apxAlias" placeholder="test"></div><div><label>Login-User (DB-User)</label><input id="apxUser" placeholder="app_user"></div></div>
       <label>Password <span id="apxPassState" class="muted small"></span></label><input id="apxPass" type="password" placeholder="stored encrypted">
       <div class="row2"><div><label>Workspace-ID</label><input id="apxWsId" placeholder="from app export"></div><div><label>Parsing schema (owner)</label><input id="apxOwner" placeholder="WKSP_MYWORKSPACE"></div></div>
-      <div class="inline" style="margin-top:8px"><button onclick="testApexConn()">🔌 Test connection</button><span id="apxConnOut" class="muted small"></span></div>
+      <div class="inline" style="margin-top:8px"><button onclick="testApexConn()">🔌 Test connection</button><button class="ghost" onclick="detectApex()" title="Log in to the target instance and fetch workspace ID, owner and the app list automatically — no more copying IDs from export files">🔍 Detect IDs from APEX</button><span id="apxConnOut" class="muted small"></span></div>
+      <div id="apxDetectOut" class="small" style="margin-top:6px"></div>
     </div>
 
     <div class="foot">
@@ -1436,6 +1437,25 @@ async function testApexConn(){
     await api('PUT','/api/apex-target',{ baseUrl:$('apxBaseUrl').value.trim(), workspace:$('apxWorkspace').value.trim(), appId:$('apxAppId').value.trim(), alias:$('apxAlias').value.trim(), loginUser:$('apxUser').value.trim(), workspaceId:$('apxWsId').value.trim(), owner:$('apxOwner').value.trim(), pass: $('apxPass').value || undefined });
     const r=await api('POST','/api/apex-target/test',{});
     $('apxConnOut').textContent = r.ok?'✅ Login ok (App Builder reached)':('⛔ '+(r.error||'Login failed'));
+    await loadSettings();
+  }catch(e){ $('apxConnOut').textContent='Error: '+e.message; }
+}
+// T-165: Workspace-ID/Owner + App-Liste direkt aus der Ziel-Instanz holen. Füllt die Felder;
+// bei mehrdeutiger App-Wahl werden die Apps als klickbare Auswahl gezeigt (nie Auto-Wahl).
+async function detectApex(appHint){
+  $('apxConnOut').textContent='detecting…'; $('apxDetectOut').innerHTML='';
+  try{
+    // erst speichern (Detect braucht Base-URL/Workspace/Login/Passwort aus den aktuellen Feldern)
+    await api('PUT','/api/apex-target',{ baseUrl:$('apxBaseUrl').value.trim(), workspace:$('apxWorkspace').value.trim(), appId:$('apxAppId').value.trim(), alias:$('apxAlias').value.trim(), loginUser:$('apxUser').value.trim(), workspaceId:$('apxWsId').value.trim(), owner:$('apxOwner').value.trim(), pass: $('apxPass').value || undefined });
+    const r=await api('POST','/api/apex-target/detect', appHint?{appHint}:{});
+    if(!r.ok){ $('apxConnOut').textContent='⛔ '+(r.error||'Detect failed'); return; }
+    $('apxWsId').value=r.workspaceId||''; $('apxOwner').value=r.owner||'';
+    if(r.appId){ $('apxAppId').value=r.appId; }
+    $('apxConnOut').textContent=`✅ detected — workspace ID + owner filled${r.appId?`, app ${r.appId} (${r.appName})`:''}${r.pageRegistersReset?` · ${r.pageRegistersReset} stale page register(s) reset`:''}`;
+    if(!r.appId && (r.apps||[]).length){
+      $('apxDetectOut').innerHTML = 'Pick the target app (a dedicated TEST app): '
+        + r.apps.map(a=>`<button class="ghost" style="margin:2px" onclick="$('apxAppId').value='${a.id}';detectApex('${a.id}')">${esc(String(a.id))} · ${esc(a.name)}</button>`).join('');
+    }
     await loadSettings();
   }catch(e){ $('apxConnOut').textContent='Error: '+e.message; }
 }
