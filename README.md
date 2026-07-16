@@ -155,6 +155,27 @@ Settings are grouped into tabs:
 - **Email** — SMTP settings for the report mail (incl. license‑change warnings).
 - **APEX target** — connection to the APEX app used for live deploy & test‑page setup.
 
+**APEX target — you only need URL, workspace and login.** Enter *Base URL* (`https://<host>/ords`),
+*Workspace*, *Login user* and *Password*, then click **🔍 Detect IDs from APEX**: the tool signs
+in to the target instance, fills **Workspace‑ID** and **Owner (parsing schema)** automatically
+and lists the workspace's apps so you can pick the target **test app** (it never picks one for
+you — create a dedicated empty test app first if the workspace has none; the tool builds its
+test pages there, from page 20000 up). Switching to a different app resets stale per‑plugin
+page registers automatically.
+
+*Manual fallback* (if Detect can't drive your instance's UI): the App‑ID is the number on the
+app's tile in the App Builder; Workspace‑ID and Owner come from **SQL Workshop → SQL Commands**:
+
+```sql
+select workspace, workspace_id,
+       sys_context('userenv','current_schema') as owner
+  from apex_workspaces;
+```
+
+…or from the header of any app export file (`p_default_workspace_id`, `p_default_owner`,
+`p_default_application_id` — in newer APEX versions inside `wwv_flow_imp.import_begin`,
+in older ones `wwv_flow_api.import_begin`).
+
 ![Settings — Git push](docs/img/06-settings-git.png)
 
 **Git push** works with any Git host (GitHub, GitLab, Bitbucket, Azure DevOps,

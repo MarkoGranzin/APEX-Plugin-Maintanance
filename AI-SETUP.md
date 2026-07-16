@@ -74,9 +74,12 @@ Open **⚙ Settings**; it has tabs. Fill them in this order:
 - SMTP host/port/TLS/user/sender + **recipients**; password stored encrypted. Use **✉ Send report now** to test. **(ask the human)**
 
 ### APEX target (optional — only for "deploy & live test")
-Use a **test app / test instance only** (see Guardrails). Fields:
-- **Base URL (ORDS)** e.g. `https://<host>/ords` · **Workspace** · **App-ID** · **App-Alias** (friendly URL) · **Login-User** (DB user) · **Password** (encrypted) · **Workspace-ID** and **Parsing schema (owner)** (both from the app export). **(ask the human for all APEX values + password)**
-- Click **🔌 Test connection**; expect *Login ok (App Builder reached)*.
+Use a **test app / test instance only** (see Guardrails). Preferred flow:
+1. Enter only **Base URL (ORDS)** (`https://<host>/ords`), **Workspace**, **Login-User** and **Password**. **(ask the human for these + which app is the dedicated TEST app)**
+2. Click **🔍 Detect IDs from APEX** — the tool signs in, fills **Workspace-ID** and **Owner (parsing schema)** automatically and lists the workspace's apps. Pick the dedicated **test app** from the list (never a real/production app; if none exists, have the human create an empty "Plugin Test" app first, then Detect again).
+3. Click **🔌 Test connection**; expect *Login ok (App Builder reached)*.
+
+*Manual fallback* (only if Detect fails on this instance): App-ID = the number on the app's tile in the App Builder; Workspace-ID + Owner via SQL Workshop → SQL Commands: `select workspace_id, sys_context('userenv','current_schema') from apex_workspaces;` — or from an app export header (`p_default_workspace_id` / `p_default_owner` in `wwv_flow_imp.import_begin`, older versions `wwv_flow_api.import_begin`). Report to the human that Detect failed (include the error) so it can be fixed.
 
 ---
 
