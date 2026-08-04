@@ -16,6 +16,9 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { extractInlineJs } from './inline.js';
 import { skipString, unquote } from './sql-scan.js';
+// B-75: Dekoder für das klassische HEX-Exportformat (varchar2_to_blob(g_varchar2_table) mit
+// Chunk-Befüllung im Vorblock) — existiert bereits generisch im MCP-Modul (T-152), eine Wahrheit.
+import { decodeEmbeddedFile } from '../../mcp-apex-deploy/lib/plugin-assets.js';
 
 /** Findet alle Aufrufe `name(...)` mit balancierten Klammern; ignoriert Klammern in '..'-Literalen. */
 export function findCalls(text, name) {
@@ -139,14 +142,17 @@ export function extractArtifact(artifact, opts = {}) {
     status: 'ok',
   };
 
-  // (2) lose .js/.css as-is
+  // (2) lose .js/.css as-is — origin auch AM Asset (B-75: die Header-Fingerprint-Stufe unterscheidet
+  // FS-Dateien von eingebetteten plugin_files, ohne die sourceMap konsultieren zu müssen).
   for (const f of artifact.jsFiles ?? []) {
-    bundle.js.push({ name: f.split('/').pop(), code: readFile(f) });
-    bundle.sourceMap[f.split('/').pop()] = { type: 'file', path: f };
+    const origin = { type: 'file', path: f };
+    bundle.js.push({ name: f.split('/').pop(), code: readFile(f), origin });
+    bundle.sourceMap[f.split('/').pop()] = origin;
   }
   for (const f of artifact.cssFiles ?? []) {
-    bundle.css.push({ name: f.split('/').pop(), code: readFile(f) });
-    bundle.sourceMap[f.split('/').pop()] = { type: 'file', path: f };
+    const origin = { type: 'file', path: f };
+    bundle.css.push({ name: f.split('/').pop(), code: readFile(f), origin });
+    bundle.sourceMap[f.split('/').pop()] = origin;
   }
 
   // (1)+(3) APEX-SQL-Export: base64-Plugin-Dateien dekodieren, referenzierte URLs sammeln
@@ -162,7 +168,19 @@ export function extractArtifact(artifact, opts = {}) {
       const fileName = (namedArgExpr(call.argsText, 'p_file_name') || '').match(/^'((?:[^']|'')*)'$/)?.[1];
       const name = fileName ? unquote(fileName) : null;
       const contentExpr = namedArgExpr(call.argsText, 'p_file_content');
-      const res = evalContentExpr(contentExpr);
+      let res = evalContentExpr(contentExpr);
+
+      // B-75: klassisches Exportformat — p_file_content referenziert die im VORBLOCK mit HEX-Chunks
+      // befüllte g_varchar2_table (varchar2_to_blob(wwv_flow_api.g_varchar2_table)). Der generische
+      // Dekoder (T-152) findet den Chunk-Block rückwärts vom create_plugin_file-Aufruf.
+      if (!res.ok && name && /g_varchar2_table/i.test(contentExpr || '')) {
+        const buf = decodeEmbeddedFile(sql, name);
+        if (buf && buf.length) {
+          const isCode = /\.(js|css|json)$/i.test(name);
+          if (!isCode) continue; // LICENSE/Bilder: dekodierbar, aber kein Code-Asset — kein unsafe-Rauschen
+          res = { ok: true, text: buf.toString('utf8') };
+        }
+      }
 
       if (!res.ok || !name) {
         bundle.unsafe.push({
@@ -173,8 +191,8 @@ export function extractArtifact(artifact, opts = {}) {
       }
 
       const kind = classify(name);
-      const entry = { name, code: res.text };
       const origin = { type: 'plugin_file', sqlFile, fileName: name, call: 'create_plugin_file' };
+      const entry = { name, code: res.text, origin };
       if (kind === 'css') {
         bundle.css.push(entry);
       } else {

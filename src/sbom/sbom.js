@@ -11,6 +11,7 @@
 
 import crypto from 'node:crypto';
 import { versionFromUrl } from '../extract/extract.js';
+import { identifyAssetByHeader } from './vendored.js';
 import { cmpSemver as cmp } from '../util/version.js';
 
 const sha256 = (s) => crypto.createHash('sha256').update(s).digest('hex');
@@ -45,7 +46,14 @@ export function fingerprint(bundle, opts = {}) {
       continue;
     }
     const byName = fromFilename(asset.name);
-    if (byName) add({ ...byName, detectedBy: 'filename', evidence: asset.name });
+    if (byName) { add({ ...byName, detectedBy: 'filename', evidence: asset.name }); continue; }
+    // B-71: EINGEBETTETE Plugin-Dateien (aus der .sql extrahiert — beim Datei-Import existiert die Lib
+    // nirgends als FS-Datei) über bekannte Dateinamen + Banner-Version erkennen (Leaflet-Fall: der
+    // Erstimport erkannte „welche Software verwendet wurde" nicht). FS-Dateien deckt detectVendoredLibraries ab.
+    if (asset.origin?.type !== 'file') {
+      const byHeader = identifyAssetByHeader(asset.name, asset.code);
+      if (byHeader) add({ ...byHeader, detectedBy: 'header', evidence: asset.name });
+    }
   }
 
   for (const ref of bundle.referencedUrls ?? []) {

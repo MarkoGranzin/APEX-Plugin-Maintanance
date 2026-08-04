@@ -991,6 +991,16 @@ function cmdServe(portArg) {
         writeFile: (pp, c) => fs.writeFileSync(pp, c),
       });
       if (r.error) return json(res, r, 400);
+      // B-74: wie beim Repo-Zuordnen (B-22) SOFORT scannen — sonst bleiben Libraries/Testplan bis zum
+      // ersten Check leer und der Import wirkt wie „Software nicht erkannt". Web-Check + Mock best effort.
+      const id = r.component.id;
+      try { runComponentOnce(store, store.get(id), { scan: scanRepo, logSink: writeLog, onTestPlan, onSbom }); } catch { /* Erkennung best effort */ }
+      try {
+        const enr = await checkLibrariesOnline(store.get(id).libs || []); store.update(id, { libs: enr, libWarning: libWarningFrom(enr) });
+        runComponentOnce(store, store.get(id), { scan: scanRepo, logSink: writeLog, onTestPlan, onSbom });
+      } catch { /* offline → Web-Aktualität später */ }
+      try { const mu = await buildMockFor(store.get(id), { force: true }); if (mu) r.mockUrl = mu; } catch { /* Mock optional */ }
+      r.component = store.get(id);
       return json(res, r, 201);
     }
 

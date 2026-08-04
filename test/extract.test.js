@@ -51,8 +51,9 @@ describe('T-19 Lose .js/.css unverändert übernehmen', () => {
         'src/slider/slider.css': '.s{}',
       }),
     });
-    expect(b.js[0]).toEqual({ name: 'slider.js', code: 'export const x=1;' });
-    expect(b.css[0]).toEqual({ name: 'slider.css', code: '.s{}' });
+    // B-75: Assets tragen origin auch direkt am Eintrag (für die Header-Fingerprint-Stufe)
+    expect(b.js[0]).toEqual({ name: 'slider.js', code: 'export const x=1;', origin: { type: 'file', path: 'src/slider/slider.js' } });
+    expect(b.css[0]).toEqual({ name: 'slider.css', code: '.s{}', origin: { type: 'file', path: 'src/slider/slider.css' } });
     expect(b.sourceMap['slider.js']).toEqual({ type: 'file', path: 'src/slider/slider.js' });
   });
 });

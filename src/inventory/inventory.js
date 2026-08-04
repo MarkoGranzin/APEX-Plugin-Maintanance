@@ -16,13 +16,15 @@ import path from 'node:path';
 // als Plugin-Code/Libs erkennen (sonst doppelte Lib-Detektion). (F-28/T-99)
 const IGNORED_DIRS = new Set(['.git', 'node_modules', 'dist', 'build', '.idea', '.vscode', '.maintenance']);
 
-/** Liest alle Dateien (rekursiv) als relative Pfade. */
-export function listFiles(rootDir) {
+/** Liest alle Dateien (rekursiv) als relative Pfade. opts.ignore überschreibt die Ignore-Liste
+ *  (B-71: die Lib-Erkennung braucht dist/build — dort liegt die AUSGELIEFERTE Datei eines Checkouts). */
+export function listFiles(rootDir, opts = {}) {
+  const ignored = opts.ignore ?? IGNORED_DIRS;
   const out = [];
   const walk = (dir) => {
     for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
       if (entry.isDirectory()) {
-        if (IGNORED_DIRS.has(entry.name)) continue;
+        if (ignored.has(entry.name)) continue;
         walk(path.join(dir, entry.name));
       } else if (entry.isFile()) {
         out.push(path.relative(rootDir, path.join(dir, entry.name)).split(path.sep).join('/'));
@@ -51,6 +53,12 @@ const isJs = (f) => /\.js$/i.test(f) && !/\.min\.test\./i.test(f);
 const isCss = (f) => /\.css$/i.test(f);
 const isSql = (f) => /\.sql$/i.test(f);
 const isTestFile = (f) => /(^|\/)(test|tests|__tests__|spec)(\/|$)/i.test(f) || /\.(test|spec)\.[jt]s$/i.test(f);
+// B-72: Verzeichnis-Anteil eines Pfads bis EINSCHLIESSLICH des Lib-Wurzelordners (lib/libs/vendor/…) —
+// alles darunter gehört zu EINEM Artefakt (ein kompletter Lib-Checkout ist kein eigenes „Plugin").
+export function libRootDir(f) {
+  const m = String(f).match(/^(.*?(?:^|\/)(?:lib|libs|vendor|vendors|third[-_]?party))\//i);
+  return m ? m[1] : null;
+}
 
 /**
  * Scannt ein ausgecheckes Repo und liefert eine Artefakt-Liste.
@@ -104,9 +112,12 @@ export function detectArtifacts(rootDir, opts = {}) {
   });
 
   // Gruppierung roher Artefakte nach Verzeichnis (ein Plugin = ein Ordner ist die häufige Konvention).
+  // B-72: Dateien UNTERHALB eines Lib-Wurzelordners (js/lib/leaflet/**, lib/x-master/src/**) werden dem
+  // Lib-Wurzelverzeichnis zugeschlagen statt je Unterordner ein eigenes „Plugin" zu bilden. Flache
+  // lib/-Strukturen (Dateien direkt in lib/) bleiben unverändert → keine Bestands-Regression.
   const byDir = new Map();
   const addToDir = (f, bucket) => {
-    const dir = path.posix.dirname(f);
+    const dir = libRootDir(f) ?? path.posix.dirname(f);
     if (!byDir.has(dir)) byDir.set(dir, { jsFiles: [], cssFiles: [], sqlFiles: [] });
     byDir.get(dir)[bucket].push(f);
   };

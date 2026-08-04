@@ -60,7 +60,15 @@ export function analyzeJs(code) {
       sourceType: 'script',
     });
   } catch (err) {
-    return { ok: false, error: `Parse error: ${err.message}` };
+    // B-73: ESM-Dateien (import/export — z.B. leaflet-src.esm.js) sind kein Fehler, sondern Module →
+    // einmal als Modul nachparsen; erst wenn BEIDES scheitert, ist es ein echter Parse-Fehler.
+    // (acorn meldet import.meta separat als „outside a module" — gleicher Fall.)
+    if (/sourceType: module|outside a module/.test(String(err?.message))) {
+      try { ast = acorn.parse(code, { ecmaVersion: 'latest', sourceType: 'module' }); }
+      catch (err2) { return { ok: false, error: `Parse error: ${err2.message}` }; }
+    } else {
+      return { ok: false, error: `Parse error: ${err.message}` };
+    }
   }
 
   const entryPoints = new Set();
