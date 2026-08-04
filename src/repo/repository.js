@@ -104,15 +104,54 @@ export class Repo {
   }
 }
 
+// T-166: beim Kopieren eines lokalen Ordners NICHT mitnehmen (Quelle) bzw. im Ziel BEWAHREN.
+const COPY_IGNORE = new Set(['.git', 'node_modules']);
+const TARGET_KEEP = new Set(['.maintenance']); // Mock/Baselines des Ziels überleben einen Re-Sync
+
+function syncCopyDir(sourceDir, targetDir) {
+  const src = path.resolve(sourceDir);
+  const dst = path.resolve(targetDir);
+  // Rekursions-/Selbst-Guards: nie in die eigene Quelle kopieren.
+  if (src === dst) throw new Error('Folder import: source and target are the same directory.');
+  if ((dst + path.sep).startsWith(src + path.sep)) throw new Error('Folder import: target lies inside the source folder.');
+  // Sync-Semantik: Ziel (außer .maintenance) leeren, dann frisch kopieren → verwaiste Dateien verschwinden.
+  if (fs.existsSync(dst)) {
+    for (const e of fs.readdirSync(dst)) {
+      if (TARGET_KEEP.has(e)) continue;
+      fs.rmSync(path.join(dst, e), { recursive: true, force: true });
+    }
+  }
+  fs.mkdirSync(dst, { recursive: true });
+  const walk = (relDir) => {
+    for (const e of fs.readdirSync(path.join(src, relDir), { withFileTypes: true })) {
+      if (COPY_IGNORE.has(e.name) || TARGET_KEEP.has(e.name)) continue;
+      const rel = relDir ? path.join(relDir, e.name) : e.name;
+      if (e.isDirectory()) { fs.mkdirSync(path.join(dst, rel), { recursive: true }); walk(rel); }
+      else if (e.isFile()) fs.copyFileSync(path.join(src, rel), path.join(dst, rel)); // Quelle wird NUR gelesen
+    }
+  };
+  walk('');
+}
+
 /**
  * Klont das Repo nach targetDir, oder fetcht, wenn dort schon ein Klon liegt.
+ * T-166: Ist die Quelle ein lokaler Ordner OHNE .git, wird KOPIERT statt geklont (Ordner-Import —
+ * das Original bleibt unangetastet; Re-Assign synct die Kopie, .maintenance des Ziels bleibt erhalten).
  * @param {Repo} repo
  * @param {string} targetDir Zielverzeichnis des Arbeits-Klons
  * @param {object} [opts]
  * @param {(dir?:string, env?:object)=>import('simple-git').SimpleGit} [opts.gitFactory] für Tests injizierbar
- * @returns {Promise<{action:'clone'|'fetch', dir:string}>}
+ * @returns {Promise<{action:'clone'|'fetch'|'copy', dir:string}>}
  */
 export async function cloneOrFetch(repo, targetDir, opts = {}) {
+  const src = String(repo.source ?? '');
+  const isPlainLocalDir = !/^(https?:\/\/|git@|ssh:\/\/)/i.test(src)
+    && fs.existsSync(src) && fs.statSync(src).isDirectory() && !fs.existsSync(path.join(src, '.git'));
+  if (isPlainLocalDir) {
+    syncCopyDir(src, targetDir);
+    return { action: 'copy', dir: targetDir };
+  }
+
   const gitFactory = opts.gitFactory ?? ((dir, env) => simpleGit({ baseDir: dir, ...(env ? { env } : {}) }));
   const env = repo.gitEnv();
   const alreadyCloned = fs.existsSync(path.join(targetDir, '.git'));

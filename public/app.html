@@ -227,7 +227,7 @@
     <h2 id="mTitle">Component</h2>
     <input type="hidden" id="mId">
     <label>Name</label><input id="mName" placeholder="e.g. ColorPicker">
-    <label>Directory or Git URL <span class="muted small">(optional)</span></label><input id="mPath" placeholder="https://github.com/org/plugin  ·  D:\repos\plugin">
+    <label>Directory or Git URL <span class="muted small">(optional — a local folder WITHOUT Git works too: it is copied into the workspace, your original stays untouched)</span></label><input id="mPath" placeholder="https://github.com/org/plugin  ·  D:\ais\MyPlugin (folder, no Git needed)">
     <div id="mFilesRow">
       <div class="small muted" style="margin:10px 0 2px">— or, if you don't use Git —</div>
       <label>Import files <span class="muted small">(.sql required · + optional JS/CSS/JSON)</span></label>
@@ -1231,11 +1231,11 @@ async function saveComponent(){
     }catch(e){ toast('Error: '+(e.message||e)); }
     return;
   }
-  // Herkunft 2 — Git-URL/lokaler Pfad (bestehendes Verhalten).
+  // Herkunft 2 — Git-URL ODER lokaler Ordner (T-166: Ordner ohne Git wird ins Workspace KOPIERT —
+  // das Original bleibt unangetastet; danach identischer Flow wie beim Klonen: Scan + Mock).
   const p=$('mPath').value.trim();
-  const isUrl=/^(https?:\/\/|git@)/i.test(p); // URL → klonen (Repo zuordnen), lokaler Pfad → direkt
   // Typ/Format/Status werden automatisch erkannt — der Nutzer wählt sie nicht.
-  const data={ name:$('mName').value.trim(), path: isUrl?'':p };
+  const data={ name:$('mName').value.trim(), path: id?p:'' };
   if(!data.name) return toast('Name missing');
   let comp;
   try{
@@ -1243,10 +1243,10 @@ async function saveComponent(){
   }catch(e){ return toast('Error: '+e.message); }
   closeModal();            // F-29: Dialog sofort schließen
   await load();            // neue Zeile sofort sichtbar machen
-  if(isUrl && comp && comp.id){
-    busyOverlay(true, `Cloning ${data.name} & building mock…`);   // F-29: Spinner bis der Klon fertig ist
-    try{ await api('POST',`/api/components/${comp.id}/assign-repo`,{source:p,visibility:'öffentlich'}); toast('Repo cloned & mock built — “▶ Check” detects type/format'); }
-    catch(e){ toast('Clone error: '+e.message); }
+  if(!id && p && comp && comp.id){
+    busyOverlay(true, `Importing ${data.name} & building mock…`);   // F-29: Spinner bis Klon/Kopie fertig ist
+    try{ await api('POST',`/api/components/${comp.id}/assign-repo`,{source:p,visibility:'öffentlich'}); toast('Source imported & mock built — “▶ Check” detects type/format'); }
+    catch(e){ toast('Import error: '+e.message); }
     finally{ busyOverlay(false); await load(); }   // Hauptseite aktualisieren, damit du es siehst
   } else { toast('Saved'); }
 }
