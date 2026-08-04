@@ -1,0 +1,26 @@
+{
+  "name": "plugin-maintenance",
+  "version": "0.2.0",
+  "description": "Autonomous maintenance for Oracle APEX plugins and template components: connect a repo, detect artifacts, keep vendored libraries current (incl. re-embedding into the plugin .sql), verify works-as-before, deploy & test in APEX.",
+  "type": "module",
+  "license": "MIT",
+  "author": "Marko Granzin",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "lint": "eslint src"
+  },
+  "dependencies": {
+    "acorn": "^8.11.3",
+    "acorn-walk": "^8.3.2",
+    "nodemailer": "^9.0.1",
+    "simple-git": "^3.27.0"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.61.1",
+    "vitest": "^2.1.8"
+  }
+}

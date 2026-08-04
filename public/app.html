@@ -1,0 +1,1641 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Plugin Maintenance</title>
+<style>
+  :root{
+    --bg:#0f1620;--panel:#16212e;--panel2:#1c2a3a;--ink:#e7eef6;--muted:#9fb0c3;--line:#26384b;
+    --accent:#4cc2ff;--green:#54d18c;--yellow:#ffc857;--red:#ff6b6b;--radius:12px;
+    --sans:system-ui,-apple-system,"Segoe UI",Roboto,Arial,sans-serif;--mono:ui-monospace,Consolas,monospace;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--ink);font-family:var(--sans);font-size:15px}
+  header{display:flex;align-items:center;gap:16px;padding:16px 22px;border-bottom:1px solid var(--line);background:var(--panel);position:sticky;top:0;z-index:5}
+  header h1{font-size:1.15rem;margin:0;letter-spacing:-.01em}
+  header .sp{flex:1}
+  a{color:var(--accent);text-decoration:none}
+  button{font:inherit;cursor:pointer;border-radius:9px;border:1px solid var(--line);background:var(--panel2);color:var(--ink);padding:8px 13px}
+  button.primary{background:var(--accent);color:#06243a;border-color:transparent;font-weight:600}
+  button.ghost{background:transparent}
+  button.danger{color:var(--red);border-color:rgba(255,107,107,.4)}
+  button:hover{filter:brightness(1.08)}
+  .wrap{padding:22px;max-width:1200px;margin:0 auto}
+  table{width:100%;border-collapse:collapse;background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);overflow:hidden}
+  th,td{text-align:left;padding:11px 13px;border-bottom:1px solid var(--line);vertical-align:middle}
+  th{color:var(--muted);font-size:.76rem;text-transform:uppercase;letter-spacing:.04em}
+  tr:last-child td{border-bottom:none}
+  tr.row:hover{background:var(--panel2);cursor:pointer}
+  .badge{display:inline-block;font-size:.74rem;padding:3px 9px;border-radius:999px;border:1px solid var(--line);color:var(--muted);white-space:nowrap}
+  .badge.export{color:var(--accent);border-color:rgba(76,194,255,.4)}
+  .badge.tc{color:#c9a3ff;border-color:#5a4a7a}
+  .dot{display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:6px;background:var(--muted)}
+  .spin{display:inline-block;width:12px;height:12px;margin-right:6px;border:2px solid var(--line);border-top-color:var(--accent);border-radius:50%;animation:spin .7s linear infinite;vertical-align:-1px}
+  .spin[hidden]{display:none} /* sonst überschreibt display:inline-block das hidden-Attribut → Spinner immer sichtbar */
+  @keyframes spin{to{transform:rotate(360deg)}}
+  .dot.ok{background:var(--green)} .dot.warn{background:var(--yellow)} .dot.err{background:var(--red)}
+  .muted{color:var(--muted)} .small{font-size:.85rem}
+  .actions{display:flex;gap:6px;justify-content:flex-end}
+  .empty{padding:50px;text-align:center;color:var(--muted)}
+  /* Header-Region (Kennzahlen) + Filter/Sortierung */
+  .overview{display:flex;gap:18px;flex-wrap:wrap;align-items:center;margin-bottom:12px;padding:10px 14px;border:1px solid var(--line);border-radius:10px;background:var(--panel,#11161d)}
+  .ov-stat{display:flex;flex-direction:column;line-height:1.15}
+  .ov-stat b{font-size:1.15rem} .ov-stat span{font-size:.72rem;color:var(--muted);text-transform:uppercase;letter-spacing:.04em}
+  .ov-stat.crit b{color:#f85149} .ov-stat.warn b{color:#d29922} .ov-stat.ok b{color:#3fb950}
+  .ov-sep{width:1px;align-self:stretch;background:var(--line)}
+  .chip{font-size:.8rem;padding:4px 11px;border-radius:999px;border:1px solid var(--line);background:transparent;color:var(--muted);cursor:pointer}
+  .chip:hover{color:var(--text,#e6edf3);border-color:var(--muted)}
+  .chip.active{background:var(--accent);border-color:var(--accent);color:#fff}
+  th.srt{cursor:pointer;user-select:none} th.srt:hover{color:var(--text,#e6edf3)}
+  th.srt .arr{opacity:.5;font-size:.8em;margin-left:3px}
+  /* Drawer */
+  .drawer-bg{position:fixed;inset:0;background:rgba(0,0,0,.5);display:none}
+  .drawer-bg.open{display:block}
+  .drawer{position:fixed;top:0;right:0;height:100%;width:min(540px,94vw);background:var(--panel);border-left:1px solid var(--line);transform:translateX(100%);transition:transform .2s;overflow:auto;z-index:20}
+  .drawer.open{transform:none}
+  .drawer .dh{display:flex;align-items:center;gap:10px;padding:18px 20px;border-bottom:1px solid var(--line);position:sticky;top:0;background:var(--panel)}
+  .drawer .body{padding:18px 20px}
+  .drawer h2{margin:.2em 0;font-size:1.2rem}
+  .kv{display:grid;grid-template-columns:120px 1fr;gap:6px 12px;margin:10px 0}
+  .kv .muted{color:var(--muted)}
+  .sec{margin-top:22px}
+  .sec h3{font-size:.9rem;text-transform:uppercase;letter-spacing:.04em;color:var(--muted);margin:0 0 8px}
+  .note{background:var(--panel2);border:1px solid var(--line);border-radius:10px;padding:9px 11px;margin:7px 0}
+  .note .meta{font-size:.74rem;color:var(--muted)}
+  .finding{border-left:3px solid var(--red);padding:4px 10px;margin:6px 0;background:var(--panel2);border-radius:0 8px 8px 0;font-size:.86rem}
+  .finding.medium{border-color:var(--yellow)} .finding.low{border-color:var(--muted)}
+  .logbox{max-height:260px;overflow:auto;background:var(--panel2);border:1px solid var(--line);border-radius:8px;padding:8px 10px;font-family:var(--mono);font-size:.78rem;margin-top:8px}
+  .logline{padding:2px 0} .logline .ag{color:var(--accent)} .logline.error .ag,.logline.high .ag{color:var(--red)} .logline.warn .ag{color:var(--yellow)}
+  .logline.error,.logline.high,.logline.critical{color:#ff8a8a} .logline.warn,.logline.medium{color:#ffd479} .logline.pass{color:#5ad27e}
+  .chat{display:flex;flex-direction:column;gap:8px;margin-top:8px;max-height:420px;overflow:auto}
+  .chatmsg{display:flex;gap:8px} .chatmsg .who{flex:0 0 104px;text-align:right;font-size:.76rem;font-weight:600;color:var(--accent);padding-top:7px}
+  .chatmsg .bubble{flex:1;background:var(--panel2);border:1px solid var(--line);border-radius:10px;padding:7px 11px;font-size:.82rem}
+  .chatmsg.bad .who{color:#f85149} .chatmsg.bad .bubble{border-color:#f8514966;background:rgba(248,81,73,.07)}
+  .chatmsg.warn .who{color:#d29922} .chatmsg.warn .bubble{border-color:#d2992266}
+  .chatmsg.ok .who{color:#3fb950}
+  .chatmsg .file{color:var(--muted);font-size:.74rem;font-family:var(--mono);margin-bottom:2px}
+  .gherkin{background:var(--panel2);border:1px solid var(--line);border-radius:8px;padding:10px 12px;font-size:.82rem;max-height:380px;overflow:auto}
+  .gh-feature{font-weight:700;color:var(--accent);margin:8px 0 8px;font-size:.9rem}
+  .gh-scn{font-weight:600;margin:12px 0 4px;padding:3px 8px;border-left:3px solid var(--accent);background:rgba(76,194,255,.06)}
+  .gh-scn.neg{border-left-color:var(--yellow);background:rgba(255,212,121,.06)} .gh-scn.ui{border-left-color:#c9a3ff;background:rgba(201,163,255,.06)}
+  .gh-step{padding:1px 0 1px 18px} .gh-kw{color:var(--accent);font-weight:600;margin-right:6px}
+  .gh-ex{margin:6px 0 2px 18px;color:var(--muted);font-size:.78rem}
+  .gh-cmt{color:var(--muted);font-style:italic;margin-top:10px}
+  .gh-tbl{border-collapse:collapse;margin:4px 0 8px 18px;font-size:.78rem}
+  .gh-tbl th,.gh-tbl td{border:1px solid var(--line);padding:2px 9px;text-align:left}
+  .gh-tbl th{background:var(--panel);color:var(--muted);font-weight:600}
+  .hero{background:var(--panel2);border:1px solid var(--line);border-radius:10px;padding:12px 14px;margin-bottom:6px}
+  .tabs{display:flex;gap:2px;border-bottom:1px solid var(--line);margin:14px 0 14px;flex-wrap:wrap;position:sticky;top:0;background:var(--panel);z-index:2}
+  .tab{background:none;border:0;border-bottom:2px solid transparent;color:var(--muted);padding:9px 14px;cursor:pointer;font:inherit;border-radius:0}
+  .tab:hover{color:var(--ink)} .tab.active{color:var(--accent);border-bottom-color:var(--accent);font-weight:600}
+  .moreact{margin-top:4px} .moreact>summary{cursor:pointer;color:var(--muted);font-size:.85rem;list-style:none;padding:4px 0;display:inline-block}
+  .moreact>summary::-webkit-details-marker{display:none}
+  .tabpanel[hidden]{display:none}
+  input,select,textarea{width:100%;font:inherit;background:var(--panel2);color:var(--ink);border:1px solid var(--line);border-radius:9px;padding:9px 11px}
+  label{display:block;font-size:.82rem;color:var(--muted);margin:12px 0 4px}
+  .row2{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+  .modal-bg{position:fixed;inset:0;background:rgba(0,0,0,.55);display:none;align-items:center;justify-content:center;z-index:30}
+  .modal-bg.open{display:flex}
+  .modal{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:22px;width:min(480px,94vw)}
+  .modal h2{margin:0 0 6px;font-size:1.15rem}
+  .modal .foot{display:flex;justify-content:flex-end;gap:8px;margin-top:18px}
+  .modal.wide{width:min(780px,96vw)}
+  .stabs{display:flex;gap:2px;border-bottom:1px solid var(--line);margin:12px 0 16px;overflow-x:auto}
+  .stabs button{background:none;border:none;color:var(--muted);padding:9px 14px;border-bottom:2px solid transparent;white-space:nowrap;border-radius:0}
+  .stabs button.active{color:var(--ink);border-bottom-color:var(--accent)}
+  .spanel{display:none} .spanel.active{display:block} .spanel h3{margin:2px 0 10px;font-size:1rem}
+  /* T-155: Aktionen als Icon-Liste + Zeilen-Popover */
+  .actgrp{margin:10px 0 3px;font-size:.8rem} .actgrp.danger{color:var(--red)}
+  .iconlist{display:flex;flex-direction:column;gap:1px}
+  .actrow{display:flex;align-items:center;gap:9px;width:100%;justify-content:flex-start;background:none;border:none;color:var(--ink);padding:6px 8px;border-radius:7px;text-align:left;font:inherit}
+  .actrow:hover{background:var(--panel2)} .actrow.danger{color:var(--red)}
+  .actmenu{position:fixed;z-index:40;background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:6px;box-shadow:0 10px 28px rgba(0,0,0,.45);min-width:236px;max-height:74vh;overflow:auto}
+  .rowmenu{background:none;border:none;color:var(--muted);font-size:18px;line-height:1;padding:2px 6px;border-radius:6px} .rowmenu:hover{background:var(--panel2);color:var(--ink)}
+  /* Icon-Leiste im Drawer: immer sichtbar, umbrechend */
+  .actbar{display:flex;flex-wrap:wrap;gap:6px;margin-top:10px}
+  .actchip{display:inline-flex;align-items:center;gap:6px;background:var(--panel2);border:1px solid var(--line);color:var(--ink);padding:6px 10px;border-radius:8px;font-size:.85rem;white-space:nowrap}
+  .actchip:hover{border-color:var(--accent)} .actchip.primary{background:var(--accent);color:#04283b;border-color:var(--accent);font-weight:600} .actchip.danger{color:var(--red);border-color:#f8514966} .actchip.danger:hover{border-color:var(--red);background:#f851491a}
+  .actchip.icononly{width:34px;height:34px;padding:0;justify-content:center;font-size:1.05rem}
+  /* globale Eingabe-Sperre während einer Aktion (Maintenance/Check/…) */
+  body.busy-lock .lockable{opacity:.5;pointer-events:none;filter:saturate(.6)}
+  #busyBanner{position:fixed;top:0;left:0;right:0;z-index:50;background:var(--accent);color:#04283b;text-align:center;padding:5px 10px;font-size:.85rem;font-weight:600;display:none;align-items:center;justify-content:center;gap:12px}
+  body.busy-lock #busyBanner, body.has-run #busyBanner{display:flex}
+  #busyBanner .cancelbtn{background:#7a1d1d;color:#fff;border:1px solid #f8514966;border-radius:6px;padding:3px 12px;font-weight:700;cursor:pointer;font-size:.82rem}
+  #busyBanner .cancelbtn:hover{background:#9a2424}
+  #busyBanner .cancelbtn[disabled]{opacity:.55;cursor:default}
+  /* Library-Kacheln (Libraries-Tab) */
+  .libgrid{display:flex;flex-direction:column;gap:8px;margin:8px 0}
+  .libcard{background:var(--panel2);border:1px solid var(--line);border-radius:9px;padding:8px 11px}
+  .libcard.warn{background:#d299220d} .libcard.error{background:#f851490d}
+  .libcard-head{display:flex;align-items:center;gap:6px;flex-wrap:wrap}
+  .libcard-head>b{font-size:.92rem}
+  .libcard-meta{margin-top:4px;line-height:1.5}
+  .vpill{font-size:.72rem;padding:1px 7px;border:1px solid var(--line);border-radius:20px;color:var(--muted)}
+  th.sorth{cursor:pointer;user-select:none} th.sorth:hover{color:var(--ink)}
+  .toast{position:fixed;bottom:20px;left:50%;transform:translateX(-50%);background:var(--panel2);border:1px solid var(--line);padding:10px 16px;border-radius:10px;display:none;z-index:50}
+  .overlay{position:fixed;inset:0;background:rgba(0,0,0,.5);display:flex;align-items:center;justify-content:center;z-index:60}
+  .overlay[hidden]{display:none}
+  .overlay-card{display:flex;align-items:center;gap:12px;background:var(--panel2);border:1px solid var(--line);padding:18px 26px;border-radius:12px;font-weight:600}
+  .toast.show{display:block}
+  .inline{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+  .agcount{display:inline-block;min-width:74px;font-size:.72rem;font-weight:600;text-transform:uppercase;letter-spacing:.04em;color:var(--muted)}
+  .protogrp{margin:6px 0} .protogrp summary{cursor:pointer;padding:4px 0;font-size:.82rem;font-weight:600;list-style:none}
+  .protogrp summary::-webkit-details-marker{display:none}
+  .protogrp summary .pill{display:inline-block;min-width:18px;text-align:center;font-size:.7rem;padding:1px 7px;border-radius:999px;background:var(--panel2);border:1px solid var(--line);margin-left:6px}
+  .protogrp summary .pill.bad{color:var(--red);border-color:rgba(255,90,90,.4)} .protogrp summary .pill.warn{color:var(--yellow)}
+  .chk{display:flex;align-items:center;gap:8px} .chk input{width:auto}
+</style>
+</head>
+<body>
+<header>
+  <h1>🔧 Plugin Maintenance</h1>
+  <span class="muted small">Manage Oracle APEX plugins &amp; template components</span>
+  <span class="sp"></span>
+  <a class="small" href="/readme.html" target="_blank">Docs ↗</a>
+  <button class="ghost" onclick="openSettings()">⚙ Settings</button>
+  <button class="primary lockable" onclick="openEdit()" title="Add a plugin — via Git URL/path, or the file import at the bottom of the dialog (for when you don't use Git).">+ Plugin</button>
+</header>
+
+<div id="staleBanner" style="display:none;margin:0;padding:10px 22px;background:#7a1d1d;color:#fff;font-size:.9rem"></div>
+<div class="wrap">
+  <div class="inline" style="margin-bottom:14px;gap:8px">
+    <button id="navPlugins" class="primary" onclick="switchView('plugins')">Plugins</button>
+    <button id="navLibs" class="ghost" onclick="switchView('libs')">Libraries</button>
+    <span class="muted small" id="wdLabel" style="margin-left:8px"></span>
+    <span class="sp" style="flex:1"></span>
+    <button class="primary lockable" onclick="runAll()">▶ Check all</button>
+  </div>
+
+  <div id="pluginsView">
+    <!-- Header-Region: Kennzahlen + letzter automatischer Lauf -->
+    <div id="overview" class="overview"></div>
+    <!-- Filterleiste (Default: alles sichtbar) -->
+    <div class="inline filterbar" style="margin-bottom:10px;gap:6px;flex-wrap:wrap;align-items:center">
+      <input id="fltText" type="text" placeholder="Filter name/repo…" oninput="setFilterText(this.value)" style="min-width:200px">
+      <span class="sp" style="width:6px"></span>
+      <button class="chip" data-flt="all" onclick="setFilterStatus('all')">All</button>
+      <button class="chip" data-flt="action" onclick="setFilterStatus('action')">Action needed</button>
+      <button class="chip" data-flt="vulnerable" onclick="setFilterStatus('vulnerable')">Vulnerable</button>
+      <button class="chip" data-flt="unmaintained" onclick="setFilterStatus('unmaintained')">Unmaintained</button>
+      <button class="chip" data-flt="outdated" onclick="setFilterStatus('outdated')">Outdated</button>
+      <button class="chip" data-flt="ok" onclick="setFilterStatus('ok')">OK</button>
+      <span class="muted small" id="fltCount" style="margin-left:6px"></span>
+    </div>
+    <table id="tbl" class="lockable">
+      <thead><tr>
+        <th class="srt" data-sort="name" onclick="setSort('name')">Name</th>
+        <th>Repo</th><th>Type</th><th>Format</th>
+        <th class="srt" data-sort="severity" onclick="setSort('severity')">Status</th>
+        <th class="srt" data-sort="libs" onclick="setSort('libs')">Libraries</th>
+        <th class="srt" data-sort="change" onclick="setSort('change')">Last change</th>
+        <th class="srt" data-sort="summary" onclick="setSort('summary')">Summary</th>
+        <th></th>
+      </tr></thead>
+      <tbody id="rows"></tbody>
+    </table>
+    <div id="empty" class="empty" style="display:none">No plugins yet — add the first one with “+ Plugin”.</div>
+  </div>
+
+  <div id="libsView" style="display:none">
+    <table>
+      <thead><tr>
+        <th class="sorth" onclick="setLibSort('name')">Library <span id="lsName"></span></th>
+        <th class="sorth" onclick="setLibSort('version')">Version <span id="lsVersion"></span></th>
+        <th class="sorth" onclick="setLibSort('status')">Status <span id="lsStatus"></span></th>
+        <th class="sorth" onclick="setLibSort('used')">Used by <span id="lsUsed"></span></th>
+      </tr></thead>
+      <tbody id="libRows"></tbody>
+    </table>
+    <div id="libsEmpty" class="empty" style="display:none">No libraries detected — assign repos and run “Check all”.</div>
+  </div>
+</div>
+
+<!-- Detail-Drawer -->
+<div class="drawer-bg" id="drawerBg" onclick="closeDrawer()"></div>
+<div class="drawer lockable" id="drawer">
+  <div class="dh">
+    <h2 id="dName" style="display:flex;align-items:center"><span class="spin" id="dSpin" hidden></span><span id="dNameTxt">—</span></h2><span class="sp" style="flex:1"></span>
+    <button class="ghost" onclick="closeDrawer()">✕</button>
+  </div>
+  <div class="body" id="dBody"></div>
+</div>
+
+<!-- Add/Edit-Modal -->
+<div class="modal-bg" id="modalBg" onclick="if(event.target===this)this.classList.remove('open')">
+  <div class="modal">
+    <h2 id="mTitle">Component</h2>
+    <input type="hidden" id="mId">
+    <label>Name</label><input id="mName" placeholder="e.g. ColorPicker">
+    <label>Directory or Git URL <span class="muted small">(optional — a local folder WITHOUT Git works too: it is copied into the workspace, your original stays untouched)</span></label><input id="mPath" placeholder="https://github.com/org/plugin  ·  D:\ais\MyPlugin (folder, no Git needed)">
+    <div id="mFilesRow">
+      <div class="small muted" style="margin:10px 0 2px">— or, if you don't use Git —</div>
+      <label>Import files <span class="muted small">(.sql required · + optional JS/CSS/JSON)</span></label>
+      <input id="mFiles" type="file" multiple accept=".sql,.js,.css,.json,.md,.txt">
+    </div>
+    <div class="foot">
+      <button class="ghost" onclick="closeModal()">Cancel</button>
+      <button class="primary" onclick="saveComponent()">Save</button>
+    </div>
+  </div>
+</div>
+
+<!-- Fehler-Report-Modal (T-147): Text + Screenshots → KI-Analyse → dauerhafter Regressionstest → Rework -->
+<div class="modal-bg" id="feedbackBg" onclick="if(event.target===this)this.classList.remove('open')">
+  <div class="modal">
+    <h2>🐞 Report issue</h2>
+    <p class="muted small" style="margin-top:0">Describe a problem the automated tests did not catch. The AI analyzes it, creates a <b>permanent regression test</b> (runs with every future check) and starts a rework until it passes.</p>
+    <label>What is wrong? <span class="muted small">(expected vs. actual behavior)</span></label>
+    <textarea id="fbText" rows="5" placeholder="e.g. After the update, the Kanban cards can no longer be moved via drag & drop — expected: the card moves to the target column; actual: it snaps back."></textarea>
+    <label>Screenshots <span class="muted small">(optional · PNG/JPG · max 8 MB per image)</span></label>
+    <input id="fbFiles" type="file" multiple accept=".png,.jpg,.jpeg,.gif,.webp">
+    <label class="chk" style="margin-top:8px"><input type="checkbox" id="fbRework" checked> start rework right away (full maintenance)</label>
+    <div class="foot">
+      <button class="ghost" onclick="closeFeedback()">Cancel</button>
+      <button class="primary" onclick="sendFeedback()">Analyze &amp; create test</button>
+    </div>
+  </div>
+</div>
+
+<!-- Repo-zuordnen-Modal (F-21) -->
+<div class="modal-bg" id="assignBg" onclick="if(event.target===this)this.classList.remove('open')">
+  <div class="modal">
+    <h2>Assign repo</h2>
+    <p class="muted small" style="margin-top:0">The repo is cloned into its own directory; type/format are detected automatically.</p>
+    <label>URL or local path</label><input id="aSource" placeholder="https://github.com/org/my-plugin.git  or  D:\\repos\\plugin">
+    <label>Visibility</label>
+    <select id="aVisibility" onchange="toggleCreds()"><option value="öffentlich">public</option><option value="intern">internal / private</option></select>
+    <div id="credBox" style="display:none">
+      <label>Personal Access Token (for https, optional)</label><input id="aToken" type="password" placeholder="e.g. ghp_…">
+      <label>OR SSH key path (for git@…)</label><input id="aSshKey" placeholder="e.g. C:\\Users\\you\\.ssh\\id_ed25519">
+      <p class="muted small">Credentials are stored encrypted; the component keeps only a reference.</p>
+    </div>
+    <div class="foot">
+      <button class="ghost" onclick="closeAssign()">Cancel</button>
+      <button class="primary" id="aBtn" onclick="saveAssign()">Assign &amp; clone</button>
+    </div>
+  </div>
+</div>
+
+<!-- Einstellungen-Modal -->
+<div class="modal-bg" id="settingsBg" onclick="if(event.target===this)this.classList.remove('open')">
+  <div class="modal wide">
+    <h2>Settings</h2>
+    <div class="stabs" id="settingsTabs">
+      <button type="button" class="active" onclick="showSettingsTab('general',this)">General</button>
+      <button type="button" onclick="showSettingsTab('ai',this)">AI backend</button>
+      <button type="button" onclick="showSettingsTab('git',this)">Git push</button>
+      <button type="button" onclick="showSettingsTab('schedule',this)">Schedule</button>
+      <button type="button" onclick="showSettingsTab('email',this)">Email</button>
+      <button type="button" onclick="showSettingsTab('apex',this)">APEX target</button>
+    </div>
+
+    <div class="spanel active" data-tab="general">
+      <label>Working directory (each repo gets its own subdirectory here)</label>
+      <input id="workDir" placeholder="./workspace">
+      <div class="muted small" style="margin-top:12px">Auto-repair (check → full maintenance) and push to remote are always on. Outward-facing pushes still ask for a confirmation when you click Upload.</div>
+      <label class="chk" style="margin-top:12px"><input type="checkbox" id="autoReplaceUnmaintained"><span>Auto-replace unmaintained libraries without asking</span></label>
+      <div class="muted small">Off by default: replacing/rebuilding an unmaintained library (interface-preserving successor or MIT self-build) is a big change and needs your explicit approval per run. Turn this on to let maintenance do it automatically (still adopted only if it works as before).</div>
+    </div>
+
+    <div class="spanel" data-tab="ai">
+      <h3>AI backend <span class="muted small">— for reviews, fixes, test generation</span></h3>
+      <label>Backend</label>
+      <select id="aiKind" onchange="toggleAi()">
+        <option value="stub">— none (stub, tests only) —</option>
+        <option value="cli">Local CLI</option>
+        <option value="provider">Provider + API key</option>
+      </select>
+      <div id="aiCli" style="display:none">
+        <label>CLI command</label><input id="aiCommand" placeholder="e.g. claude">
+        <div id="aiAuthRow" class="inline" style="margin-top:8px;gap:8px;align-items:center">
+          <span id="aiAuthState" class="muted small">Checking login status…</span>
+          <button type="button" id="aiLoginBtn" style="display:none" onclick="openAiLogin()" title="Opens a terminal with claude — confirm the browser login there">🔑 Open login</button>
+          <button type="button" class="ghost" onclick="checkAiAuth()" title="Re-check login status">↻</button>
+        </div>
+        <label style="margin-top:8px">API key <span class="muted small">— optional, for headless/scheduler runs (otherwise interactive claude login)</span> <span id="aiCliKeyState" class="muted small"></span></label>
+        <input id="aiCliKey" type="password" placeholder="ANTHROPIC_API_KEY — stored encrypted, optional">
+      </div>
+      <div id="aiProvider" style="display:none">
+        <div class="row2"><div><label>Endpoint</label><input id="aiEndpoint" placeholder="https://api.anthropic.com/v1/messages"></div><div><label>Model</label><input id="aiModel" placeholder="claude-opus-4-8"></div></div>
+        <label>API key <span id="aiKeyState" class="muted small"></span></label><input id="aiKey" type="password" placeholder="stored encrypted">
+      </div>
+      <div class="inline" style="margin-top:8px"><button onclick="testAi()">🔌 Test connection</button><span id="aiTestOut" class="muted small"></span></div>
+    </div>
+
+    <div class="spanel" data-tab="git">
+      <h3>Git push <span class="muted small">— fix → branch → push → PR/MR</span></h3>
+      <div class="muted small" style="margin-bottom:8px">Upload creates a new branch <code>aisp/pflege-…</code>, commits the fix and pushes it to the repo's <code>origin</code> → PR/MR link. Works with <b>any Git host</b> (GitHub, GitLab, Bitbucket, Azure DevOps, Gitea/self-hosted). Auth: either the machine's <b>Git Credential Manager</b> (no token needed) <b>or</b> a <b>Personal Access Token</b> below — stored encrypted, never logged, only injected into a one-time push URL. Token scope: write/push access to the target repo.</div>
+      <label>Personal Access Token <span id="gitTokenState" class="muted small"></span></label>
+      <input id="gitToken" type="password" placeholder="token (stored encrypted)">
+      <label>Username <span class="muted small">(optional — only for hosts that need user:token, e.g. Bitbucket app passwords / Azure DevOps)</span></label>
+      <input id="gitUser" placeholder="leave empty for GitHub / GitLab / Gitea">
+      <div class="inline" style="margin-top:8px"><button onclick="saveGitToken()">🔑 Save token</button><button class="ghost" onclick="clearGitToken()">Remove token</button><span id="gitTokenOut" class="muted small"></span></div>
+    </div>
+
+    <div class="spanel" data-tab="schedule">
+      <h3>Automatic check <span class="muted small">— scheduled maintenance run</span></h3>
+      <div class="chk"><input type="checkbox" id="schedEnabled"><span>enable automatic check</span></div>
+      <label>Cron expression (min hour day month weekday) <span class="muted small" id="schedHint"></span></label>
+      <input id="schedule" placeholder="0 3 * * 1" oninput="updateSchedHint()">
+    </div>
+
+    <div class="spanel" data-tab="email">
+      <h3>Email report (SMTP)</h3>
+      <div class="row2"><div><label>SMTP host</label><input id="smtpHost" placeholder="smtp.company.com"></div><div><label>Port</label><input id="smtpPort" placeholder="587"></div></div>
+      <div class="chk"><input type="checkbox" id="smtpSecure"><span>TLS (secure)</span></div>
+      <div class="row2"><div><label>User</label><input id="smtpUser" placeholder="user@company.com"></div><div><label>Sender (From)</label><input id="smtpFrom" placeholder="maintenance@company.com"></div></div>
+      <label>Password <span id="smtpPassState" class="muted small"></span></label><input id="smtpPass" type="password" placeholder="stored encrypted">
+      <label>Recipients (comma-separated)</label><input id="recipients" placeholder="a@company.com, b@company.com">
+      <div class="inline" style="margin-top:8px"><button onclick="sendReport()">✉ Send report now</button><span id="reportOut" class="muted small"></span></div>
+    </div>
+
+    <div class="spanel" data-tab="apex">
+      <h3>APEX target <span class="muted small">— live deploy &amp; test</span></h3>
+      <div class="muted small" style="margin-bottom:8px">For deploying into a real APEX app + render smoke test. Use a test app/instance only. The password is stored encrypted, never logged.</div>
+      <label>Base URL (ORDS)</label><input id="apxBaseUrl" placeholder="https://host/ords">
+      <div class="row2"><div><label>Workspace</label><input id="apxWorkspace" placeholder="MYWORKSPACE"></div><div><label>App-ID</label><input id="apxAppId" placeholder="200000"></div></div>
+      <div class="row2"><div><label>App-Alias (Friendly-URL)</label><input id="apxAlias" placeholder="test"></div><div><label>Login-User (DB-User)</label><input id="apxUser" placeholder="app_user"></div></div>
+      <label>Password <span id="apxPassState" class="muted small"></span></label><input id="apxPass" type="password" placeholder="stored encrypted">
+      <div class="row2"><div><label>Workspace-ID</label><input id="apxWsId" placeholder="from app export"></div><div><label>Parsing schema (owner)</label><input id="apxOwner" placeholder="WKSP_MYWORKSPACE"></div></div>
+      <div class="inline" style="margin-top:8px"><button onclick="testApexConn()">🔌 Test connection</button><button class="ghost" onclick="detectApex()" title="Log in to the target instance and fetch workspace ID, owner and the app list automatically — no more copying IDs from export files">🔍 Detect IDs from APEX</button><span id="apxConnOut" class="muted small"></span></div>
+      <div id="apxDetectOut" class="small" style="margin-top:6px"></div>
+    </div>
+
+    <div class="foot">
+      <button class="ghost" onclick="closeSettings()">Close</button>
+      <button class="primary" onclick="saveSettingsAll()">Save</button>
+    </div>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+<div id="busyBanner"><span id="busyBannerTxt">⏳ Action running — inputs locked, please wait…</span><button class="cancelbtn" id="cancelBtn" onclick="cancelRunning()" title="Cancel the running run — child processes are terminated and changes rolled back">⏹ Cancel</button></div>
+
+<!-- F-29: Clone-/Lauf-Overlay nach „Save" (Repo klonen + Mock bauen) -->
+<div class="overlay" id="busyOverlay" hidden>
+  <div class="overlay-card"><span class="spin" style="width:18px;height:18px"></span><span id="busyOverlayTxt">Working…</span></div>
+</div>
+
+<!-- App-eigene Bestätigung statt blockierendem confirm() (zuverlässig + automatisierbar) -->
+<div class="modal-bg" id="confirmBg" onclick="if(event.target===this)__resolveConfirm(false)">
+  <div class="modal">
+    <h2 id="confirmTitle">Please confirm</h2>
+    <p id="confirmMsg" class="muted small" style="margin-top:0"></p>
+    <input id="confirmInput" style="display:none;width:100%;margin:2px 0 10px" oninput="__confirmTypeCheck()" autocomplete="off">
+    <div class="foot">
+      <button class="ghost" onclick="__resolveConfirm(false)">Cancel</button>
+      <button class="primary danger" id="confirmOk" onclick="__resolveConfirm(true)">Delete</button>
+    </div>
+  </div>
+</div>
+
+<script>
+const $ = (id) => document.getElementById(id);
+const esc = (s) => String(s ?? '').replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const api = async (m, url, body) => {
+  const r = await fetch(url, { method:m, headers: body?{'Content-Type':'application/json'}:{}, body: body?JSON.stringify(body):undefined });
+  const t = await r.text(); let d; try{ d=JSON.parse(t);}catch{ d=t; }
+  if(!r.ok) throw new Error((d&&d.error)||r.statusText); return d;
+};
+const toast = (msg) => { const t=$('toast'); t.textContent=msg; t.classList.add('show'); setTimeout(()=>t.classList.remove('show'),2200); };
+const fmtDate = (s) => s ? new Date(s).toLocaleString('en-GB') : '—';
+// Anzeige-Labels für Backend-Werte (die Werte selbst/Vergleiche bleiben unverändert)
+const STATUS_LABEL={ok:'OK',handlungsbedarf:'action needed','zu klären':'needs clarification',neu:'new',getestet:'tested',erkannt:'detected','review-blockiert':'review blocked'};
+const LIBSTATUS_LABEL={verwundbar:'vulnerable','nicht gepflegt':'unmaintained',veraltet:'outdated',aktuell:'current',unbekannt:'unknown'};
+const VIS_LABEL={'öffentlich':'public',intern:'internal'};
+const statusLabel=(s)=>STATUS_LABEL[s]||s||'—';
+const libStatusLabel=(s)=>LIBSTATUS_LABEL[s]||s||'';
+const visLabel=(s)=>VIS_LABEL[s]||s||'public';
+function libWarnBadge(w){
+  if(!w) return '';
+  let h='';
+  if(w.vulnerable) h+=` <span class="badge" style="color:#f85149;border-color:#f8514966" title="${w.vulnerable} vulnerable librar(y/ies)">⛔ ${w.vulnerable} vulnerable</span>`;
+  if(w.unmaintained) h+=` <span class="badge" style="color:#d29922;border-color:#d2992266" title="${w.unmaintained} unmaintained librar(y/ies)">⚠ ${w.unmaintained} unmaintained</span>`;
+  if(w.outdated) h+=` <span class="badge" style="color:#d29922;border-color:#d2992266" title="${w.outdated} outdated librar(y/ies)">⬆ ${w.outdated} outdated</span>`;
+  if(w.unknown) h+=` <span class="badge" style="color:var(--muted)" title="${w.unknown} librar(y/ies) with unknown version">? ${w.unknown} unknown</span>`;
+  return h;
+}
+// T-94: Kennzeichnung neu gebauter/migrierter Komponenten (verifiziert „wie zuvor")
+function rebuiltBadge(c){
+  return c && c.rebuilt ? ` <span class="badge" title="Rebuilt on ${esc(c.rebuiltTo||'latest')} — verified as before" style="color:#3fb950;border-color:#3fb95066">🚀 rebuilt</span>` : '';
+}
+// B-25: ehrlich kennzeichnen, wenn die automatische Pflege NICHT reparieren konnte (kein wirksames Upgrade).
+function notRepairableBadge(c){
+  if(!c || !c.notRepairable) return '';
+  const r = typeof c.notRepairable==='object' ? (c.notRepairable.reason||'') : '';
+  return ` <span class="badge" title="${esc(r||'Not auto-repairable — manual migration required')}" style="color:#f85149;border-color:#f8514966">⛔ not auto-repairable</span>`;
+}
+// Empfohlene Lib-Aktionen je Komponente (T-114/T-119): update / replace (Nachfolger) / redevelop (tote Lib, slice-weise neu).
+function libActionBadge(c){
+  const a=c.libActions||{}; let h='';
+  if(a.update) h+=` <span class="badge" style="color:#58a6ff;border-color:#58a6ff66" title="${a.update} librar(y/ies) → update to latest stable (works-as-before gate)">↻ ${a.update} update</span>`;
+  if(a.replace) h+=` <span class="badge" style="color:#d29922;border-color:#d2992266" title="${a.replace} librar(y/ies) → obligation-free equivalent successor exists: only an adapter is written (plugin code untouched)">♻ ${a.replace} replace</span>`;
+  if(a.redevelop) h+=` <span class="badge" style="color:#f85149;border-color:#f8514966" title="${a.redevelop} dead librar(y/ies) without an obligation-free equivalent successor → rewritten from the interfaces (F-30)">🧬 ${a.redevelop} redevelop</span>`;
+  return h;
+}
+// T-123: Sicherheits-Verdikt einer (veralteten) Lib sichtbar machen — RISIKO vs. nur-Code.
+function secMark(l){
+  const s=l&&l.security; if(!s||!s.scanned) return '';
+  if(s.securityRisk){ const col=s.severity==='critical'?'#f85149':'#ff8a3d'; return ` <span class="badge" style="color:${col};border-color:${col}66" title="Security check: RISK — ${esc(s.reason||'')}">🛡 risk</span>`; }
+  return ` <span class="badge" style="color:#3fb950;border-color:#3fb95066" title="Security check: only outdated code, no known risk — ${esc(s.reason||'')}">🛡 code</span>`;
+}
+// Mock-Status sofort in der Liste sichtbar: grün = KI-Mock + Self-Test-Bilanz, rot = auf statischen Stub gefallen.
+function mockBadge(c){
+  if(!c || !c.mockUrl) return '';
+  if(c.mockMode==='ai'){
+    const sc=c.mockSelfCheck;
+    if(sc && typeof sc.total==='number'){
+      const pass=sc.total-(sc.failed||0);
+      // B-37: rote Self-Checks sind HANDLUNGSBEDARF, kein „ok" — rot zeigen; die nächste Pflege korrigiert weiter (kein Cache für rote Mocks).
+      return ` <span class="badge" title="AI mock self-tests${sc.views?` · ${sc.views} views`:''}${sc.failed?` · ${sc.failed} red — die nächste Pflege untersucht/korrigiert den Mock erneut`:''}" style="color:${sc.failed?'#f85149':'#3fb950'};border-color:${sc.failed?'#f8514966':'#3fb95066'}">🧪 ${pass}/${sc.total}</span>`;
+    }
+    return ''; // KI-Mock ohne Self-Test-Bilanz → kein separates „AI"-Badge (Bilanz erscheint nach Rebuild)
+  }
+  return ` <span class="badge" title="Mock build fell back to a static stub${c.mockNote?': '+esc(c.mockNote):''} — re-import/▶ to rebuild" style="color:#f85149;border-color:#f8514966">🧪 mock failed</span>`;
+}
+
+let current = null;
+
+// Laufende Aktionen je Komponente → Spinner vor dem Plugin (Liste) + im Drawer-Titel.
+// BUSY = in diesem Tab gestartet; SRUN = serverseitig laufend (F-29, via /api/running-Poll →
+// zeigt „läuft gerade" auch nach Reload oder wenn der Lauf woanders gestartet wurde).
+const BUSY = new Set();
+const SRUN = new Set();
+function rowBusy(id){ return BUSY.has(id) || SRUN.has(id); }
+const SSTEP = new Map(); // serverseitiger aktueller Schritt je laufender Komponente (F-29+)
+const SCANCEL = new Set(); // B-59: Komponenten, deren Lauf gerade abgebrochen wird
+function applySpin(id){
+  const on = rowBusy(id);
+  document.querySelectorAll(`.spin[data-cid="${id}"]`).forEach(s=>s.hidden=!on);
+  const step = SSTEP.get(id);
+  document.querySelectorAll(`.runlbl[data-cid="${id}"]`).forEach(s=>{ s.hidden=!on; s.textContent = on ? ` · ${step||'running…'}` : ''; });
+  const d=$('dSpin'); if(d && current && current.id===id) d.hidden=!on;
+}
+function setBusy(id, on){ if(on) BUSY.add(id); else BUSY.delete(id); applySpin(id); syncBusyLock(); }
+// Globale Eingabe-Sperre: solange eine Aktion läuft (per-Komponente via BUSY ODER global via _extraBusy),
+// werden alle .lockable-Bereiche (Tabelle, Drawer, Kopf-Buttons) nicht-interaktiv + ein Banner erscheint.
+let _extraBusy=0;
+function syncBusyLock(){ const on = BUSY.size>0 || _extraBusy>0; document.body.classList.toggle('busy-lock', on); if(on) closeRowMenu(); }
+function guardBusy(){ if(BUSY.size>0 || _extraBusy>0){ toast('⏳ Please wait — an action is running'); return false; } return true; }
+// F-29: serverseitig laufende Komponenten pollen und Spinner entsprechend setzen
+async function pollRunning(){
+  try{
+    const r = await api('GET','/api/running');
+    const next = new Set(r.running||[]);
+    const touched = new Set([...next, ...SRUN]);
+    // Hat sich die Lauf-Menge geändert (ein Lauf startete/endete)? → Liste + Header frisch laden,
+    // damit Status/Badges/Kennzahlen live mitlaufen (z.B. wenn ein Plugin fertig gepflegt ist).
+    let changed = next.size !== SRUN.size; if(!changed){ for(const id of next){ if(!SRUN.has(id)){ changed=true; break; } } }
+    SRUN.clear(); next.forEach(id=>SRUN.add(id));
+    SSTEP.clear(); for(const [id,st] of Object.entries(r.steps||{})) SSTEP.set(id, st);
+    SCANCEL.clear(); (r.cancelling||[]).forEach(id=>SCANCEL.add(id));
+    touched.forEach(applySpin);
+    updateBusyBanner();
+    lastRunInfo = { lastScheduledRunAt: r.lastScheduledRunAt, scheduledRunning: r.scheduledRunning };
+    renderOverview(); // „letzter Lauf"/running im Header aktuell halten
+    if(changed) load(); // ein Lauf begann/endete → Daten neu holen (Header zählt neu, Badges aktuell)
+  }catch{ /* offline → ignorieren */ }
+}
+// B-59: Der Banner zeigt den laufenden Schritt + einen (nicht gesperrten) Abbrechen-Button. Sichtbar,
+// sobald ein Lauf aktiv ist (serverseitig SRUN oder lokal BUSY) — auch nach Reload / in einem anderen Tab.
+function runningId(){ return [...SRUN][0] || [...BUSY][0] || null; }
+function updateBusyBanner(){
+  const id = runningId();
+  document.body.classList.toggle('has-run', SRUN.size>0);
+  const txt = $('busyBannerTxt'), btn = $('cancelBtn');
+  if(!txt||!btn) return;
+  if(!id){ txt.textContent='⏳ Action running — inputs locked, please wait…'; return; }
+  const c = ALL.find(x=>x.id===id); const name = c? c.name : '';
+  const step = SSTEP.get(id);
+  if(SCANCEL.has(id)){ txt.textContent = `⏹ Cancelling${name?` — ${name}`:''}… (terminating child processes, rollback)`; btn.disabled=true; btn.textContent='⏳ Cancelling…'; }
+  else { txt.textContent = `⏳ ${step? step : 'Action running'}${name?` — ${name}`:''}`; btn.disabled=false; btn.textContent='⏹ Cancel'; }
+}
+async function cancelRunning(){
+  const id = runningId();
+  if(!id){ toast('No running run'); return; }
+  const c = ALL.find(x=>x.id===id); const name = c? c.name : id;
+  if(!confirm(`Cancel the running run for “${name}”?\nThe child processes (claude/Playwright) are terminated and already-applied changes are rolled back.`)) return;
+  try{
+    const r = await api('POST', `/api/components/${id}/cancel`);
+    if(r && r.cancelled){ SCANCEL.add(id); updateBusyBanner(); toast(`⏹ Cancel requested (${r.killed||0} process(es) terminated)`); }
+    else toast(r&&r.reason? `Not cancelled: ${r.reason}` : 'No running run');
+  }catch(e){ toast('Cancel failed: '+(e&&e.message||e)); }
+}
+// Datei-Download aus In-Memory-Inhalt (vorher 4× dupliziert: SBOM/Log/Testplan/Coded-Test)
+function saveBlob(name, content, type){
+  const url = URL.createObjectURL(new Blob([content], { type }));
+  const a = document.createElement('a'); a.href = url; a.download = name; a.click();
+  URL.revokeObjectURL(url);
+}
+
+// Übersicht: Daten + Sortier-/Filter-Zustand (Default: alles sichtbar, nach Dringlichkeit sortiert)
+let ALL = [];
+let sortKey = 'severity', sortDir = 'desc';
+let filterText = '', filterStatus = 'all';
+let lastRunInfo = {};
+const ACTION = (s)=> s && !['ok','getestet','neu'].includes(s); // „action needed" = Status weder ok/getestet/neu
+// Dringlichkeits-Rang: verwundbar > nicht gepflegt > veraltet > action needed > unbekannt > ok
+function sevRank(c){ const w=c.libWarning||{}; if(w.vulnerable) return 5; if(w.unmaintained) return 4; if(w.outdated) return 3; if(ACTION(c.status)) return 2; if(w.unknown) return 1; return 0; }
+function matchesFilter(c){
+  const t=filterText.trim().toLowerCase();
+  if(t && !((c.name||'').toLowerCase().includes(t) || (c.repo||'').toLowerCase().includes(t))) return false;
+  const w=c.libWarning||{};
+  switch(filterStatus){
+    case 'vulnerable': return !!w.vulnerable;
+    case 'unmaintained': return !!w.unmaintained;
+    case 'outdated': return !!w.outdated;
+    case 'action': return ACTION(c.status);
+    case 'ok': return c.status==='ok'||c.status==='getestet';
+    default: return true;
+  }
+}
+function cmpRow(a,b){
+  let d=0;
+  if(sortKey==='name') d=(a.name||'').localeCompare(b.name||'');
+  else if(sortKey==='libs') d=((a.libs||[]).length)-((b.libs||[]).length);
+  else if(sortKey==='change') d=(new Date((a.lastChange&&a.lastChange.at)||0))-(new Date((b.lastChange&&b.lastChange.at)||0));
+  else if(sortKey==='summary') d=(a.changeSummary||'').localeCompare(b.changeSummary||'');
+  else d=sevRank(a)-sevRank(b); // severity (default)
+  d = sortDir==='asc'? d : -d;
+  if(d===0) d=(a.name||'').localeCompare(b.name||''); // stabiler Tiebreak: Name A–Z
+  return d;
+}
+function renderOverview(){
+  // Auf LIB-Ebene zählen (deckungsgleich mit den Lib-Warn-Badges der Zeilen): ein Plugin kann zugleich
+  // vulnerable UND unmaintained/outdated sein — beide Beiträge werden gezählt, nicht nur einer.
+  let crit=0, warn=0;
+  for(const c of ALL){ const w=c.libWarning||{}; crit+=w.vulnerable||0; warn+=(w.unmaintained||0)+(w.outdated||0)+(w.unknown||0); }
+  const action=ALL.filter(c=>ACTION(c.status)).length;
+  const lr=lastRunInfo.lastScheduledRunAt? fmtDate(lastRunInfo.lastScheduledRunAt) : 'never';
+  const run=lastRunInfo.scheduledRunning?' <span class="badge" style="color:#3fb950;border-color:#3fb95066">running…</span>':'';
+  const ov=$('overview'); if(!ov) return;
+  ov.innerHTML = `
+    <div class="ov-stat"><b>${ALL.length}</b><span>Plugins</span></div>
+    <div class="ov-sep"></div>
+    <div class="ov-stat crit"><b>${crit}</b><span>Vulnerable libs</span></div>
+    <div class="ov-stat warn"><b>${warn}</b><span>Warning libs</span></div>
+    <div class="ov-stat"><b>${action}</b><span>Action needed</span></div>
+    <div class="ov-sep"></div>
+    <div class="ov-stat"><b style="font-size:.92rem">${lr}${run}</b><span>Last auto-run</span></div>`;
+}
+function renderTable(){
+  const rows=$('rows'); if(!rows) return;
+  rows.innerHTML='';
+  $('empty').style.display = ALL.length ? 'none' : 'block';
+  const view = ALL.filter(matchesFilter).slice().sort(cmpRow);
+  const fc=$('fltCount'); if(fc) fc.textContent = view.length===ALL.length? `${ALL.length} shown` : `${view.length} of ${ALL.length} shown`;
+  // Filter-Chips: aktiven markieren
+  document.querySelectorAll('.chip[data-flt]').forEach(b=>b.classList.toggle('active', b.getAttribute('data-flt')===filterStatus));
+  // Sortier-Pfeile in den Spaltenköpfen
+  document.querySelectorAll('th.srt').forEach(th=>{ const k=th.getAttribute('data-sort'); const base=th.textContent.replace(/[▲▼]\s*$/,'').trim(); th.innerHTML = base + (k===sortKey?` <span class="arr">${sortDir==='asc'?'▲':'▼'}</span>`:''); });
+  for(const c of view){
+    const tr = document.createElement('tr'); tr.className='row';
+    const dot = (c.libWarning&&c.libWarning.vulnerable) ? 'err' : (c.status==='ok'||c.status==='getestet') ? 'ok' : c.status==='neu' ? '' : 'warn';
+    const badgeCls = c.formatBadge==='APEX-SQL-Export'?'export':'';
+    const typeBadge = c.type==='template_component'?'<span class="badge tc">Template Component</span>':'<span class="badge">Plugin</span>';
+    tr.innerHTML = `
+      <td><span class="spin" data-cid="${c.id}"${rowBusy(c.id)?'':' hidden'}></span><b>${esc(c.name)}</b>${libWarnBadge(c.libWarning)}${libActionBadge(c)}${rebuiltBadge(c)}${notRepairableBadge(c)}${mockBadge(c)}<span class="runlbl muted small" data-cid="${c.id}"${rowBusy(c.id)?'':' hidden'}> · running…</span></td>
+      <td class="small muted">${esc(c.repo||'—')}</td>
+      <td>${typeBadge}</td>
+      <td><span class="badge ${badgeCls}">${esc(c.formatBadge)}</span></td>
+      <td><span class="dot ${dot}"></span>${esc(statusLabel(c.status))}</td>
+      <td class="small muted">${(c.libs||[]).slice(0,4).map(l=>`<span class="badge" style="${l.status==='verwundbar'?'color:var(--red);border-color:#f8514966':(l.status==='nicht gepflegt'||l.status==='veraltet')?'color:var(--yellow);border-color:#d2992266':l.status==='unbekannt'?'color:var(--muted)':''}" title="${esc((libStatusLabel(l.status)||l.status||'')+(l.action&&l.action!=='ok'?' → '+l.action+(l.actionPath?' ('+l.actionPath+')':''):'')+(l.security&&l.security.scanned?' · 🛡 '+l.security.reason:''))}">${esc(l.name)}@${esc(l.version)}</span>${l.status==='veraltet'?secMark(l):''}`).join(' ')||'—'}${(c.libs||[]).length>4?` <span class="muted">+${c.libs.length-4}</span>`:''}${sbomBar(c.libs,{compact:true,status:c.status})}</td>
+      <td class="small muted">${fmtDate(c.lastChange&&c.lastChange.at)}</td>
+      <td class="small">${esc(c.changeSummary)}</td>
+      <td style="text-align:right;white-space:nowrap;width:60px"><button class="rowmenu" title="Actions" onclick="openRowMenu(event,'${c.id}')">⋯</button><span style="color:var(--muted);font-size:18px" title="Open details">›</span></td>`;
+    // Actions leben im Drawer (bessere UX): die ganze Zeile öffnet das Detail.
+    tr.style.cursor = 'pointer';
+    tr.onclick = ()=> openDetail(c.id);
+    rows.appendChild(tr);
+  }
+  renderOverview();
+}
+function setSort(key){ if(sortKey===key){ sortDir = sortDir==='asc'?'desc':'asc'; } else { sortKey=key; sortDir = key==='name'||key==='summary' ? 'asc' : 'desc'; } renderTable(); }
+function setFilterStatus(s){ filterStatus=s; renderTable(); }
+function setFilterText(t){ filterText=t; renderTable(); }
+async function load(){
+  ALL = await api('GET','/api/components');
+  renderTable();
+}
+
+async function openDetail(id){
+  let c; try{ c = await api('GET','/api/components/'+id); }
+  catch(e){ toast('Cannot load detail — is the service running? ('+(e.message||e)+')'); return; }
+  current = c;
+  $('dNameTxt').textContent = current.name;
+  const libDot = c.libWarning ? ` <span style="color:${c.libWarning.vulnerable?'#f85149':'#d29922'}">●</span>` : '';
+  $('dBody').innerHTML = `
+    <div class="hero">
+      ${!c.source ? `<div class="finding medium" style="margin:0 0 10px">No repo assigned — connect via “🔗 Assign repo” so check/tests/libraries work.</div>` : ''}
+      <div class="inline" style="gap:6px">
+        ${statusPill(c)}${libWarnBadge(c.libWarning)}${rebuiltBadge(c)}
+        <span class="badge">${c.type==='template_component'?'Template Component':'Plugin'}</span>
+        <span class="badge ${c.formatBadge==='APEX-SQL-Export'?'export':''}">${esc(c.formatBadge)}</span>
+      </div>
+      <!-- Aktionen als IMMER sichtbare Icon-Leiste (kein Aufklappen, kein separater „Check"). Full maintenance
+           + Report issue kommen aus demselben Datenmodell wie das Zeilen-Popover. -->
+      ${renderActionBar(c)}
+      ${c.reviewUrl?`<div class="finding low" style="margin-top:8px">📤 Open review: <a href="${esc(c.reviewUrl)}" target="_blank" rel="noopener" style="color:var(--accent)">branch ${esc(c.reviewBranch||'')} → open PR ↗</a></div>`:''}
+      <div id="reviewOut" style="margin-top:8px"></div>
+    </div>
+
+    <div class="tabs">
+      <button class="tab active" data-tab="overview" onclick="showTab('overview')">Overview</button>
+      <button class="tab" data-tab="libs" onclick="showTab('libs')">Libraries${libDot}</button>
+      <button class="tab" data-tab="tests" onclick="showTab('tests')">Tests</button>
+      <button class="tab" data-tab="proto" onclick="showTab('proto')">Protocol</button>
+      <button class="tab" data-tab="notes" onclick="showTab('notes')">Notes</button>
+    </div>
+
+    <div class="tabpanel" data-panel="overview">
+      <div class="kv">
+        <span class="muted">Type</span><span>${c.type==='template_component'?'Template Component':'Plugin'}</span>
+        <span class="muted">Format</span><span>${esc(c.formatBadge)}</span>
+        <span class="muted">Status</span><span>${esc(statusLabel(c.status))}</span>
+        <span class="muted">Source</span><span class="small" style="font-family:var(--mono)">${esc(c.source)||'— (no repo assigned)'}</span>
+        <span class="muted">Visibility</span><span>${esc(visLabel(c.visibility||'öffentlich'))}${c.secretRef?' 🔒':''}</span>
+        <span class="muted">Path</span><span class="small" style="font-family:var(--mono)">${esc(c.path)||'—'}</span>
+        <span class="muted">Last change</span><span>${fmtDate(c.lastChange&&c.lastChange.at)} — ${esc(c.lastChange&&c.lastChange.summary||'—')}</span>
+      </div>
+      <h4 class="muted small" style="margin:14px 0 4px">🤖 AI &amp; automatic changes <span class="muted">(last run)</span></h4>
+      ${renderAiChanges(c)}
+    </div>
+
+    <div class="tabpanel" data-panel="libs" hidden>
+      <div class="inline" style="justify-content:space-between"><h3 style="margin:0">SBOM &amp; libraries ${c.libsCheckedAt?`<span class="muted small">· web check ${fmtDate(c.libsCheckedAt)}</span>`:''}</h3></div>
+      ${sbomViz(c.libs)}
+      <div class="inline" style="margin-bottom:6px"><button onclick="checkLibs()">🌐 Check online (version &amp; age)</button>${(c.libs&&c.libs.length)?'<button onclick="downloadSbom()">⬇ SBOM (CycloneDX)</button>':''}</div>
+      ${(c.libs && c.libs.length)
+        ? `<div class="libgrid">${c.libs.map(l=>libLine(l)).join('')}</div>`
+        : '<div class="muted small">Not detected yet — run “▶ Check” or add manually.</div>'}
+      <div class="inline" style="margin-top:8px">
+        <input id="libName" placeholder="Library (e.g. jquery)" style="max-width:180px">
+        <input id="libVer" placeholder="Version (e.g. 3.4.1)" style="max-width:140px">
+        <input id="libSrc" placeholder="Source/URL (optional)" style="max-width:220px">
+        <button onclick="addLib()">+ Add manually</button>
+      </div>
+    </div>
+
+    <div class="tabpanel" data-panel="tests" hidden>
+      <div class="muted small" style="margin-bottom:6px">Test execution result (actual) + Cucumber test plan (target, baseline until “regenerate”).</div>
+      <h4 class="muted small" style="margin:8px 0 4px">▶ Last run ${c.lastLog?'· '+fmtDate(c.lastLog.at):''} <span class="muted">(always runs, even unfixed)</span></h4>
+      ${renderTestExecution(c)}
+      <h4 class="muted small" style="margin:14px 0 4px">📋 Test plan (Cucumber) — planned coverage</h4>
+      ${c.coverage ? `<div class="finding low" style="margin:4px 0">Path coverage: ${c.coverage.scenarios} scenarios · functions ${c.coverage.functionsCovered}/${c.coverage.functions} · branches ${c.coverage.branchesCovered}/${c.coverage.branches} · parameters ${c.coverage.paramsCovered}/${c.coverage.params}</div>` : ''}
+      <div class="inline" style="margin-bottom:6px"><button onclick="regenTestPlan()">🔄 Regenerate plan</button>${c.testPlan?'<button onclick="downloadTestPlan()">⬇ .feature</button>':''}${(c.codedTests&&c.codedTests.length)?c.codedTests.map((t,i)=>`<button onclick="downloadCoded(${i})">⬇ ${esc(t.name)}</button>`).join(''):''}</div>
+      <h4 class="muted small" style="margin:14px 0 4px">🎭 Coded UI tests (Playwright) <span class="muted">— run live &amp; evaluate (not in the scheduled job)</span></h4>
+      <div class="inline" style="gap:6px"><input id="uiUrl" placeholder="UI test URL: auto-mock is used by default" value="${esc(c.uiTestUrl||'')}" style="max-width:340px"><button onclick="runPwTests()">▶ Run UI tests</button></div>
+      ${c.mockUrl?`<div class="small" style="margin-top:4px">🧪 Auto-mock [${c.mockMode==='ai'?'<span style="color:#3fb950">AI-written</span>':'<span style="color:#d29922">static fallback</span>'}]: <a href="${esc(c.mockUrl)}" target="_blank" rel="noopener" style="color:var(--accent)">open &amp; test manually ↗</a>${c.mockMode!=='ai'&&c.mockNote?` <span style="color:#d29922">— fell back: ${esc(c.mockNote)}</span>`:''}</div>`:''}
+      <div class="small muted" style="margin-top:4px">Playwright: ${healthCache.hasPlaywright?'<span style="color:#3fb950">✓ installed</span>':'<span style="color:#d29922">not installed</span> <button class="ghost small" onclick="installPlaywright()">⬇ Install Playwright</button>'}</div>
+      <div id="uiTestOut"></div>
+      <h4 class="muted small" style="margin:14px 0 4px">📌 Characterization baseline <span class="muted">— pin the working behavior (“works as before”)</span></h4>
+      ${renderBaseline(c)}
+      <div class="muted small" style="margin-top:4px">The verified migration to the latest libs runs automatically inside <b>🧰 Full maintenance now</b>. Manual baseline refresh:</div>
+      <div class="inline" style="gap:6px"><button onclick="captureBaselineNow()" title="Re-pin the as-before baseline by running the UI tests against the current working build.">📌 Capture baseline (now-working state)</button></div>
+      <div id="baselineOut"></div>
+      <h4 class="muted small" style="margin:14px 0 4px">📋 Test plan (Cucumber)</h4>
+      ${renderGherkin(c.testPlan)}
+      <h4 class="muted small" style="margin:14px 0 4px">🕘 History (previous runs)</h4>
+      <div id="testHistory"><div class="muted small">loading…</div></div>
+      <div id="runLogView"></div>
+    </div>
+
+    <div class="tabpanel" data-panel="proto" hidden>
+      <div class="inline" style="justify-content:space-between"><h3 style="margin:0">Check protocol ${c.lastLog ? '· '+fmtDate(c.lastLog.at) : ''}</h3>${c.lastLog&&(c.lastLog.entries||[]).length?'<button onclick="downloadLog()">⬇ Log</button>':''}</div>
+      <div class="muted small" style="margin:2px 0 6px">What each agent did per file. Test results are in the “Tests” tab.</div>
+      <div class="inline" style="gap:2px;margin-bottom:4px"><button class="tab" id="pvG" onclick="setProtoView('grouped')">Grouped</button><button class="tab" id="pvC" onclick="setProtoView('chat')">💬 Agent chat</button></div>
+      <div id="protoBody"></div>
+      <h4 class="muted small" style="margin:14px 0 4px">🗄 Protocol archive</h4>
+      <div id="logArchive"><div class="muted small">loading…</div></div>
+    </div>
+
+    <div class="tabpanel" data-panel="notes" hidden>
+      <h3 style="margin:0 0 6px">Notes</h3>
+      <div class="inline"><input id="noteText" placeholder="Note or log entry…"><button onclick="addNote()">Add</button></div>
+      <div id="notes"></div>
+      <h3 style="margin:16px 0 6px">Reviews</h3><div id="reviews"></div>
+    </div>`;
+  showTab('overview');
+  renderNotes(); renderReviews(); loadLogArchive(); loadTestHistory(); setProtoView('grouped');
+  $('drawer').classList.add('open'); $('drawerBg').classList.add('open');
+}
+// Status-Pille fürs Drawer-Kopf: rot bei Verwundbarkeit, gelb bei Handlungsbedarf, grün bei ok.
+function statusPill(c){
+  const v=c.libWarning&&c.libWarning.vulnerable;
+  const col = v ? '#f85149' : (c.status==='handlungsbedarf'||c.status==='zu klären') ? '#d29922' : c.status==='ok' ? '#3fb950' : 'var(--muted)';
+  return `<span class="badge" style="color:${col};border-color:${col}66">● ${esc(v?'critical':statusLabel(c.status))}</span>`;
+}
+function showTab(name){
+  document.querySelectorAll('#dBody .tabpanel').forEach(p=>{ p.hidden = p.getAttribute('data-panel')!==name; });
+  document.querySelectorAll('#dBody .tab').forEach(t=>t.classList.toggle('active', t.getAttribute('data-tab')===name));
+}
+function renderNotes(){
+  $('notes').innerHTML = (current.notes||[]).map(n=>`<div class="note"><div class="meta">${fmtDate(n.at)} · ${esc(n.kind)}</div>${esc(n.text)}</div>`).join('') || '<div class="muted small">No entries.</div>';
+}
+// Gherkin/Cucumber-Testplan ordentlich rendern: Struktur, Keywords, Beispiel-Tabellen.
+function renderGherkin(text){
+  if(!text) return '<div class="muted small">Not generated yet — “▶ Check” creates the test plan.</div>';
+  const lines=text.split('\n'); let html=''; let tbl=null;
+  const flush=()=>{ if(tbl){ const h=tbl[0]||[], b=tbl.slice(1); html+='<table class="gh-tbl"><thead><tr>'+h.map(x=>`<th>${esc(x)}</th>`).join('')+'</tr></thead><tbody>'+b.map(r=>'<tr>'+r.map(c=>`<td>${esc(c)}</td>`).join('')+'</tr>').join('')+'</tbody></table>'; tbl=null; } };
+  for(const raw of lines){
+    const line=raw.trim();
+    if(line.startsWith('|')){ (tbl=tbl||[]).push(line.split('|').slice(1,-1).map(s=>s.trim())); continue; }
+    flush();
+    if(!line) continue;
+    if(/^Funktionalität:/i.test(line)){ html+=`<div class="gh-feature">📦 ${esc(line)}</div>`; continue; }
+    if(/^(Szenariogrundriss|Szenario):/i.test(line)){ const cls=/Negativ/i.test(line)?'neg':/UI|Event/i.test(line)?'ui':''; html+=`<div class="gh-scn ${cls}">${esc(line)}</div>`; continue; }
+    if(/^Beispiele:/i.test(line)){ html+=`<div class="gh-ex">${esc(line)}</div>`; continue; }
+    if(/^#/.test(line)){ html+=`<div class="gh-cmt">${esc(line)}</div>`; continue; }
+    const m=line.match(/^(Angenommen|Wenn|Dann|Und|Aber|Given|When|Then|And|But)\b(.*)$/i);
+    html+= m ? `<div class="gh-step"><span class="gh-kw">${esc(m[1])}</span>${esc(m[2])}</div>` : `<div class="gh-step">${esc(line)}</div>`;
+  }
+  flush();
+  return `<div class="gherkin">${html}</div>`;
+}
+// Testausführung des letzten Laufs (Ist-Ergebnis), nach Artefakt gruppiert + Zusammenfassung.
+function renderTestExecution(c){
+  const tests=((c.lastLog&&c.lastLog.entries)||[]).filter(e=>e.agent==='Test' && /bestanden|fehlgeschlagen/.test(e.result||''));
+  if(!tests.length) return '<div class="muted small">No run yet — “▶ Check” runs the tests.</div>';
+  const fail=tests.filter(e=>e.severity==='error').length, pass=tests.length-fail;
+  const head=`<div class="inline" style="gap:6px;margin-bottom:6px"><span class="badge" style="color:#3fb950;border-color:#3fb95066">${pass} ✓ passed</span>${fail?`<span class="badge" style="color:#f85149;border-color:#f8514966">${fail} ✗ failed</span>`:''}</div>`;
+  // nach Artefakt (file) gruppieren — übersichtlich statt langer Flachliste
+  const groups={}; for(const e of tests){ (groups[e.file]=groups[e.file]||[]).push(e); }
+  const body=Object.keys(groups).map(art=>{
+    const list=groups[art]; const bad=list.filter(e=>e.severity==='error').length;
+    return `<details class="protogrp"${bad?' open':''}><summary><span class="ag">${esc(art)}</span> <span class="pill${bad?' bad':''}">${list.length-bad} ✓${bad?` · ${bad} ✗`:''}</span></summary>`
+      +`<div class="logbox">${list.map(e=>`<div class="logline ${e.severity==='error'?'error':'pass'}">${esc(e.result)}</div>`).join('')}</div></details>`;
+  }).join('');
+  return head+body;
+}
+async function loadTestHistory(){
+  if(!current) return;
+  try{
+    const list = await api('GET',`/api/components/${current.id}/logs`);
+    $('testHistory').innerHTML = (list&&list.length)
+      ? list.slice(0,10).map(l=>`<div class="runrow"><div class="note inline" style="justify-content:space-between"><span class="meta">${fmtDate(l.at)}</span><button class="ghost small" data-lbl="Open run" onclick="toggleRun(this,'${esc(l.name)}')">Open run</button></div></div>`).join('')
+      : '<div class="muted small">No previous runs yet.</div>';
+  }catch{ $('testHistory').innerHTML='<div class="muted small">History unavailable.</div>'; }
+}
+// Protokoll als Agenten-Chat (chronologisch, Bubbles je Agent).
+const AGENT_LABEL={Erkennung:'🔎 Detection',Extraktion:'📦 Extraction',Lint:'🧹 Lint',AST:'🌳 AST',Test:'🧪 Test',Security:'🛡 Security','Code-Review':'🔍 Code review','Review-Gate':'⚖ Review gate','Web-Dev':'🛠 Web dev','Auto-Review':'🤖 Auto review','Quick-Fix':'🛠 Quick fix','Lib-Update':'⬆ Lib update','Auto-Fix':'🤖 Auto fix','retire.js':'⚠ retire.js',Snapshot:'📸 Snapshot'};
+// Eigener, prominenter Block: nur die KI-/Auto-Fix-Schritte des letzten Laufs (Tab Übersicht).
+function renderAiChanges(c){
+  const FIX=['Quick-Fix','Lib-Update','Web-Dev','Auto-Review','Auto-Fix'];
+  const entries=((c.lastLog&&c.lastLog.entries)||[]).filter(e=>FIX.includes(e.agent));
+  return entries.length ? renderProtocolChat(entries) : '<div class="muted small">No automatic/AI changes in the last run — run “🛠 Fix everything automatically” or “🧰 Full maintenance” (needs a working AI backend for code fixes).</div>';
+}
+function renderProtocolChat(entries){
+  return `<div class="chat">${entries.map(e=>{
+    const bad=e.severity==='error'||e.severity==='high'||e.severity==='critical';
+    const warn=e.severity==='warn'||e.severity==='medium';
+    const ok=/bestanden|approved|keine Befunde|ok\b/i.test(e.result||'') && !bad && !warn;
+    const cls=bad?'bad':warn?'warn':ok?'ok':'';
+    return `<div class="chatmsg ${cls}"><div class="who">${esc(AGENT_LABEL[e.agent]||e.agent)}</div><div class="bubble">${e.file&&e.file!==e.agent?`<div class="file">${esc(e.file)}</div>`:''}${esc(e.result)}</div></div>`;
+  }).join('')}</div>`;
+}
+function setProtoView(v){
+  const entries=((current&&current.lastLog&&current.lastLog.entries)||[]).filter(e=>e.agent!=='Test');
+  const body=$('protoBody'); if(!body) return;
+  body.innerHTML = !entries.length ? '<div class="muted small">Not checked yet — “▶ Check” creates the protocol.</div>'
+    : (v==='chat' ? renderProtocolChat(entries) : renderProtocol(entries));
+  const g=$('pvG'), ch=$('pvC'); if(g) g.classList.toggle('active',v!=='chat'); if(ch) ch.classList.toggle('active',v==='chat');
+}
+// Protokoll nach Agent gruppieren, in sinnvoller Reihenfolge; Gruppen mit Befunden offen.
+function renderProtocol(entries){
+  const order=['Erkennung','Extraktion','Lint','AST','Test','Security','Code-Review','Review-Gate','Web-Dev','Auto-Review','retire.js','Snapshot'];
+  const groups={};
+  for(const e of entries){ (groups[e.agent]=groups[e.agent]||[]).push(e); }
+  const names=Object.keys(groups).sort((a,b)=>{const ia=order.indexOf(a),ib=order.indexOf(b);return (ia<0?99:ia)-(ib<0?99:ib);});
+  const desc={Erkennung:'inventory/format',Extraktion:'asset extraction',Lint:'static-first lint',AST:'entry points',Test:'executed tests',Security:'OWASP review','Code-Review':'quality review','Review-Gate':'release decision','Web-Dev':'autonomous fixes','Auto-Review':'auto-review result','retire.js':'CVE libraries',Snapshot:'golden master'};
+  return names.map(n=>{
+    const list=groups[n];
+    const bad=list.filter(e=>e.severity==='error'||e.severity==='high'||e.severity==='critical').length;
+    const warn=list.filter(e=>e.severity==='warn'||e.severity==='medium').length;
+    const open = bad||warn ? ' open':'';
+    // Test-Gruppe: bestanden/fehlgeschlagen klar zählen
+    const pill = n==='Test'
+      ? `<span class="pill">${list.length-bad} ✓</span>${bad?`<span class="pill bad">${bad} ✗</span>`:''}`
+      : bad?`<span class="pill bad">${bad}</span>`:warn?`<span class="pill warn">${warn}</span>`:`<span class="pill">${list.length}</span>`;
+    return `<details class="protogrp"${open}><summary><span class="ag">[${esc(n)}]</span> <span class="muted small">${esc(desc[n]||'')}</span>${pill}</summary>`
+      +`<div class="logbox">${list.map(e=>`<div class="logline ${esc(e.severity||'')}">${esc(e.file)} → ${esc(e.result)}</div>`).join('')}</div></details>`;
+  }).join('');
+}
+// Eine Bibliotheks-Zeile inkl. Web-Aktualität (neueste Version, Alter, outdated)
+function libLine(l){
+  const unknownVer = !l.version || l.version==='unbekannt' || l.status==='unbekannt';
+  const cls = (l.status==='verwundbar')?'error':(l.status==='nicht gepflegt'||l.status==='veraltet'||l.outdated||unknownVer)?'warn':'';
+  // Verdict konsistent zum Status: veraltet > unbekannte installierte Version > aktuell (nie „current" bei unbekannter Version!)
+  const verdict = (l.outdated||l.status==='veraltet') ? '⬆ outdated' : unknownVer ? '⚠ installed version unknown' : '✓ current';
+  const web = l.latest
+    ? ` · latest ${esc(l.latest)} ${verdict}${l.ageDays!=null?` (released ${l.ageDays} days ago)`:''}`
+    : (l.webStatus==='unbekannt' ? ' · web: unknown' : '');
+  const inst = l.installedAgeDays!=null ? ` · installed version ${l.installedAgeDays} days old` : '';
+  const link = l.source||l.homepage||l.npm;
+  const src = link ? ` · <a href="${esc(link)}" target="_blank" rel="noopener" style="color:var(--accent)">Source ↗</a>` : '';
+  const manual = l.detectedBy==='manuell' ? ' <span class="badge">manual</span>' : '';
+  // T-164: unmaintained → pflichtenfreier gleichwertiger Nachfolger = NUR Adapter; sonst Interface-Neubau (MIT).
+  const rep = l.replacement
+    ? (l.replacement.to
+        ? `<div class="small" style="margin:2px 0 0 12px;color:var(--accent)">↳ adapter to <b>${esc(l.replacement.to)}</b> (${esc(l.replacement.license)}, no obligations) — only an adapter is written, plugin code stays unchanged (needs approval)</div>`
+        : `<div class="small" style="margin:2px 0 0 12px;color:var(--accent)">↳ no obligation-free equivalent successor → rewritten from the interfaces (MIT) on maintenance (needs approval)</div>`)
+    : '';
+  // T-123: bei veralteten Libs das dedizierte Security-Verdikt zeigen (RISIKO vs. nur Code).
+  const sec = (l.status==='veraltet' && l.security && l.security.scanned) ? secMark(l) : '';
+  // Karten-Akzent nach Status: verwundbar=rot, veraltet/unmaintained/unbekannt=gelb, aktuell=grün.
+  const accent = (l.status==='verwundbar')?'#f85149':(l.status==='nicht gepflegt'||l.status==='veraltet'||l.outdated||unknownVer)?'#d29922':'#3fb950';
+  const vColor = (l.outdated||l.status==='veraltet') ? '#d29922' : unknownVer ? '#6e7681' : '#3fb950';
+  const link2 = l.source||l.homepage||l.npm;
+  return `<div class="libcard ${cls}" style="border-left:3px solid ${accent}">
+    <div class="libcard-head">
+      <b>${esc(l.name)}</b><span class="vpill">${esc(l.version)}</span>
+      <span class="vpill" style="color:${vColor};border-color:${vColor}66">${verdict}</span>
+      ${licenseBadge(l).replace(/^ · /,'')}${licenseChangeBadge(l)}${manual}${sec}
+    </div>
+    <div class="libcard-meta small muted">${l.latest?`latest <b>${esc(l.latest)}</b>${l.ageDays!=null?` · released ${l.ageDays} d ago`:''}`:(l.webStatus==='unbekannt'?'web: unknown':'')}${l.installedAgeDays!=null?` · installed ${l.installedAgeDays} d old`:''}${l.vuln?` · <span style="color:#f85149">${esc(l.vuln)}</span>`:''}${l.reason?` · ${esc(l.reason)}`:''}${link2?` · <a href="${esc(link2)}" target="_blank" rel="noopener" style="color:var(--accent)">Source ↗</a>`:''}</div>
+    ${rep}
+  </div>`;
+}
+// Lizenz-Badge: pflichtenarm (grün) / Attribution (gelb) / copyleft|unklar (rot) — T-95
+function licenseBadge(l){
+  const c = l.licenseInfo; if(!c) return '';
+  const col = c.level==='clean' ? '#3fb950' : c.level==='attribution' ? '#d29922' : '#f85149';
+  const icon = c.level==='clean' ? '⚖✓' : c.level==='attribution' ? '⚖' : '⚖⚠';
+  return ` · <span class="badge" title="${esc(c.reason)}" style="color:${col};border-color:${col}66">${icon} ${esc(c.id)}</span>${licenseChangeBadge(l)}`;
+}
+// T-156: Lizenzwechsel installiert→latest — riskant (Klasse schlechter) rot, sonst gelb. Rechtlich wichtig.
+function licenseChangeBadge(l){
+  const ch = l.licenseChange; if(!ch) return '';
+  const col = ch.riskier ? '#f85149' : '#d29922';
+  return ` <span class="badge" title="License change ${esc(ch.from)} (${esc(ch.fromClass)}) → ${esc(ch.to)} (${esc(ch.toClass)})${ch.riskier?' — riskier, legally review!':''}" style="color:${col};border-color:${col}66">⚖⇄ ${esc(ch.from)}→${esc(ch.to)}${ch.riskier?' ⛔':''}</span>`;
+}
+// T-155: Aktionen als DATEN (eine Quelle) — im Drawer als Icon-Liste UND im Zeilen-Popover.
+// on = onclick-JS auf `current`; für das Zeilen-Popover wird current vorher auf die Zeilen-Komponente gesetzt.
+const PLUGIN_ACTIONS = [
+  { group:'Maintain', items:[
+    { icon:'🧰', label:'Full maintenance now', title:'Full cycle: check → web lib check → apply SAFE lib updates → auto-fix → re-test. Writes files. Pushes only if allow-push is ON.', on:'runMaintain()', primary:true },
+    { icon:'🐞', label:'Report issue…', title:'Report a bug the tests missed (text + screenshots). AI analyses it, adds a permanent regression test and starts the rework.', on:'openFeedback()' },
+  ]},
+  { group:'This plugin', items:[
+    { icon:'🧪', label:'Open mock', title:'Open the rendered mock in a new tab', on:"window.open(current.mockUrl,'_blank','noopener')", when:c=>c.mockUrl },
+    { icon:'🚀', label:'APEX-Testseite öffnen', title:'Öffnet die deployte APEX-Testseite im Browser (read-only). Erscheint, sobald die Seite via Pflegelauf eingespielt wurde.', on:'openApexTestPage()', when:c=>!!apexTestUrl(c) },
+    { icon:'⤓', label:'Requirements', title:'Export the acceptance requirements (works-as-before) as a Gherkin .feature', on:'exportRequirements(current)', when:c=>c.mockSelfCheck },
+    { icon:'✏', label:'Edit', title:'Edit the plugin name / repo path', on:'openEdit(current)' },
+  ]},
+  { group:'Read-only / local', items:[
+    { icon:'🔗', label:'Assign repo', title:'Connect/clone the Git repo so check, tests and library detection work', on:'openAssign()' },
+    { icon:'🌐', label:'Open Git', title:'Open the repo URL in the browser. No changes.', on:'openGit()' },
+    { icon:'📂', label:'Open locally', title:'Open the local working copy in the file manager. No changes.', on:'openDir()' },
+    { icon:'🔍', label:'Manual review', title:'Security + quality gate. Read-only.', on:'runReview()' },
+    { icon:'🔄', label:'Rebuild requirements', title:'Re-derive the acceptance requirements from the mock self-test. Writes only .maintenance/acceptance.json.', on:'rebuildRequirements()' },
+    { icon:'🧩', label:'Setup-JSON', title:'Build the setup recipe (JSON) from the analysis and download it. Read-only.', on:'apexSetup()' },
+    { icon:'🧬', label:'Re-develop', title:'Dead library without successor → slice-wise re-development against the acceptance contract', on:'redevelopDeadLib(current)', when:c=>c.libActions&&c.libActions.redevelop },
+  ]},
+  { group:'Writes files / Git', items:[
+    { icon:'⬆', label:'Update libs to latest', title:'Update libraries. Safe updates applied directly; breaking ones offer a force option or verified migration.', on:'runUpdate()' },
+    { icon:'📤', label:'Upload (branch + PR)', title:'Commit current changes on a NEW branch + push + show PR link (asks for confirmation).', on:'runUpload()' },
+  ]},
+  { group:'Danger zone', danger:true, items:[
+    { icon:'—', label:'Remove from list', title:"Remove from this tool's list only. APEX app and files on disk are kept.", on:'delComponent(current)' },
+    { icon:'🗑', label:'Delete everywhere…', title:'Delete the plugin everywhere: tool registry, APEX test page + plug-in, and data on disk. Asks for the exact name.', on:'purgeComponent()' },
+  ]},
+];
+// Icon-LEISTE (immer sichtbar, im Drawer): nur Icons + Beschreibung als Tooltip; NUR die Primäraktion
+// (Full maintenance) trägt ihr Label. Danger-Aktionen rot. Kompakt, umbrechend.
+function renderActionBar(c){
+  return `<div class="actbar">`+PLUGIN_ACTIONS.flatMap(g=>g.items.filter(a=>!a.when||a.when(c)).map(a=>
+    `<button class="actchip${a.primary?' primary':' icononly'}${g.danger?' danger':''}" title="${esc(a.label+' — '+a.title)}" aria-label="${esc(a.label)}" onclick="closeRowMenu();${a.on}">${a.icon}${a.primary?` <span>${esc(a.label)}</span>`:''}</button>`
+  )).join('')+`</div>`;
+}
+function renderActionList(c){
+  return PLUGIN_ACTIONS.map(g=>{
+    const items=g.items.filter(a=>!a.when||a.when(c));
+    if(!items.length) return '';
+    return `<div class="actgrp${g.danger?' danger':''}">${g.group}</div>`+
+      items.map(a=>`<button class="actrow${g.danger?' danger':''}" title="${esc(a.title)}" onclick="closeRowMenu();${a.on}">${a.icon} <span>${esc(a.label)}</span></button>`).join('');
+  }).join('');
+}
+// Zeilen-Popover: schneller Aktions-Zugriff ohne den ganzen Drawer. Kontext = die Zeilen-Komponente.
+let _rowMenuEl=null;
+function _rowMenuKey(e){ if(e.key==='Escape') closeRowMenu(); }
+function closeRowMenu(){ if(_rowMenuEl){ _rowMenuEl.remove(); _rowMenuEl=null; document.removeEventListener('keydown',_rowMenuKey); document.removeEventListener('click',closeRowMenu,true); } }
+function openRowMenu(ev, id){
+  ev.stopPropagation(); ev.preventDefault();
+  closeRowMenu();
+  const c = (ALL||[]).find(x=>x.id===id); if(!c) return;
+  current = c; // Handler wirken auf DIESE Zeile
+  const m=document.createElement('div'); m.className='actmenu'; m.innerHTML=renderActionList(c);
+  m.onclick=e=>e.stopPropagation();
+  document.body.appendChild(m);
+  const r=ev.currentTarget.getBoundingClientRect();
+  m.style.top=Math.max(8, Math.min(r.bottom+4, window.innerHeight-10-m.offsetHeight))+'px';
+  m.style.left=Math.max(8, Math.min(r.right-m.offsetWidth, window.innerWidth-10-m.offsetWidth))+'px';
+  _rowMenuEl=m;
+  setTimeout(()=>{ document.addEventListener('click',closeRowMenu,true); document.addEventListener('keydown',_rowMenuKey); },0);
+}
+// Jede Lib in genau EINE Kategorie zählen (konsistent zum Backend-libStatus). Unbekannte Version ist NICHT „current".
+function libCounts(libs){
+  const cat = l => l.status==='verwundbar' ? 'vuln'
+    : l.status==='nicht gepflegt' ? 'unmaint'
+    : (l.outdated||l.status==='veraltet') ? 'outdated'
+    : (!l.version||l.version==='unbekannt'||l.status==='unbekannt') ? 'unknown'
+    : 'current';
+  const n={vuln:0,unmaint:0,outdated:0,unknown:0,current:0};
+  for(const l of libs||[]) n[cat(l)]++;
+  return n;
+}
+// T-154: gestapelter Health-Balken (wiederverwendbar: Drawer-SBOM UND Übersichts-Zeile). status koppelt
+// den Maintenance-Stand als farbige Endkappe an den Balken. Ohne Libs → leer.
+function sbomBar(libs, opts){
+  opts = opts||{}; libs = libs||[];
+  if(!libs.length) return '';
+  const n = libCounts(libs);
+  const seg=(c,col,lbl)=> c?`<div title="${lbl}: ${c}" style="flex:${c};background:${col}"></div>`:'';
+  const cap = opts.status ? `<div title="maintenance: ${esc(opts.status)}" style="flex:0 0 5px;background:${statusColor(opts.status)}"></div>` : '';
+  const h = opts.h || 8;
+  return `<div title="${n.current} current · ${n.outdated} outdated · ${n.unmaint} unmaintained · ${n.unknown} unknown · ${n.vuln} vulnerable" style="display:flex;height:${h}px;gap:2px;border-radius:6px;overflow:hidden;background:var(--line);margin:${opts.compact?'3px 0 0':'6px 0'}">${seg(n.current,'#3fb950','current')}${seg(n.outdated,'#d29922','outdated')}${seg(n.unmaint,'#ff8a3d','unmaintained')}${seg(n.unknown,'#6e7681','unknown')}${seg(n.vuln,'#f85149','vulnerable')}${cap}</div>`;
+}
+// Farbe für den Maintenance-Stand (Endkappe/Marker).
+function statusColor(status){
+  const s=String(status||'').toLowerCase();
+  if(/verwundbar|review-blockiert/.test(s)) return '#f85149';
+  if(/handlungsbedarf|zu klären|action/.test(s)) return '#d29922';
+  if(/ok|aktuell|up to date/.test(s)) return '#3fb950';
+  return '#6e7681';
+}
+// SBOM-Visualisierung: Zähler + gestapelter Balken nach Status (nutzt sbomBar)
+function sbomViz(libs){
+  libs = libs||[];
+  if(!libs.length) return '';
+  const n = libCounts(libs);
+  const bar = sbomBar(libs);
+  const chip=(c,col,lbl)=> c?`<span class="badge" style="color:${col};border-color:${col}66">${lbl}: ${c}</span>`:'';
+  const summary = (n.current===libs.length)
+    ? `<span class="badge" style="color:#3fb950;border-color:#3fb95066">✓ all ${libs.length} current</span>`
+    : `${chip(n.vuln,'#f85149','⛔ vulnerable')}${chip(n.unmaint,'#ff8a3d','⚠ unmaintained')}${chip(n.outdated,'#d29922','outdated')}${chip(n.unknown,'#6e7681','? unknown')}${chip(n.current,'#3fb950','current')}`;
+  return `<div class="small muted">${libs.length} component(s) in SBOM</div>${bar}<div class="inline" style="gap:6px;margin-bottom:6px">${summary}</div>`;
+}
+async function downloadSbom(){
+  if(!current) return;
+  try{
+    const r=await fetch(`/api/components/${current.id}/sbom`); const sbom=await r.json();
+    saveBlob(`${current.name}.cdx.json`, JSON.stringify(sbom,null,2), 'application/json');
+  }catch(e){ toast('Error: '+e.message); }
+}
+async function runUpload(){
+  if(!current) return;
+  if(!confirm('Commit changes as a NEW branch and (if remote/token available) push?\n\nNothing on the current branch is changed; the PR/review link is shown afterwards.')) return;
+  const id=current.id; setBusy(id,true); $('reviewOut').innerHTML='<div class="muted small">Upload running (branch + commit + push)…</div>';
+  try{
+    const r=await api('POST',`/api/components/${id}/upload`,{});
+    if(!r.ok){ $('reviewOut').innerHTML=`<div class="finding medium">${esc(r.reason||r.error||'not run')}</div>`; return; }
+    await openDetail(id); load();
+    const link = r.prUrl?`<a href="${esc(r.prUrl)}" target="_blank" rel="noopener" style="color:var(--accent)">Open PR/review ↗</a>`:'(no PR link)';
+    $('reviewOut').innerHTML=`<div class="note"><b>📤 ${r.pushed?'Pushed':'Committed locally'}</b> on branch <code>${esc(r.branch)}</code> — ${link}${r.pushError?` <span class="muted small">(push: ${esc(r.pushError)})</span>`:''}</div>`;
+  }catch(e){ $('reviewOut').innerHTML=`<div class="finding">${esc(e.message)}</div>`; }
+  finally{ setBusy(id,false); }
+}
+async function runPwTests(){
+  if(!current) return;
+  const url=$('uiUrl').value.trim();
+  $('uiTestOut').innerHTML='<div class="muted small">Playwright UI tests running… (may take a moment)</div>';
+  try{
+    const r=await api('POST',`/api/components/${current.id}/ui-tests`,{url});
+    if(!r.ran){ $('uiTestOut').innerHTML=`<div class="finding medium">${esc(r.reason||'not run')}</div>`; return; }
+    const head=`<div class="note"><b style="color:${r.ok?'#3fb950':'#f85149'}">${r.ok?'✅ UI tests green':'⛔ UI tests red'}</b> — ${r.passed||0} ✓ / ${r.failed||0} ✗ <span class="muted small">(${esc(r.url||'')})</span></div>`;
+    $('uiTestOut').innerHTML=head+`<pre class="logbox" style="white-space:pre-wrap">${esc(r.output||'(no output)')}</pre>`;
+  }catch(e){ $('uiTestOut').innerHTML=`<div class="finding">${esc(e.message)}</div>`; }
+}
+async function addLib(){
+  if(!current) return;
+  const name=$('libName').value.trim(); if(!name) return toast('Name missing');
+  const version=$('libVer').value.trim(); const source=$('libSrc').value.trim()||null;
+  try{ await api('POST',`/api/components/${current.id}/libraries`,{name,version,source}); await openDetail(current.id); toast('Library added'); }
+  catch(e){ toast('Error: '+e.message); }
+}
+async function runMaintain(consentReplace){
+  if(!current) return;
+  const id=current.id; setBusy(id,true); $('reviewOut').innerHTML='<div class="muted small">Full maintenance running (check → review → fix → updates → re-test)…</div>';
+  try{
+    // T-163: consentReplace=true = explizite Extra-Zustimmung, unmaintained Libs in diesem Lauf zu ersetzen/nachzubauen.
+    const r = await api('POST',`/api/components/${id}/maintain`,{consentReplace:!!consentReplace});
+    if(r.error){ $('reviewOut').innerHTML=`<div class="finding">${esc(r.error)}</div>`; return; }
+    if(r.skipped){ $('reviewOut').innerHTML=`<div class="finding medium">Skipped: ${esc(r.reason||'')}</div>`; return; }
+    await openDetail(id); load();
+    let mig='';
+    if(r.migration){
+      const m=r.migration;
+      if(m.consentRequired){
+        const props=(m.proposals||[]).map(p=>`<li><b>${esc(p.lib)}</b> → ${p.strategy==='replace'?('adapter to <code>'+esc(p.to||'')+'</code> (obligation-free equivalent — plugin code untouched)'):'rewrite from the interfaces (MIT self-build)'} <span class="muted small">(same external interface, verified as before)</span></li>`).join('');
+        mig=`<div class="finding medium"><b>⚠ Approval needed — replace/rebuild unmaintained library</b><ul style="margin:6px 0 8px 18px">${props}</ul><button class="primary" onclick="runMaintain(true)">✅ Approve &amp; replace</button> <span class="muted small">runs the interface-preserving replacement; adopted only if it still works as before, otherwise rolled back</span></div>`;
+      }
+      else if(m.adopted) mig=`<div class="note"><b style="color:#3fb950">🚀 Migrated to latest — verified as before</b> · ${esc(m.migration||'')}${m.upload&&m.upload.prUrl?` — <a href="${esc(m.upload.prUrl)}" target="_blank" rel="noopener" style="color:var(--accent)">PR ↗</a>`:''}</div>`;
+      else if(m.skipped) mig=`<div class="finding medium">↪ Migration skipped — ${esc(m.reason||'')}</div>`;
+      else mig=`<div class="finding"><b>⛔ Migration not adopted (rolled back)</b> — ${esc(m.reason||(m.gate&&m.gate.summary)||'not green as before')}</div>`+((m.regressions||[]).map(x=>`<div class="finding medium">↩ ${esc(x.scenario)}: ${esc(x.was||'passed')} → ${esc(x.now||'failed')}</div>`).join(''));
+    }
+    let apx='';
+    if(r.apexLive){ const a=r.apexLive; apx=`<div class="${a.ok?'note':'finding'}"><b>${a.ok?'✅':'⛔'} Verified in APEX (page ${esc(a.pageId)}):</b> ${a.rendered?'rendered':'not confirmed'}${a.url?` — <a href="${esc(a.url)}" target="_blank" rel="noopener" style="color:var(--accent)">Open page ↗</a>`:''}</div>`; }
+    $('reviewOut').innerHTML = `<div class="note"><b>🧰 Maintenance done:</b> ${esc(r.before)} → ${esc(r.after)}${r.rebuilt?' · 🚀 rebuilt':''}</div>` + mig + apx
+      + (r.steps||[]).map(s=>`<div class="finding low"><b>${esc(s.step)}</b> ${esc(s.step==='apex-live'?((s.ok?'✓ rendered':'not confirmed')+(s.url?' — '+s.url:'')):(s.summary||s.status||s.reason||(s.error?('Error: '+s.error):JSON.stringify(s))))}</div>`).join('');
+    toast(r.apexLive?(r.apexLive.ok?`✅ Maintained + rendered in APEX (page ${r.apexLive.pageId})`:'Maintained, APEX render not confirmed'):(r.migration&&r.migration.adopted?'Migrated to latest (verified)':'Full maintenance done'));
+  }catch(e){ $('reviewOut').innerHTML=`<div class="finding">${esc(e.message)}</div>`; toast('Error: '+e.message); }
+  finally{ setBusy(id,false); }
+}
+async function checkLibs(){
+  if(!current) return; const id=current.id;
+  toast('Checking libraries online…'); setBusy(id,true);
+  try{ await api('POST',`/api/components/${id}/libraries/check`,{}); await openDetail(id); toast('Libraries checked'); }
+  catch(e){ toast('Error: '+e.message); }
+  finally{ setBusy(id,false); }
+}
+async function runAutoFix(){
+  if(!current) return;
+  const id=current.id; setBusy(id,true); $('reviewOut').innerHTML='<div class="muted small">Automatic fixes running…</div>';
+  try{
+    const r = await api('POST',`/api/components/${id}/autofix`,{});
+    if(r.error){ $('reviewOut').innerHTML=`<div class="finding">${esc(r.error)}</div>`; return; }
+    await openDetail(id); load();
+    $('reviewOut').innerHTML = `<div class="note"><b>🛠 Auto-Fix:</b> ${r.quickFixes} quick fix(es)${r.libUpdate?', lib update triggered':''}${r.aiResult?(r.aiResult.pass?', AI green':', AI not green'):''}</div>`
+      + (r.protocol||[]).map(p=>`<div class="finding ${p.severity==='error'?'':'low'}"><b>${esc(p.agent||'')}</b> ${esc(p.file||'')} — ${esc(p.result||'')}</div>`).join('');
+    toast('Auto-fix done');
+  }catch(e){ $('reviewOut').innerHTML=`<div class="finding">${esc(e.message)}</div>`; toast('Error: '+e.message); }
+  finally{ setBusy(id,false); }
+}
+function renderReviews(){
+  $('reviews').innerHTML = (current.reviews||[]).map(r=>`<div class="note"><div class="meta">${fmtDate(r.at)} · ${esc(r.kind)} · ${r.pass?'✅ passed':'⛔ '+esc(r.stage)}</div>${r.findingsCount||0} Finding(s)</div>`).join('') || '<div class="muted small">No reviews yet.</div>';
+}
+function closeDrawer(){ $('drawer').classList.remove('open'); $('drawerBg').classList.remove('open'); current=null; }
+
+async function addNote(){
+  const text = $('noteText').value.trim(); if(!text) return;
+  await api('POST',`/api/components/${current.id}/notes`,{kind:'hinweis',text});
+  current = await api('GET','/api/components/'+current.id); $('noteText').value=''; renderNotes(); toast('Note saved');
+}
+async function openDir(){
+  try{ const r = await api('POST',`/api/components/${current.id}/open`,{}); toast(r.ok?('Opened: '+r.command):('Error: '+r.error)); }
+  catch(e){ toast('Error: '+e.message); }
+}
+function openGit(){
+  if(!current) return;
+  const src = (current.source||'').trim();
+  if(/^https?:\/\//i.test(src)){ window.open(src,'_blank','noopener'); return; }
+  const m = src.match(/^git@([^:]+):(.+?)(?:\.git)?$/i); // git@host:org/repo(.git) → https
+  if(m){ window.open(`https://${m[1]}/${m[2]}`,'_blank','noopener'); return; }
+  toast(src ? 'Source is a local path — use “Open locally”.' : 'No repo assigned.');
+}
+async function runReview(){
+  if(!current) return;
+  const id=current.id; setBusy(id,true);
+  $('reviewOut').innerHTML='<div class="muted small">Review running…</div>';
+  try{
+    const r = await api('POST',`/api/components/${current.id}/review`,{save:true});
+    if(!r.gate){ $('reviewOut').innerHTML=`<div class="note">${esc(r.message||'No result')}</div>`; return; }
+    const g = r.gate; const f = [...((g.security&&g.security.findings)||[]),...((g.quality&&g.quality.findings)||[])];
+    $('reviewOut').innerHTML = `<div class="note"><b>${g.pass?'✅ Review passed':'⛔ blocked ('+esc(g.stage)+')'}</b></div>`
+      + (f.length ? f.map(x=>`<div class="finding ${esc(x.severity)}"><b>${esc(x.severity)}</b> ${esc(x.rule||'')} — ${esc(x.message||'')} ${x.asset?'<span class="muted">('+esc(x.asset)+')</span>':''}</div>`).join('') : '<div class="muted small">No findings.</div>');
+    current = await api('GET','/api/components/'+current.id); renderReviews();
+  }catch(e){ $('reviewOut').innerHTML='<div class="finding">Error: '+esc(e.message)+'</div>'; }
+  finally{ setBusy(id,false); }
+}
+
+function downloadLog(){
+  if(!current||!current.lastLog) return;
+  const t = `Plugin Maintenance — Check protocol\nComponent: ${current.name}\nTime: ${current.lastLog.at}\n\n`
+    + (current.lastLog.entries||[]).map(e=>`[${e.agent}] ${e.file} → ${e.result}${e.severity?(' ('+e.severity+')'):''}`).join('\n') + '\n';
+  saveBlob(`${current.name}-check-protocol.log`, t, 'text/plain;charset=utf-8');
+}
+
+async function runAutoReview(){
+  if(!current) return;
+  const id=current.id; setBusy(id,true); $('reviewOut').innerHTML='<div class="muted small">Autonomous review & fix running…</div>';
+  try{
+    const r = await api('POST',`/api/components/${id}/autoreview`,{});
+    await openDetail(id); load();
+    $('reviewOut').innerHTML = `<div class="note"><b>${r.pass?'✅ Autonomous green':'⛔ not green'} after ${r.attempts??0} fix attempt(s)</b></div>`
+      + (r.protocol||[]).map(p=>`<div class="finding ${p.result&&/Fehler|nicht/.test(p.result)?'medium':'low'}"><b>${esc(p.agent||'')}</b> ${esc(p.file||'')} — ${esc(p.result||'')}</div>`).join('');
+    toast(r.pass?'Autonomously fixed':'No green gate');
+  }catch(e){ $('reviewOut').innerHTML=`<div class="finding">${esc(e.message)}</div>`; toast('Error: '+e.message); }
+  finally{ setBusy(id,false); }
+}
+function downloadTestPlan(){
+  if(!current||!current.testPlan) return;
+  saveBlob(`${current.name}.feature`, current.testPlan, 'text/plain;charset=utf-8');
+}
+function downloadCoded(i){
+  const t=(current&&current.codedTests||[])[i]; if(!t) return;
+  saveBlob(t.name, t.content, 'text/javascript;charset=utf-8');
+}
+// Charakterisierungs-Baseline (F-28): Ist-Verhalten als „works as before"-Spec
+function renderBaseline(c){
+  const b=c.baseline;
+  if(!b) return '<div class="muted small">No baseline yet — set a UI test URL, run the UI tests against the working build, then capture it. Migrations/rebuilds are afterwards verified “green as before”.</div>';
+  const ok=(b.scenarios||[]).filter(s=>s.status==='passed').length, tot=(b.scenarios||[]).length;
+  const modeBadge = b.mode==='ui' ? '🎭 UI' : '📄 static (degraded)';
+  const noGreen = ok===0;
+  return `<div class="finding ${noGreen?'':b.mode==='ui'?'low':'medium'}" style="margin:4px 0"><b>Baseline</b> · ${fmtDate(b.at)} · ${modeBadge} · ${ok}/${tot} green${noGreen?' — ⚠ no green scenarios: not a usable baseline (make the UI tests pass on the working build first — migration cannot be verified against a red baseline)':(b.note?` · <span class="muted">${esc(b.note)}</span>`:'')}</div>`;
+}
+async function installPlaywright(){
+  if(!confirm('Install Playwright now? This downloads @playwright/test + a Chromium browser (~150 MB) and may take a few minutes.')) return;
+  $('uiTestOut').innerHTML='<div class="muted small">Installing Playwright (npm + Chromium)… this can take a few minutes.</div>';
+  try{
+    const r=await api('POST','/api/playwright/install',{});
+    await checkBackend();
+    if(current) await openDetail(current.id);
+    $('uiTestOut').innerHTML=`<div class="${r.ok?'note':'finding'}"><b>${r.ok?'✅ Playwright installed':'⛔ Install failed'}</b><pre class="small" style="white-space:pre-wrap;max-height:200px;overflow:auto">${esc((r.log||r.error||'').slice(-2000))}</pre></div>`;
+    toast(r.ok?'Playwright installed':'Install failed');
+  }catch(e){ $('uiTestOut').innerHTML=`<div class="finding">${esc(e.message)}</div>`; toast('Error: '+e.message); }
+}
+async function runRedev(){
+  if(!current) return; const id=current.id; setBusy(id,true);
+  if(!confirm('AI migrates/rebuilds this plugin onto the latest stable library and verifies it against the captured baseline.\n\nChanges are only kept if the UI tests are green as before (otherwise rolled back). Continue?')){ setBusy(id,false); return; }
+  $('baselineOut').innerHTML='<div class="muted small">Migrating + verifying against baseline…</div>';
+  try{
+    const r=await api('POST',`/api/components/${id}/redevelop`,{});
+    if(r.error){ $('baselineOut').innerHTML=`<div class="finding">${esc(r.error)}</div>`; return; }
+    await openDetail(id); load();
+    if(r.adopted){
+      const link=r.upload&&r.upload.prUrl?` — <a href="${esc(r.upload.prUrl)}" target="_blank" rel="noopener" style="color:var(--accent)">Open PR/review ↗</a>`:'';
+      $('baselineOut').innerHTML=`<div class="note"><b>✅ Adopted — green as before</b> · ${esc(r.migration||'')}${link}</div>`;
+      toast('Migrated (verified as before)');
+    } else {
+      const regs=(r.regressions||[]).map(x=>`<div class="finding medium">↩ regression: ${esc(x.scenario)} (${esc(x.was||'passed')} → ${esc(x.now||'failed')})</div>`).join('');
+      $('baselineOut').innerHTML=`<div class="finding"><b>⛔ Not adopted (rolled back)</b> — ${esc(r.reason||(r.gate&&r.gate.summary)||'not green as before')}</div>`+regs;
+      toast('Not adopted — kept the working version');
+    }
+  }catch(e){ $('baselineOut').innerHTML=`<div class="finding">${esc(e.message)}</div>`; toast('Error: '+e.message); }
+  finally{ setBusy(id,false); }
+}
+async function captureBaselineNow(){
+  if(!current) return; const id=current.id; setBusy(id,true);
+  const url=$('uiUrl')?$('uiUrl').value.trim():'';
+  $('baselineOut').innerHTML='<div class="muted small">Capturing baseline (running UI tests against the working build)…</div>';
+  try{
+    const b=await api('POST',`/api/components/${id}/baseline`,{url});
+    await openDetail(id);
+    $('baselineOut').innerHTML=`<div class="note"><b>📌 Baseline captured</b> — ${esc(b.mode)} mode, ${(b.scenarios||[]).length} scenario(s)${b.note?` <span class="muted small">(${esc(b.note)})</span>`:''}</div>`;
+    toast('Baseline captured');
+  }catch(e){ $('baselineOut').innerHTML=`<div class="finding">${esc(e.message)}</div>`; toast('Error: '+e.message); }
+  finally{ setBusy(id,false); }
+}
+async function regenTestPlan(){
+  if(!current) return; const id=current.id; toast('Regenerating test plan…');
+  try{ await api('POST',`/api/components/${id}/testplan`,{}); await openDetail(id); toast('Test plan regenerated'); }
+  catch(e){ toast('Error: '+e.message); }
+}
+async function loadLogArchive(){
+  if(!current) return;
+  try{
+    const list = await api('GET',`/api/components/${current.id}/logs`);
+    $('logArchive').innerHTML = (list&&list.length)
+      ? list.map(l=>`<div class="runrow"><div class="note inline" style="justify-content:space-between"><span class="meta">${fmtDate(l.at)}</span><button class="ghost small" data-lbl="open" onclick="toggleRun(this,'${esc(l.name)}')">open</button></div></div>`).join('')
+      : '<div class="muted small">No protocols stored yet.</div>';
+  }catch{ $('logArchive').innerHTML='<div class="muted small">Archive unavailable.</div>'; }
+}
+// Ergebnis eines Laufs DIREKT unter dem geklickten Eintrag ein-/ausklappen (gute UX statt fixem Container).
+async function toggleRun(btn, name){
+  const row = btn.closest('.runrow'); if(!row) return;
+  const open = row.querySelector('.logopen');
+  if(open){ open.remove(); btn.textContent = btn.dataset.lbl || 'Open run'; return; }
+  btn.textContent = 'loading…';
+  try{
+    const r=await fetch(`/api/components/${current.id}/logs/${encodeURIComponent(name)}`); const t=await r.text();
+    row.insertAdjacentHTML('beforeend', `<pre class="logbox logopen" style="white-space:pre-wrap;margin:6px 0 2px">${esc(t)||'(empty)'}</pre>`);
+    btn.textContent = 'close';
+  }catch(e){ toast('Error: '+e.message); btn.textContent = btn.dataset.lbl || 'Open run'; }
+}
+
+function openEdit(c){
+  const editing = !!(c&&c.id);
+  $('mTitle').textContent = editing ? 'Edit plugin' : 'Add plugin';
+  $('mId').value=c&&c.id||''; $('mName').value=c&&c.name||''; $('mPath').value=c&&c.path||'';
+  // Datei-Import nur beim Anlegen anbieten (beim Bearbeiten sinnlos).
+  const fr=$('mFilesRow'); if(fr) fr.style.display = editing ? 'none' : 'block';
+  const mf=$('mFiles'); if(mf) mf.value='';
+  $('modalBg').classList.add('open');
+}
+function closeModal(){ $('modalBg').classList.remove('open'); }
+async function saveComponent(){
+  const id=$('mId').value;
+  // Herkunft 1 — Datei-Import (kein Git): sind beim Anlegen Dateien gewählt, diese hochladen.
+  const mf=$('mFiles');
+  const fl = (!id && mf && mf.files) ? [...mf.files] : [];
+  if(fl.length){
+    if(!fl.some(f=>/\.sql$/i.test(f.name))) return toast('A plugin export (.sql) is required');
+    toast('Importing…');
+    try{
+      const files = await Promise.all(fl.map(f => f.text().then(content => ({ name: f.name, content }))));
+      const r = await api('POST','/api/import-file', { name: $('mName').value.trim(), files });
+      closeModal(); await load();
+      toast(`Imported “${r.component.name}” (${(r.files||[]).length} file(s))`);
+      if(r.component&&r.component.id) openDetail(r.component.id);
+    }catch(e){ toast('Error: '+(e.message||e)); }
+    return;
+  }
+  // Herkunft 2 — Git-URL ODER lokaler Ordner (T-166: Ordner ohne Git wird ins Workspace KOPIERT —
+  // das Original bleibt unangetastet; danach identischer Flow wie beim Klonen: Scan + Mock).
+  const p=$('mPath').value.trim();
+  // Typ/Format/Status werden automatisch erkannt — der Nutzer wählt sie nicht.
+  const data={ name:$('mName').value.trim(), path: id?p:'' };
+  if(!data.name) return toast('Name missing');
+  let comp;
+  try{
+    comp = id ? await api('PUT','/api/components/'+id,data) : await api('POST','/api/components',data);
+  }catch(e){ return toast('Error: '+e.message); }
+  closeModal();            // F-29: Dialog sofort schließen
+  await load();            // neue Zeile sofort sichtbar machen
+  if(!id && p && comp && comp.id){
+    busyOverlay(true, `Importing ${data.name} & building mock…`);   // F-29: Spinner bis Klon/Kopie fertig ist
+    try{ await api('POST',`/api/components/${comp.id}/assign-repo`,{source:p,visibility:'öffentlich'}); toast('Source imported & mock built — “▶ Check” detects type/format'); }
+    catch(e){ toast('Import error: '+e.message); }
+    finally{ busyOverlay(false); await load(); }   // Hauptseite aktualisieren, damit du es siehst
+  } else { toast('Saved'); }
+}
+// F-29: zentrales Lauf-Overlay (Klonen/Mock-Bau) ein/aus
+function busyOverlay(on, txt){ const o=$('busyOverlay'); if(!o) return; if(txt) $('busyOverlayTxt').textContent=txt; o.hidden=!on; }
+// App-eigene, nicht-blockierende Bestätigung (ersetzt natives confirm()): gibt ein Promise<bool> zurück.
+let __confirmResolve = null;
+let __confirmExpect = null; // bei destruktiven Aktionen: exakter Text, der zum Bestätigen getippt werden muss
+function __resolveConfirm(v){ const bg=$('confirmBg'); if(bg) bg.classList.remove('open'); const inp=$('confirmInput'); if(inp){inp.style.display='none';inp.value='';} $('confirmOk').disabled=false; __confirmExpect=null; const r=__confirmResolve; __confirmResolve=null; if(r) r(v); }
+function __confirmTypeCheck(){ $('confirmOk').disabled = ($('confirmInput').value !== __confirmExpect); }
+function uiConfirm(msg, okLabel, opts){
+  opts = opts || {};
+  return new Promise((resolve)=>{
+    __confirmResolve = resolve;
+    $('confirmMsg').textContent = msg;
+    if(okLabel) $('confirmOk').textContent = okLabel;
+    const inp = $('confirmInput'); __confirmExpect = opts.requireText || null;
+    if(__confirmExpect){ inp.style.display='block'; inp.value=''; inp.placeholder = opts.placeholder || `Type “${__confirmExpect}” to confirm`; $('confirmOk').disabled = true; setTimeout(()=>inp.focus(), 60); }
+    else { inp.style.display='none'; $('confirmOk').disabled = false; }
+    $('confirmBg').classList.add('open');
+  });
+}
+async function delComponent(c){
+  if(!(await uiConfirm(`Really delete component “${c.name}”? This removes it from the list.`, 'Delete'))) return;
+  await api('DELETE','/api/components/'+c.id); await load(); toast('Deleted'); // await → Header/Kennzahlen sofort aktualisiert
+}
+// T-147: Fehler-Report (Text + Screenshots) → KI legt dauerhaften Regressionstest an → Rework.
+function openFeedback(){ if(!current) return; $('fbText').value=''; $('fbFiles').value=''; $('fbRework').checked=true; $('feedbackBg').classList.add('open'); }
+function closeFeedback(){ $('feedbackBg').classList.remove('open'); }
+async function sendFeedback(){
+  const c = current; if(!c) return;
+  const text = $('fbText').value.trim();
+  if(!text) return toast('Please describe the problem');
+  const files = [...($('fbFiles').files||[])];
+  const tooBig = files.find(f=>f.size>8_000_000);
+  if(tooBig) return toast(`Screenshot too large (max 8 MB): ${tooBig.name}`);
+  closeFeedback(); toast('Analyzing report & creating regression test…'); setBusy(c.id,true); applySpin(c.id);
+  try{
+    const images = await Promise.all(files.map(f => new Promise((res,rej)=>{ const r=new FileReader(); r.onload=()=>res({name:f.name, data:String(r.result).split(',')[1]}); r.onerror=rej; r.readAsDataURL(f); })));
+    const r = await api('POST','/api/components/'+c.id+'/feedback',{ text, images, rework: $('fbRework')?.checked!==false });
+    await load();
+    if(!r.ok) return toast('Error: '+(r.error||'?'));
+    const rep = r.reproduced===true ? 'reproduced (test red)' : r.reproduced===false ? 'not reproducible in the mock (test green)' : (r.run&&r.run.reason)||'';
+    toast(`Regression test ${r.spec} created — ${rep}${r.reworkStarted?' · rework started':''}`);
+    if(current&&current.id===c.id) openDetail(c.id); // Notiz/Tests im Drawer auffrischen
+  }catch(e){ toast('Error: '+(e.message||e)); }
+  finally{ setBusy(c.id,false); await load(); }
+}
+
+// T-143: Plugin ÜBERALL löschen (Tool + APEX-Testseite/Plug-in + Platten-Daten). Bewusst versteckt
+// (Danger zone) + Tipp-Bestätigung (exakter Name), weil destruktiv und nicht umkehrbar.
+async function purgeComponent(){
+  const c = current; if(!c) return;
+  const ok = await uiConfirm(`Delete “${c.name}” EVERYWHERE — from this tool, from the APEX test app (its test page + plug-in), and its data on disk (clone, mock, logs, tests). This cannot be undone.`, 'Delete everywhere', { requireText: c.name });
+  if(!ok) return;
+  toast('Deleting everywhere…');
+  try{
+    const r = await api('POST','/api/components/'+c.id+'/purge', { confirm: c.name });
+    closeDrawer(); await load();
+    const apex = r.apex ? (r.apex.ok ? 'APEX cleaned' : 'APEX: '+(r.apex.error||'partial')) : 'APEX skipped (no connection)';
+    toast(`Deleted “${r.component}” — ${apex}, ${(r.removed||[]).length} path(s) removed`);
+  }catch(e){ toast('Error: '+(e.message||e)); }
+}
+// F-30/T-120: Anforderungen (Akzeptanz-Vertrag) als Gherkin .feature exportieren (devhub-tauglich).
+async function exportRequirements(c){
+  toast('Exporting requirements…');
+  try{
+    const r = await fetch(`/api/components/${c.id}/acceptance?format=feature`);
+    if(!r.ok){ const d=await r.json().catch(()=>({})); toast('Error: '+(d.error||r.statusText)); return; }
+    const text = await r.text();
+    saveBlob(`${(c.name||'plugin').toLowerCase().replace(/[^a-z0-9.-]+/g,'-')}.acceptance.feature`, text, 'text/plain');
+    toast('Requirements exported (.feature)');
+  }catch(e){ toast('Error: '+e.message); }
+}
+// T-127: Requirements (Akzeptanz-Vertrag) gezielt neu anstoßen — frisch aus dem Mock-Self-Test abgeleitet.
+async function rebuildRequirements(){
+  const c = current; if(!c) return;
+  setBusy(c.id,true); toast('Rebuilding requirements…');
+  try{
+    const r = await api('POST',`/api/components/${c.id}/rebuild-requirements`,{});
+    if(!r || r.ok===false || r.error){ toast('Error: '+((r&&r.error)||'no contract built')); }
+    else { toast(`Requirements rebuilt ✓ — ${r.total} criteria, ${r.interfaceCount} interface param(s)`); await load(); if(current&&current.id===c.id){ try{ await openDetail(c.id); }catch{} } }
+  }catch(e){ toast('Error: '+e.message); }
+  finally{ setBusy(c.id,false); }
+}
+// F-30/T-118: tote Lib slice-weise gegen den Akzeptanz-Vertrag neu bauen (tech-frei, lizenzrein). Läuft länger.
+async function redevelopDeadLib(c){
+  if(!(await uiConfirm(`Re-develop “${c.name}” slice-by-slice against its acceptance contract (replacing a dead library with any clean, permissively-licensed technology)? Runs several AI passes; nothing is pushed.`, 'Re-develop'))) return;
+  setBusy(c.id,true); toast('Re-development started…');
+  try{
+    const r = await api('POST',`/api/components/${c.id}/redevelop-dead-lib`,{});
+    if(r.error){ toast('Error: '+r.error); }
+    else { const okN=(r.slices||[]).filter(s=>s.pass).length, n=(r.slices||[]).length; toast(r.ok?`Re-developed ✓ (${okN}/${n} slices green)`:`Not adopted — ${okN}/${n} slices green, rolled back`); }
+    await load();
+  }catch(e){ toast('Error: '+e.message); }
+  finally{ setBusy(c.id,false); }
+}
+
+// --- Einstellungen (Arbeitsverzeichnis, KI, Zeitplan, SMTP) ---
+let settingsCache = {};
+let healthCache = {};
+async function loadSettings(){
+  try{ settingsCache = await api('GET','/api/settings'); $('wdLabel').textContent = 'Working directory: '+(settingsCache.workDir||'—'); }catch{}
+}
+function openSettings(){
+  const s = settingsCache, ai = s.aiBackend||{kind:'stub'}, sm = s.smtp||{};
+  $('workDir').value = s.workDir||'';
+  $('autoReplaceUnmaintained').checked = !!s.autoReplaceUnmaintained; // T-163 Opt-in
+  $('aiKind').value = ai.kind||'stub'; $('aiCommand').value=ai.command||''; $('aiEndpoint').value=ai.endpoint||''; $('aiModel').value=ai.model||''; $('aiKey').value=''; $('aiKeyState').textContent=ai.hasKey?'(key stored)':''; $('aiTestOut').textContent='';
+  $('aiCliKey').value=''; $('aiCliKeyState').textContent=ai.hasKey?'(key stored — headless aktiv)':''; window._aiHasKey=!!ai.hasKey;
+  $('schedEnabled').checked=!!s.scheduleEnabled; $('schedule').value=s.schedule||''; updateSchedHint();
+  $('smtpHost').value=sm.host||''; $('smtpPort').value=sm.port||587; $('smtpSecure').checked=!!sm.secure; $('smtpUser').value=sm.user||''; $('smtpFrom').value=sm.from||''; $('smtpPass').value=''; $('reportOut').textContent='';
+  $('recipients').value=(s.recipients||[]).join(', ');
+  const ax = s.apexTarget||{};
+  $('apxBaseUrl').value=ax.baseUrl||''; $('apxWorkspace').value=ax.workspace||''; $('apxAppId').value=ax.appId||''; $('apxAlias').value=ax.alias||'';
+  $('apxUser').value=ax.loginUser||''; $('apxWsId').value=ax.workspaceId||''; $('apxOwner').value=ax.owner||''; $('apxPass').value=''; $('apxPassState').textContent=s.apexPassSet?'(stored)':''; $('apxConnOut').textContent='';
+  $('gitToken').value=''; $('gitTokenState').textContent=s.gitTokenSet?'(stored — Credential Manager wird sonst genutzt)':'(leer — Push nutzt den Git Credential Manager)'; $('gitTokenOut').textContent=''; $('gitUser').value=s.gitUser||'';
+  showSettingsTab('general'); toggleAi(); $('settingsBg').classList.add('open');
+}
+function closeSettings(){ $('settingsBg').classList.remove('open'); }
+function showSettingsTab(name, btn){
+  document.querySelectorAll('#settingsBg .spanel').forEach(el=>el.classList.toggle('active', el.dataset.tab===name));
+  const tabs=[...document.querySelectorAll('#settingsTabs button')];
+  tabs.forEach(b=>b.classList.remove('active'));
+  (btn || tabs.find(b=>b.getAttribute('onclick')?.includes("'"+name+"'")) )?.classList.add('active');
+}
+function toggleAi(){ const k=$('aiKind').value; $('aiCli').style.display=k==='cli'?'block':'none'; $('aiProvider').style.display=k==='provider'?'block':'none'; if(k==='cli') checkAiAuth(); }
+// B-62/GUI: Login-Status der claude-CLI anzeigen (nur Ablaufdaten, keine Secrets) + Login-Terminal öffnen.
+async function checkAiAuth(){
+  const el=$('aiAuthState'), btn=$('aiLoginBtn'); if(!el) return;
+  el.textContent='Checking login status…'; btn.style.display='none';
+  try{
+    const r=await api('GET','/api/ai/auth');
+    if(!r.applicable){ el.textContent='(no CLI backend selected)'; return; }
+    if(r.method==='api-key'){ el.innerHTML='✅ <b>API key active</b> — runs headless, no login needed'; el.style.color='var(--green,#3fb950)'; return; }
+    if(r.loggedIn){ el.innerHTML=`✅ <b>logged in</b>${r.validUntil?` — valid until ${new Date(r.validUntil).toLocaleString()}`:''}`; el.style.color='var(--green,#3fb950)'; }
+    else { el.innerHTML=`⛔ <b>NOT logged in</b> — ${esc(r.reason||'login required')} → AI runs (mock/fix) will fail`; el.style.color='#f85149'; btn.style.display='inline-block'; }
+  }catch(e){ el.textContent='Status not checkable: '+(e&&e.message||e); }
+}
+async function openAiLogin(){
+  try{
+    const r=await api('POST','/api/ai/login');
+    if(r.ok) toast('🔑 Terminal opened — confirm the browser login there (enter /login if needed). Then press ↻ here.');
+    else toast('Login terminal failed: '+(r.error||'?'));
+  }catch(e){ toast('Login terminal failed: '+(e&&e.message||e)); }
+}
+function updateSchedHint(){ const m={'0 3 * * 1':'weekly Mon 03:00','0 3 * * *':'daily 03:00','0 * * * *':'hourly','*/15 * * * *':'every 15 minutes'}; $('schedHint').textContent=m[$('schedule').value.trim()]?('· '+m[$('schedule').value.trim()]):''; }
+async function testAi(){
+  $('aiTestOut').textContent='testing…';
+  try{ const r=await api('POST','/api/ai/test',{}); $('aiTestOut').textContent = r.ok?('✅ ok'+(r.model?' ('+r.model+')':'')):('⛔ '+(r.error||'Error')); }
+  catch(e){ $('aiTestOut').textContent='Error: '+e.message; }
+}
+async function sendReport(){
+  $('reportOut').textContent='sending…';
+  try{ const r=await api('POST','/api/report/send',{}); $('reportOut').textContent = r.ok?('✅ sent to '+(r.sent||[]).join(', ')):('⛔ '+(r.error||'Error')); }
+  catch(e){ $('reportOut').textContent='Error: '+e.message; }
+}
+// T-148: Git-PAT verschlüsselt hinterlegen/entfernen (für Push in den Fork). Token verlässt den Browser nur beim Speichern.
+async function saveGitToken(){
+  const token=$('gitToken').value.trim(); const user=$('gitUser').value.trim();
+  if(!token) return toast('Enter a token or use Remove');
+  try{ const r=await api('POST','/api/git/token',{token, user}); if(!r.ok) return toast('Error: '+(r.error||'?'));
+    $('gitToken').value=''; $('gitTokenState').textContent='(stored — Credential Manager wird sonst genutzt)'; $('gitTokenOut').textContent='✅ token stored'; settingsCache.gitTokenSet=true; settingsCache.gitUser=user||null;
+  }catch(e){ toast('Error: '+e.message); }
+}
+async function clearGitToken(){
+  try{ const r=await api('POST','/api/git/token',{clear:true}); if(!r.ok) return toast('Error: '+(r.error||'?'));
+    $('gitToken').value=''; $('gitUser').value=''; $('gitTokenState').textContent='(leer — Push nutzt den Git Credential Manager)'; $('gitTokenOut').textContent='🗑 token removed'; settingsCache.gitTokenSet=false; settingsCache.gitUser=null;
+  }catch(e){ toast('Error: '+e.message); }
+}
+async function saveSettingsAll(){
+  try{
+    const aiNewKey = $('aiKey').value || $('aiCliKey').value; // B-62: Key aus Provider- ODER CLI-Feld
+    const ai = { kind:$('aiKind').value, command:$('aiCommand').value.trim()||undefined, endpoint:$('aiEndpoint').value.trim()||undefined, model:$('aiModel').value.trim()||undefined, secretRef:((window._aiHasKey||aiNewKey)?'ai-key':undefined) };
+    const smtp = { host:$('smtpHost').value.trim(), port:Number($('smtpPort').value)||587, secure:$('smtpSecure').checked, user:$('smtpUser').value.trim(), from:$('smtpFrom').value.trim() };
+    const recipients = $('recipients').value.split(',').map(x=>x.trim()).filter(Boolean);
+    await api('PUT','/api/settings',{ workDir:$('workDir').value.trim(), aiBackend:ai, smtp, recipients, schedule:$('schedule').value.trim(), scheduleEnabled:$('schedEnabled').checked, autoReplaceUnmaintained:$('autoReplaceUnmaintained').checked });
+    if(aiNewKey) await api('POST','/api/ai/key',{key:aiNewKey}); // B-62: Provider- oder CLI-Headless-Key
+    if($('smtpPass').value) await api('POST','/api/smtp/pass',{pass:$('smtpPass').value});
+    await api('PUT','/api/apex-target',{ baseUrl:$('apxBaseUrl').value.trim(), workspace:$('apxWorkspace').value.trim(), appId:$('apxAppId').value.trim(), alias:$('apxAlias').value.trim(), loginUser:$('apxUser').value.trim(), workspaceId:$('apxWsId').value.trim(), owner:$('apxOwner').value.trim(), pass: $('apxPass').value || undefined });
+    await loadSettings(); closeSettings(); toast('Settings saved');
+  }catch(e){ toast('Error: '+e.message); }
+}
+async function testApexConn(){
+  $('apxConnOut').textContent='testing…';
+  try{
+    // erst speichern (damit der Test die aktuellen Werte nutzt), dann testen
+    await api('PUT','/api/apex-target',{ baseUrl:$('apxBaseUrl').value.trim(), workspace:$('apxWorkspace').value.trim(), appId:$('apxAppId').value.trim(), alias:$('apxAlias').value.trim(), loginUser:$('apxUser').value.trim(), workspaceId:$('apxWsId').value.trim(), owner:$('apxOwner').value.trim(), pass: $('apxPass').value || undefined });
+    const r=await api('POST','/api/apex-target/test',{});
+    $('apxConnOut').textContent = r.ok?'✅ Login ok (App Builder reached)':('⛔ '+(r.error||'Login failed'));
+    await loadSettings();
+  }catch(e){ $('apxConnOut').textContent='Error: '+e.message; }
+}
+// T-165: Workspace-ID/Owner + App-Liste direkt aus der Ziel-Instanz holen. Füllt die Felder;
+// bei mehrdeutiger App-Wahl werden die Apps als klickbare Auswahl gezeigt (nie Auto-Wahl).
+async function detectApex(appHint){
+  $('apxConnOut').textContent='detecting…'; $('apxDetectOut').innerHTML='';
+  try{
+    // erst speichern (Detect braucht Base-URL/Workspace/Login/Passwort aus den aktuellen Feldern)
+    await api('PUT','/api/apex-target',{ baseUrl:$('apxBaseUrl').value.trim(), workspace:$('apxWorkspace').value.trim(), appId:$('apxAppId').value.trim(), alias:$('apxAlias').value.trim(), loginUser:$('apxUser').value.trim(), workspaceId:$('apxWsId').value.trim(), owner:$('apxOwner').value.trim(), pass: $('apxPass').value || undefined });
+    const r=await api('POST','/api/apex-target/detect', appHint?{appHint}:{});
+    if(!r.ok){ $('apxConnOut').textContent='⛔ '+(r.error||'Detect failed'); return; }
+    $('apxWsId').value=r.workspaceId||''; $('apxOwner').value=r.owner||'';
+    if(r.appId){ $('apxAppId').value=r.appId; }
+    $('apxConnOut').textContent=`✅ detected — workspace ID + owner filled${r.appId?`, app ${r.appId} (${r.appName})`:''}${r.pageRegistersReset?` · ${r.pageRegistersReset} stale page register(s) reset`:''}`;
+    if(!r.appId && (r.apps||[]).length){
+      $('apxDetectOut').innerHTML = 'Pick the target app (a dedicated TEST app): '
+        + r.apps.map(a=>`<button class="ghost" style="margin:2px" onclick="$('apxAppId').value='${a.id}';detectApex('${a.id}')">${esc(String(a.id))} · ${esc(a.name)}</button>`).join('');
+    }
+    await loadSettings();
+  }catch(e){ $('apxConnOut').textContent='Error: '+e.message; }
+}
+// T-135: Plugin in echte APEX-App einspielen & live testen
+// Deployte APEX-Testseiten-URL aus der letzten apex-live-Review (falls schon eingespielt).
+function apexTestUrl(c){
+  if(!c) return null;
+  const rev = (c.reviews||[]).filter(r=>r && r.kind==='apex-live' && r.url).sort((a,b)=>String(b.at).localeCompare(String(a.at)))[0];
+  return rev ? rev.url : null;
+}
+// „APEX-Testseite öffnen": reiner Öffnen-Link auf die deployte Live-Seite (read-only). Der Deploy
+// passiert automatisch im Pflegelauf (Mock + vorher/nachher-Test); hier wird NICHT eingespielt.
+function openApexTestPage(){
+  const url = apexTestUrl(current);
+  if(url) window.open(url,'_blank','noopener');
+  else toast('Not in APEX yet — will be deployed on the next full-maintenance run.');
+}
+// Setup-JSON („Rezept") aus der Analyse erzeugen, anzeigen + herunterladen (read-only).
+async function apexSetup(){
+  const c = current; if(!c) return;
+  toast('Generating setup JSON…');
+  try{
+    const r = await fetch(`/api/components/${c.id}/apex-setup`);
+    const j = await r.json();
+    if(!r.ok){ toast('Error: '+(j.error||r.statusText)); return; }
+    const pi = j.testPage&&j.testPage.pageItem?j.testPage.pageItem.name:'—';
+    const src = j.testPage&&j.testPage.source?'yes':'no';
+    toast(`🧩 ${j.plugin.internalName}: Region ${j.plugin.regionSourceType}, Item ${pi}, Source ${src}, ${j.fileUrls.js.length} JS/${j.fileUrls.css.length} CSS`);
+    saveBlob(`${(c.name||'plugin').toLowerCase().replace(/[^a-z0-9.-]+/g,'-')}.apex-setup.json`, JSON.stringify(j,null,2), 'application/json');
+  }catch(e){ toast('Error: '+e.message); }
+}
+
+// --- Repo einem Plugin zuordnen (F-21) ---
+function toggleCreds(){ $('credBox').style.display = $('aVisibility').value==='intern' ? 'block' : 'none'; }
+function openAssign(){
+  if(!current) return;
+  $('aSource').value=current.source||''; $('aVisibility').value=current.visibility||'öffentlich';
+  $('aToken').value=''; $('aSshKey').value=''; toggleCreds();
+  $('assignBg').classList.add('open');
+}
+function closeAssign(){ $('assignBg').classList.remove('open'); }
+async function saveAssign(){
+  if(!current) return;
+  const source=$('aSource').value.trim(); if(!source) return toast('Source required');
+  const body={ source, visibility:$('aVisibility').value, token:$('aToken').value||undefined, sshKeyPath:$('aSshKey').value.trim()||undefined };
+  const btn=$('aBtn'); btn.disabled=true; btn.textContent='Cloning…';
+  try{ await api('POST',`/api/components/${current.id}/assign-repo`,body); closeAssign(); await openDetail(current.id); load(); toast('Repo assigned'); }
+  catch(e){ toast('Error: '+e.message); }
+  finally{ btn.disabled=false; btn.textContent='Assign & clone'; }
+}
+async function runUpdate(force){
+  if(!current) return;
+  if(force && !confirm('Force update vendored libraries to the LATEST version — including BREAKING ones (e.g. three 0.116→0.185, jQuery 1→3).\n\nThe files are swapped (a backup is kept), but the plugin is NOT auto-verified — you must test it yourself afterwards. Continue?')) return;
+  const id=current.id; setBusy(id,true); toast(force?'Force-updating libs…':'Auto-update running…');
+  try{
+    const r = await api('POST',`/api/components/${id}/update`,{force:!!force});
+    await openDetail(id); load();
+    const urlOut = (r.results||[]).map(x=>`<div class="finding ${x.pushed?'low':'medium'}">${esc(x.lib)} ${esc(x.from)}→${esc(x.to)} — ${x.pushed?('PR branch '+esc((x.prRef&&x.prRef.branch)||x.branchKey||'')):('Review blocked ('+esc(x.stage||'')+')')}</div>`).join('');
+    const vend = (r.vendored||[]);
+    const vendOut = vend.map(x=>x.applied
+      ? `<div class="finding low">✅ ${esc(x.name)} ${esc(x.from)}→${esc(x.to)} — file swapped${x.breaking?' (breaking — please test!)':''}</div>`
+      : `<div class="finding medium">⚠ ${esc(x.name)} ${esc(x.from)}→${esc(x.to)} — ${esc(x.reason||'not applied')}</div>`).join('');
+    const anyApplied = vend.some(x=>x.applied);
+    const anyBreaking = vend.some(x=>!x.applied && x.breaking);
+    const hint = (!anyApplied && (r.results||[]).length===0 && vend.length===0)
+      ? '<div class="muted small">No CDN-referenced or vendored library had a safe update. Breaking/unmaintained libs are not auto-swapped — use “🚀 Migrate to latest” (Tests tab, verified) or force below.</div>' : '';
+    const forceBtn = (anyBreaking && !r.forced) ? `<div class="inline" style="margin-top:6px"><button onclick="runUpdate(true)">⚡ Force update to latest (breaking — I verify myself)</button></div>` : '';
+    $('reviewOut').innerHTML = `<div class="note"><b>${force?'Force update':'Auto-update'}:</b> ${esc(r.summary||'')}</div>` + urlOut + vendOut + hint + forceBtn;
+    toast(anyApplied?'Libraries updated':(r.summary||'no automatic updates'));
+  }catch(e){ toast('Error: '+e.message); }
+  finally{ setBusy(id,false); }
+}
+async function runAll(){
+  if(!guardBusy()) return;
+  _extraBusy++; syncBusyLock();
+  try{
+    const r = await api('POST','/api/run',{}); await load();
+    if(settingsCache.autoRepair){
+      const list = await api('GET','/api/components');
+      const todo = list.filter(c=>c.source && c.status && c.status!=='ok' && c.status!=='neu');
+      toast(`Auto-repair: ${todo.length} component(s)…`);
+      for(const c of todo){ try{ await api('POST',`/api/components/${c.id}/maintain`,{}); }catch{} }
+      await load();
+      toast(`Checked + repaired (${todo.length})`);
+    } else { toast(`Checked: ${r.count} component(s)`); }
+  }catch(e){ toast('Error: '+e.message); }
+  finally{ _extraBusy=Math.max(0,_extraBusy-1); syncBusyLock(); }
+}
+async function runOne(){
+  if(!current) return;
+  // Auto-repair: ein Check stößt direkt die volle (sichere) Pflege an
+  if(settingsCache.autoRepair) return runMaintain();
+  const id = current.id; setBusy(id,true);
+  toast('Checking…');
+  try{ const r = await api('POST',`/api/components/${id}/run`,{}); await openDetail(id); load(); toast(`Checked: ${r.summary}`); }
+  catch(e){ toast('Error: '+e.message); }
+  finally{ setBusy(id,false); }
+}
+function switchView(v){
+  const plugins = v !== 'libs';
+  $('pluginsView').style.display = plugins ? '' : 'none';
+  $('libsView').style.display = plugins ? 'none' : '';
+  $('navPlugins').className = plugins ? 'primary' : 'ghost';
+  $('navLibs').className = plugins ? 'ghost' : 'primary';
+  if(!plugins) loadLibraries();
+}
+// Sortierbare globale Bibliotheks-Tabelle. Default: Status-Kritikalität ↓, dann Library, Version, Used by.
+let LIBS=[], libSortKey='status', libSortDir='desc';
+function libCrit(s){ return ({'verwundbar':4,'nicht gepflegt':3,'veraltet':2,'unbekannt':1,'aktuell':0})[s] ?? 1; }
+function libPrimary(a,b,key){
+  if(key==='status') return libCrit(a.status)-libCrit(b.status);
+  if(key==='version') return String(a.version||'').localeCompare(String(b.version||''),undefined,{numeric:true});
+  if(key==='used') return (a.usedBy||[]).join(', ').localeCompare((b.usedBy||[]).join(', '));
+  return String(a.name||'').localeCompare(String(b.name||''));
+}
+function libCmp(a,b){
+  let d=libPrimary(a,b,libSortKey); if(libSortDir==='desc') d=-d;
+  if(d!==0) return d;
+  // feste Tie-Break-Reihenfolge (Nutzer): Kritikalität ↓ → Library → Version → Used by
+  return (libCrit(b.status)-libCrit(a.status))
+    || String(a.name||'').localeCompare(String(b.name||''))
+    || String(a.version||'').localeCompare(String(b.version||''),undefined,{numeric:true})
+    || (a.usedBy||[]).join(', ').localeCompare((b.usedBy||[]).join(', '));
+}
+function setLibSort(key){ if(libSortKey===key){ libSortDir=libSortDir==='asc'?'desc':'asc'; } else { libSortKey=key; libSortDir = key==='status'?'desc':'asc'; } renderLibsTable(); }
+function renderLibsTable(){
+  const rows=$('libRows'); if(!rows) return;
+  const arrow=libSortDir==='asc'?'▲':'▼';
+  for(const [k,id] of [['name','lsName'],['version','lsVersion'],['status','lsStatus'],['used','lsUsed']]){ const el=$(id); if(el) el.textContent = libSortKey===k?arrow:''; }
+  const cls = { 'verwundbar':'err', 'nicht gepflegt':'warn', 'veraltet':'warn', 'unbekannt':'warn', 'aktuell':'ok' };
+  const sorted=[...LIBS].sort(libCmp);
+  rows.innerHTML = sorted.map(l=>`<tr><td><b>${esc(l.name)}</b></td><td class="small">${esc(l.version)}</td>`
+    + `<td><span class="dot ${cls[l.status]||''}"></span>${esc(libStatusLabel(l.status))}`
+    + `${l.vuln?` <span class="muted small">(${esc(l.vuln)})</span>`:''}${l.reason?` <span class="muted small">— ${esc(l.reason)}</span>`:''}`
+    + `${l.outdated&&l.latest?` <span class="muted small">→ ${esc(l.latest)}</span>`:''}</td>`
+    + `<td class="small muted">${(l.usedBy||[]).map(esc).join(', ')}</td></tr>`).join('');
+}
+async function loadLibraries(){
+  try{
+    const r = await api('GET','/api/libraries');
+    LIBS = r.libraries || [];
+    $('libsEmpty').style.display = LIBS.length ? 'none' : 'block';
+    renderLibsTable();
+    load(); // libWarning evtl. aktualisiert → Plugin-Übersicht neu zeichnen
+  }catch(e){ toast('Error: '+e.message); }
+}
+
+// Build-Marker: muss mit BUILD in start.js übereinstimmen. Erkennt einen veralteten Backend-Prozess.
+const APP_BUILD = '26.07.11';
+async function checkBackend(){
+  const b = $('staleBanner');
+  try{
+    const r = await fetch('/api/health');
+    if(!r.ok) throw 0;
+    const h = await r.json();
+    healthCache = h;
+    if(h.build !== APP_BUILD){
+      b.style.display='block';
+      b.innerHTML = `⚠ <b>Backend out of date</b> — the running service (build ${esc(h.build||'?')}) does not match the UI (build ${APP_BUILD}). Please restart the service (Start.cmd → automatic), otherwise data/detection are stale.`;
+    } else { b.style.display='none'; }
+  }catch{
+    b.style.display='block';
+    b.innerHTML = `⚠ <b>Backend out of date</b> — no /api/health. Please restart the service via <b>Start.cmd</b> (stops the old instance automatically).`;
+  }
+}
+
+// Esc schließt offene Dialoge bzw. den Drawer
+document.addEventListener('keydown', (e) => {
+  if (e.key !== 'Escape') return;
+  if ($('confirmBg')?.classList.contains('open')) { __resolveConfirm(false); return; } // Bestätigung sauber abbrechen
+  const m = document.querySelector('.modal-bg.open');
+  if (m) { m.classList.remove('open'); return; }
+  if ($('drawer').classList.contains('open')) closeDrawer();
+});
+
+checkBackend();
+loadSettings();
+load().then(pollRunning); // F-29: nach dem ersten Laden Lauf-Status anwenden
+loadLibraries(); // beim Öffnen: Bibliotheken + Warn-Badges aktualisieren
+setInterval(pollRunning, 2500); // F-29: „läuft gerade" laufend aktualisieren
+</script>
+</body>
+</html>

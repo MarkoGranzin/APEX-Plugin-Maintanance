@@ -1,0 +1,84 @@
+# =============================================================================
+#  Plugin Maintenance — .gitignore
+#  Rule of thumb: only the app itself is versioned (src/, test/, public/,
+#  mcp-apex-deploy/, examples/, start*, package*, config). Everything the tool
+#  generates at runtime, every machine-local config, and all editor/OS noise
+#  stays OUT of Git.
+#  NOTE: Git does not support trailing comments — keep every note on its own line.
+# =============================================================================
+
+# --- Dependencies ---
+node_modules/
+.npm/
+.pnpm-store/
+
+# --- Runtime / user data (config, secrets, logs, test plans, SBOM) ---
+data/
+
+# --- Working copies of the maintained plugins ---
+workspace/
+
+# --- Tool output written per run ---
+# generated acceptance .feature files, setup JSON, …
+exports/
+# Playwright run artifacts
+test-results/
+playwright-report/
+# per-repo acceptance/backups the tool writes
+.maintenance/
+# test coverage reports
+coverage/
+.nyc_output/
+
+# --- Machine-local / tooling configuration ---
+.mcp.json
+.mcp.json.example
+# local Claude Code config (incl. project skills like devhub) — not versioned
+.claude/
+# Claude Code project instructions (dev-workflow meta, references internal devhub)
+CLAUDE.md
+
+# --- Project-internal planning export (devhub) — not part of the shipped tool ---
+devhub/
+
+# --- Demo scratch (cloned repo + generated harness) ---
+.demo/
+
+# --- Secrets / environment ---
+.env
+.env.*
+*.pem
+*.key
+*.p12
+*.pfx
+
+# --- Logs & temporary files ---
+*.log
+npm-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+qa.log
+.chk.js
+*.tmp
+*.bak
+*.orig
+*~
+
+# --- Local build output (the app has none; guards against stray artifacts) ---
+/dist/
+/build/
+.cache/
+
+# --- Editor / IDE ---
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# --- OS junk ---
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# --- Unused sample fixtures (not referenced by tests) ---
+examples/

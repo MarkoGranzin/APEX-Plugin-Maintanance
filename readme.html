@@ -1,0 +1,261 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Plugin Maintenance — Übersicht & Einrichtung</title>
+<style>
+  :root{
+    --bg:#0f1620; --panel:#16212e; --panel2:#1c2a3a; --ink:#e7eef6; --muted:#9fb0c3;
+    --line:#26384b; --accent:#4cc2ff; --accent2:#7c9cff; --green:#54d18c; --yellow:#ffc857; --red:#ff6b6b;
+    --radius:14px; --mono:ui-monospace,"Cascadia Code",Consolas,monospace;
+    --sans:system-ui,-apple-system,"Segoe UI",Roboto,Arial,sans-serif;
+  }
+  @media (prefers-color-scheme: light){
+    :root{ --bg:#f4f7fb; --panel:#ffffff; --panel2:#f0f4f9; --ink:#142030; --muted:#5a6b7e; --line:#dde6f0; }
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:linear-gradient(180deg,var(--bg),var(--bg));color:var(--ink);font-family:var(--sans);line-height:1.6}
+  .wrap{max-width:980px;margin:0 auto;padding:0 22px 90px}
+  header.hero{padding:64px 22px 40px;background:radial-gradient(1200px 400px at 70% -50%,rgba(76,194,255,.18),transparent),var(--panel);border-bottom:1px solid var(--line)}
+  .hero .wrap{max-width:980px;margin:0 auto;padding:0}
+  h1{font-size:2.3rem;margin:.1em 0 .15em;letter-spacing:-.02em}
+  .tagline{color:var(--muted);font-size:1.15rem;max-width:62ch}
+  .badges{margin-top:18px;display:flex;flex-wrap:wrap;gap:8px}
+  .badge{font:600 .8rem/1 var(--sans);padding:7px 11px;border-radius:999px;background:var(--panel2);border:1px solid var(--line);color:var(--muted)}
+  .badge.ok{color:var(--green);border-color:rgba(84,209,140,.35)}
+  .badge.ac{color:var(--accent);border-color:rgba(76,194,255,.35)}
+  h2{font-size:1.5rem;margin:46px 0 12px;padding-top:10px;letter-spacing:-.01em}
+  h3{font-size:1.12rem;margin:26px 0 8px}
+  p,li{color:var(--ink)}
+  .muted{color:var(--muted)}
+  a{color:var(--accent)}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);padding:20px 22px;margin:14px 0}
+  code{font-family:var(--mono);background:var(--panel2);padding:.12em .4em;border-radius:6px;font-size:.92em}
+  pre{background:var(--panel2);border:1px solid var(--line);border-radius:12px;padding:16px 18px;overflow:auto;font-family:var(--mono);font-size:.9rem}
+  pre .c{color:var(--muted)}
+  .grid{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+  @media(max-width:720px){.grid{grid-template-columns:1fr}}
+  table{width:100%;border-collapse:collapse;margin:10px 0;font-size:.94rem}
+  th,td{text-align:left;padding:10px 12px;border-bottom:1px solid var(--line);vertical-align:top}
+  th{color:var(--muted);font-weight:600;font-size:.82rem;text-transform:uppercase;letter-spacing:.04em}
+  td code{white-space:nowrap}
+  .pipe{display:flex;flex-wrap:wrap;align-items:center;gap:6px;margin:10px 0}
+  .step{background:var(--panel2);border:1px solid var(--line);border-radius:10px;padding:8px 12px;font:600 .86rem var(--sans)}
+  .step small{display:block;color:var(--muted);font-weight:400;font-size:.74rem}
+  .arrow{color:var(--accent);font-weight:700}
+  .pill{display:inline-block;font:600 .76rem var(--sans);padding:3px 9px;border-radius:999px;border:1px solid var(--line);color:var(--muted)}
+  .pill.g{color:var(--green)} .pill.y{color:var(--yellow)} .pill.r{color:var(--red)}
+  ul.tight{margin:.3em 0;padding-left:1.2em} ul.tight li{margin:.2em 0}
+  .kbd{font-family:var(--mono);font-size:.82rem;background:var(--panel2);border:1px solid var(--line);border-bottom-width:2px;border-radius:6px;padding:2px 7px}
+  footer{margin-top:60px;padding-top:22px;border-top:1px solid var(--line);color:var(--muted);font-size:.9rem}
+  .toc{display:flex;flex-wrap:wrap;gap:8px;margin-top:18px}
+  .toc a{font-size:.9rem;text-decoration:none;background:var(--panel2);border:1px solid var(--line);padding:6px 11px;border-radius:8px;color:var(--ink)}
+  .note{border-left:3px solid var(--accent);padding:4px 0 4px 14px;color:var(--muted)}
+</style>
+</head>
+<body>
+<header class="hero">
+  <div class="wrap">
+    <h1>Plugin&nbsp;Maintenance</h1>
+    <p class="tagline">Automatisierte Pflege von Oracle&nbsp;APEX-Plugins und Template-Komponenten: Repos anbinden, Artefakte erkennen, kanonisch normalisieren, KI-gestützt testen, Abhängigkeiten aktualisieren — und nur bei grünem Test als Pull&nbsp;Request ausliefern.</p>
+    <div class="badges">
+      <span class="badge ok">✓ 31/31 Tasks umgesetzt</span>
+      <span class="badge ok">✓ 147 Tests grün</span>
+      <span class="badge ac">Node ≥ 20 · ESM</span>
+      <span class="badge ac">Vitest</span>
+      <span class="badge">4 Slices komplett</span>
+    </div>
+    <div class="toc">
+      <a href="#was">Was es tut</a>
+      <a href="#prinzip">Leitprinzipien</a>
+      <a href="#pipeline">Der Lauf</a>
+      <a href="#rollen">Pflege &amp; Reviews</a>
+      <a href="#bundle">Kanonisches Bündel</a>
+      <a href="#module">Module</a>
+      <a href="#setup">Einrichtung</a>
+      <a href="#cli">Befehle</a>
+      <a href="#config">Konfiguration</a>
+      <a href="#offen">Offen / Adapter</a>
+    </div>
+  </div>
+</header>
+
+<div class="wrap">
+
+  <h2 id="was">Was es tut</h2>
+  <div class="card">
+    <p>APEX-Plugins werden oft „von vielen Händen" gebaut: JS/CSS liegt mal als base64-BLOB im SQL-Export, mal als lose Datei, mal als String mitten im PL/SQL. Es gibt kein <code>package.json</code>, keine einheitliche Konvention. Dieses Werkzeug macht daraus einen wartbaren, automatisch geprüften Bestand:</p>
+    <ul class="tight">
+      <li><b>Anbinden &amp; Inventarisieren</b> — mehrere Git-Repos (GitHub/lokal), Plugins und Template-Komponenten erkennen.</li>
+      <li><b>Normalisieren</b> — jedes Artefakt in <em>ein</em> kanonisches Bündel überführen (die einzige stabile interne API).</li>
+      <li><b>Testen</b> — Static-First (Lint, retire.js, Golden-Master-Snapshot) plus KI-generierte Verhaltenstests, mit Selbstheilungs-Schleife und Flaky-Quarantäne.</li>
+      <li><b>Aktualisieren</b> — veraltete Libs per SBOM-Fingerprinting erkennen, updaten, testen, und das Ergebnis über die <code>sourceMap</code> ins Original zurückschreiben (Re-Injektion).</li>
+      <li><b>Ausliefern &amp; Melden</b> — nur bei grünem Test ein Pull Request (kein Doppel-PR), ein gebündelter E-Mail-Report je Lauf, vollständige History.</li>
+    </ul>
+  </div>
+
+  <h2 id="prinzip">Leitprinzipien (die Leitplanken)</h2>
+  <div class="grid">
+    <div class="card"><h3>🟢 Test-Gate vor Push</h3><p class="muted">Kein Re-Upload ohne grünen Testlauf. Bei Rot: begrenzte Selbstheilung, sonst Rollback + Fehlerbericht — niemals „grün gemogelt".</p></div>
+    <div class="card"><h3>🔑 Keine Secrets im Klartext</h3><p class="muted">API-Keys/Git-Tokens werden verschlüsselt gespeichert (AES-256-GCM), maskiert angezeigt und nie in Report/Logs geschrieben.</p></div>
+    <div class="card"><h3>🧩 Normalisierung zuerst</h3><p class="muted">Alles Format-Spezifische passiert <em>vor</em> dem kanonischen Bündel. Danach ist die ganze Pipeline format-blind.</p></div>
+    <div class="card"><h3>🤖 Deterministik &gt; KI</h3><p class="muted">Übergänge, Extraktion, Re-Injektion sind deterministisch. Die KI sitzt nur an Urteils-Knoten (Testvorschlag, Reparatur, Risiko-Text). Nicht sicher Auflösbares wird markiert, nicht geraten.</p></div>
+  </div>
+
+  <h2 id="pipeline">Ein Lauf — der Zustandsautomat je Artefakt</h2>
+  <div class="card">
+    <div class="pipe">
+      <span class="step">Scan<small>Repo fetch + Diff</small></span><span class="arrow">→</span>
+      <span class="step">Extrakt<small>kanon. Bündel</small></span><span class="arrow">→</span>
+      <span class="step">Test<small>Static-First + Gate</small></span><span class="arrow">→</span>
+      <span class="step">Update<small>Lib-Bump</small></span><span class="arrow">→</span>
+      <span class="step">Re-Injektion<small>sourceMap</small></span><span class="arrow">→</span>
+      <span class="step">Review<small>Security + Code</small></span><span class="arrow">→</span>
+      <span class="step">PR<small>dedupliziert</small></span><span class="arrow">→</span>
+      <span class="step">Report<small>gebündelt</small></span>
+    </div>
+    <p class="muted" style="margin-top:14px">Jedes Artefakt durchläuft diese Zustände einzeln. Eigenschaften des Treibers (<code>src/run/orchestrate.js</code>):</p>
+    <ul class="tight">
+      <li><b>Teil-Fehler isoliert</b> — kippt Artefakt A, laufen B/C zu Ende; A landet als <span class="pill r">failed</span> / <span class="pill y">zu klären</span>.</li>
+      <li><b>Resume</b> — nach Crash startet jedes Artefakt am letzten persistierten Zustand, nicht von vorn.</li>
+      <li><b>Aggregation</b> — genau <em>ein</em> Report und <em>ein</em> History-Eintrag je Lauf, nicht eine Mail pro Artefakt.</li>
+    </ul>
+  </div>
+
+  <h2 id="rollen">Pflege durch Agenten &amp; Review-Gates</h2>
+  <div class="card">
+    <p>Die automatische Pflege läuft wie in einem echten Team — Umsetzung durch einen starken Entwickler, danach zwei unabhängige Reviews. <b>Der Pull Request entsteht erst, wenn Pflege fertig <em>und</em> beide Reviews grün sind.</b></p>
+    <div class="grid">
+      <div class="card" style="margin:6px 0">
+        <h3>👩‍💻 Pflege — Web-Entwickler-Agent</h3>
+        <p class="muted">Reparatur (Selbstheilung) und Lib-Update kommen von einer Web-Dev-Persona: idiomatisch, schlank, lesbar — nicht nur „Tests grün". Nutzt den AST-Testkontext und vorhandene APIs statt neuer Globals.</p>
+        <p class="muted">Skill-Anker: eigener Umsetzungs-Agent (Persona-Prompt in <code>src/ai/personas.js</code>).</p>
+      </div>
+      <div class="card" style="margin:6px 0">
+        <h3>🛡️ Gate 1 — Security-Review (OWASP)</h3>
+        <p class="muted">Prüft die Änderung gegen OWASP Top 10 / ASVS &amp; typische APEX-JS-Fallen: XSS (<code>innerHTML</code>, <code>document.write</code>), <code>eval</code>/<code>new&nbsp;Function</code>, hartkodierte Secrets, <code>javascript:</code>-URLs — plus CVE-Libs aus dem SBOM. Findings ab Schwelle blockieren (explizit quittierbar).</p>
+        <p class="muted">Skill: <code>security-review</code> + retire.js/SBOM.</p>
+      </div>
+      <div class="card" style="margin:6px 0">
+        <h3>✨ Gate 2 — Code-Review (Qualität)</h3>
+        <p class="muted">Ist der Code schön, einfach, lesbar und ohne lose Enden? Erkennt TODO/FIXME, <code>debugger</code>, leere catch-Blöcke, unbenutzte Variablen und übermäßige Komplexität (per AST).</p>
+        <p class="muted">Skills: <code>code-review</code>, <code>simplify</code>.</p>
+      </div>
+      <div class="card" style="margin:6px 0">
+        <h3>🚦 Gate-Regel</h3>
+        <p class="muted">Sequentiell: <span class="pill">Security</span> → <span class="pill">Code</span> → <span class="pill g">PR</span>. Ein Security-Block stoppt schon vor dem Code-Review; jeder Block verhindert den Push und landet als <span class="pill y">review-blockiert</span> in History/Report. Im Lauf-Automaten ist das der Zustand <code>reviewed</code>.</p>
+      </div>
+    </div>
+    <p class="note" style="margin-top:14px">Die statischen Scans sind die deterministische Untergrenze; die genannten Skills/Agenten werden als injizierbare Reviewer zusätzlich daraufgesetzt (<code>opts.reviewer</code>). Umgesetzt in <code>src/run/review.js</code>.</p>
+  </div>
+
+  <h2 id="bundle">Das kanonische Bündel</h2>
+  <div class="card">
+    <p>Herzstück der Architektur. JS steckt in APEX an drei Orten — base64-BLOB (<code>create_plugin_file</code>), inline im PL/SQL (<code>add_inline_code</code>/<code>htp.p</code>) und als Referenz (CDN). Der Extraktor führt alles in eine Struktur über; die <code>sourceMap</code> merkt sich die Herkunft, damit ein Fix exakt zurückfindet (Round-Trip byte-identisch).</p>
+    <pre><span class="c">// src/extract/extract.js — extractArtifact()</span>
+{
+  artifact: "colorpicker",
+  js:            [{ name, code }],   <span class="c">// dekodiert / lose / inline</span>
+  css:           [{ name, code }],
+  inlineCode:    [{ name, code }],   <span class="c">// aus PL/SQL (T-20)</span>
+  referencedUrls:[{ url, version }], <span class="c">// CDN/File-URLs</span>
+  sourceMap:     { "widget.js": { type:"plugin_file", sqlFile, fileName } },
+  unsafe:        [],                 <span class="c">// nicht auflösbar → markiert, nie geraten</span>
+  status:        "ok"
+}</pre>
+    <p class="note">Speicherformat (Export/roh/unklar) entscheidet die <em>Extraktion</em> und den groben Test-Pfad; die <em>Laufzeit-Abhängigkeit</em> entscheidet die Testebene: jsdom + apex.*-Shim als günstiger Default, Playwright gegen eine ephemere APEX-Instanz nur dort, wo echtes <code>apex.server.process</code>-Runtime nötig ist.</p>
+  </div>
+
+  <h2 id="module">Modul-Karte</h2>
+  <table>
+    <tr><th>Bereich</th><th>Datei</th><th>Aufgabe</th></tr>
+    <tr><td>Repo</td><td><code>src/repo/repository.js</code></td><td>Anbinden, klonen/fetchen, Auth (Token/SSH, nie persistiert), Verbindungstest</td></tr>
+    <tr><td>Inventar</td><td><code>src/inventory/inventory.js</code></td><td>Plugins/Template-Komponenten erkennen, Assets sammeln</td></tr>
+    <tr><td>Format</td><td><code>src/inventory/format.js</code></td><td>Speicherformat + Test-Pfad je Artefakt (unklar → „zu klären")</td></tr>
+    <tr><td>Diff</td><td><code>src/diff/diff.js</code></td><td>Geänderte Artefakte seit letztem Lauf als Trigger</td></tr>
+    <tr><td>Extraktion</td><td><code>src/extract/extract.js</code>, <code>inline.js</code></td><td>Kanonisches Bündel + sourceMap (BLOB / lose / inline)</td></tr>
+    <tr><td>AST</td><td><code>src/extract/analyze.js</code></td><td>Einstiegspunkte, apex.*/jQuery/AJAX, DOM-Zugriffe (acorn)</td></tr>
+    <tr><td>Re-Injektion</td><td><code>src/extract/reinject.js</code></td><td>Gepatchtes Asset zurück ins Original (Round-Trip, minimaler Diff)</td></tr>
+    <tr><td>Tests</td><td><code>src/test/*.js</code></td><td>Testumgebung-Wahl, apex-Shim, Static-First (Lint/retire/Snapshot)</td></tr>
+    <tr><td>KI</td><td><code>src/ai/backend.js</code>, <code>generate.js</code>, <code>personas.js</code></td><td>Backend (CLI/Provider), Testgenerierung, Web-Dev-Pflege-Persona</td></tr>
+    <tr><td>Lauf</td><td><code>src/run/*.js</code></td><td>Gate, Selbstheilung, Quarantäne, Auto-Update, PR-Dedup, Review-Gates, Orchestrierung</td></tr>
+    <tr><td>SBOM</td><td><code>src/sbom/sbom.js</code>, <code>risk.js</code></td><td>Fingerprinting → CycloneDX, Update-Check, Risiko-Score + Quittierung</td></tr>
+    <tr><td>Report</td><td><code>src/report/mail.js</code>, <code>history.js</code></td><td>Gebündelte Report-Mail (ohne Secrets), Lauf-History</td></tr>
+    <tr><td>Konfig</td><td><code>src/config/secrets.js</code>, <code>settings.js</code></td><td>Verschlüsselte Secrets, Repos/Empfänger/Zeitplan</td></tr>
+    <tr><td>Dienst/GUI</td><td><code>src/service/*.js</code>, <code>src/gui/*.js</code></td><td>Scheduler, Repo-Lauf-Verkettung, Dashboard- &amp; Triage-View-Model</td></tr>
+  </table>
+
+  <h2 id="setup">Einrichtung</h2>
+  <div class="card">
+    <p>Voraussetzung: <span class="kbd">Node ≥ 20</span> und <span class="kbd">git</span> im Pfad.</p>
+    <div class="note" style="margin:6px 0 14px">Am schnellsten: <b><code>Start.cmd</code> doppelklicken</b> (Windows) bzw. <code>./start.sh</code> ausführen (macOS/Linux). Das Skript installiert fehlende Abhängigkeiten automatisch und bietet ein Menü: Web-GUI starten, Repo scannen oder Tests ausführen.</div>
+    <pre><span class="c"># Manuell: Abhängigkeiten installieren</span>
+npm install
+
+<span class="c"># komplette Testsuite (sollte grün sein)</span>
+npm test</pre>
+    <p class="muted">Optional für die spätere Nutzung von Secrets/Provider-Backend:</p>
+    <pre><span class="c"># Windows PowerShell</span>
+$env:AISPP_MASTER_KEY = "ein-langes-geheimes-passphrase"
+<span class="c"># macOS/Linux</span>
+export AISPP_MASTER_KEY="ein-langes-geheimes-passphrase"</pre>
+  </div>
+
+  <h2 id="cli">Starten &amp; Befehle</h2>
+  <div class="card">
+    <h3>Schnellstart (Doppelklick)</h3>
+    <p class="muted">Kein Terminal nötig: die Start-Datei prüft Node, installiert bei Bedarf <code>npm install</code> und zeigt ein Menü.</p>
+    <table>
+      <tr><th>Plattform</th><th>Start-Datei</th></tr>
+      <tr><td>Windows</td><td><code>Start.cmd</code> &nbsp;<span class="muted">(doppelklicken)</span></td></tr>
+      <tr><td>macOS / Linux</td><td><code>./start.sh</code> &nbsp;<span class="muted">(ggf. <code>chmod +x start.sh</code>)</span></td></tr>
+    </table>
+    <p class="muted">Im Hintergrund ruft sie dieselbe CLI auf — <code>node start.js …</code> — die du auch direkt nutzen kannst:</p>
+
+    <h3>Einmaliger Scan (read-only)</h3>
+    <p class="muted">Analysiert ein ausgechecktes Repo, ohne etwas zu verändern: Inventar, Format/Test-Pfad, erkannte Libs, veraltete/verwundbare Abhängigkeiten, Triage-Kennzahl, Report-Vorschau.</p>
+    <pre>node start.js scan &lt;repo-pfad&gt;
+<span class="c"># Beispiel mit dem mitgelieferten Demo-Repo:</span>
+node start.js scan examples/sample-repo</pre>
+
+    <h3>Dienst mit Mini-Web-GUI</h3>
+    <p class="muted">Startet den wöchentlichen Scheduler (kein Doppellauf pro Repo) und die Web-GUI. Unter <code>/</code> läuft die <b>Komponenten-Verwaltung</b> (Übersicht, Add/Edit/Delete, Notizen, Verzeichnis öffnen, manuelles Review); diese Doku liegt unter <code>/readme.html</code>.</p>
+    <pre>node start.js serve <span class="c"># Default-Port 4317</span>
+node start.js serve 8080</pre>
+    <table>
+      <tr><th>Endpunkt</th><th>Zweck</th></tr>
+      <tr><td><code>/</code></td><td>Verwaltungs-GUI (Plugins/Template-Komponenten)</td></tr>
+      <tr><td><code>/readme.html</code></td><td>Diese Doku</td></tr>
+      <tr><td><code>/api/components</code></td><td>CRUD; <code>/:id/notes</code>, <code>/:id/review</code>, <code>/:id/open</code></td></tr>
+      <tr><td><code>/api/scan?path=&lt;pfad&gt;</code></td><td>Read-only Scan-Ergebnis als JSON</td></tr>
+      <tr><td><code>/api/dashboard</code></td><td>Repos + Lauf-History (JSON)</td></tr>
+    </table>
+  </div>
+
+  <h2 id="config">Konfiguration</h2>
+  <div class="card">
+    <p>Programmgesteuert über <code>src/config/settings.js</code> (Repos, E-Mail-Empfänger, Cron-Zeitplan, KI-Backend) und <code>src/config/secrets.js</code> (verschlüsselter Secret-Speicher). Repos referenzieren ein Secret nur über eine <code>secretRef</code> — der Key selbst liegt verschlüsselt.</p>
+    <pre><span class="c">// KI-Backend wählbar — gleiche Schnittstelle</span>
+createBackend({ kind:"cli", command:"claude" })                 <span class="c">// lokale CLI</span>
+createBackend({ kind:"provider", endpoint, model, apiKey })     <span class="c">// Provider+Key</span>
+<span class="c">// ungültiger/fehlender Key blockiert produktive Läufe</span></pre>
+  </div>
+
+  <h2 id="offen">Bewusst offen (Adapter / Folgearbeit)</h2>
+  <div class="card">
+    <p class="muted">Die gesamte Logik ist deterministisch gekapselt und über <code>opts</code> injizierbar (git/ai/http/runner/transport) — damit sie ohne Netz/DB/APEX-Instanz testbar ist. Für den Produktivbetrieb sind diese <em>Adapter</em> anzuschließen:</p>
+    <ul class="tight">
+      <li>Echtes Provider-HTTP &amp; SMTP-Transport, lokale KI-CLI.</li>
+      <li>Ephemere APEX-Instanz (23ai-Container) + Playwright/utPLSQL für Verhaltenstests kritischer Plugins.</li>
+      <li>HTML-Frontend für Dashboard/Triage (die View-Modelle liefern bereits die Daten).</li>
+      <li>Externe Risiko-Signale (GitHub archived, OSV, deps.dev, OpenSSF) für den Score in <code>risk.js</code>.</li>
+    </ul>
+  </div>
+
+  <footer>
+    <p>Plugin Maintenance · geplant &amp; dokumentiert in devhub (Projekt „AIS Pluginpflege") · Code ist das Resultat, devhub die Single Source of Truth fürs Konzept.</p>
+  </footer>
+</div>
+</body>
+</html>

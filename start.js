@@ -1,0 +1,1245 @@
+#!/usr/bin/env node
+/**
+ * Plugin Maintenance — Start-/CLI-Einstieg.
+ *
+ *   node start.js scan <repo-pfad>     Einmaliger, read-only Pflege-Lauf über ein Repo (Analyse,
+ *                                       Inventar, SBOM/Updates, Risiko, Static-First-Gate, Triage).
+ *   node start.js serve [port]          Dienst: wöchentlicher Scheduler + Mini-Web-GUI
+ *                                       (Dashboard-JSON, Repo-Trigger, readme.html). Default-Port 4317.
+ *   node start.js help                  Diese Hilfe.
+ *
+ * Secrets: Master-Key aus Umgebungsvariable AISPP_MASTER_KEY (für `serve`/Settings mit Secrets).
+ */
+
+import http from 'node:http';
+import fs from 'node:fs';
+import path from 'node:path';
+import { spawn as childSpawn } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
+import { scanRepo } from './src/service/run-repo.js';
+import { createScheduler } from './src/service/scheduler.js';
+import { createHistory, recordRun, listRuns } from './src/report/history.js';
+import { createSettings, setApexTarget } from './src/config/settings.js';
+import { deployAndTest, findPluginExport } from './src/service/apex-live.js';
+import { loadChromium, uiLogin, uiDeletePage, uiDeletePlugin, uiListApps, uiRunSql } from './mcp-apex-deploy/lib/apex-ui.js';
+import { detectApexTarget, pageRegisterResetPlan } from './src/service/apex-detect.js';
+import { purgeComponent } from './src/service/purge-component.js';
+import { importFromFiles } from './src/service/import-file.js';
+import { saveFeedback, createFeedbackTest } from './src/service/feedback.js';
+import { buildSetupManifest } from './mcp-apex-deploy/lib/apex.js';
+import { createComponentStore } from './src/gui/store.js';
+import { recoverInterruptedRun } from './src/service/run-guard.js';
+import { apiHandler, metaApiHandler } from './src/gui/api.js';
+import { defaultGather } from './src/gui/components.js';
+import { syncRepo } from './src/service/workspace.js';
+import { autoUpdateComponent } from './src/service/update-component.js';
+import { applyVendoredUpdates } from './src/service/lib-update.js';
+import { assignRepoToComponent } from './src/service/assign-repo.js';
+import { autoReviewFix } from './src/service/autoreview.js';
+import { dualReviewFix } from './src/service/dual-review-fix.js';
+import { checkLibrariesOnline, libWarningFrom } from './src/service/lib-check.js';
+import { buildSbom } from './src/sbom/sbom.js';
+import { autoFixComponent } from './src/service/autofix.js';
+import { maintainComponent } from './src/service/maintain.js';
+import { runUiTests, runUiTestsDetailed, abortUiChildren } from './src/test/run-ui.js';
+import { abortAiChildren } from './src/ai/backend.js';
+import { captureBaseline, compareToBaseline } from './src/service/baseline.js';
+import { redevelopComponent } from './src/service/redev.js';
+import { replaceConsentGate } from './src/service/lib-replace.js';
+import { generateAiMock, writeMock, refineMock, mockInputFingerprint, MOCK_SPEC_VERSION, runMockSelfTests, pluginInterface, refreshMockLibs } from './src/test/mock.js';
+import { acceptanceFromSelfTest, writeAcceptance, readAcceptance, acceptanceFeatureFile, acceptanceToDevhub, compareAcceptance, normalizeInterface } from './src/service/acceptance.js';
+import { redevelopDeadLib, buildSliceRebuildPrompt } from './src/service/redev-slices.js';
+import { inspectAssets, parseOk } from './src/extract/assets.js';
+import { reinjectAsset } from './src/extract/reinject.js';
+import { uploadFix } from './src/service/upload.js';
+import { authenticatedPushUrl, redactToken } from './src/run/git-auth.js';
+import { slug as slugify } from './src/util/slug.js';
+import { resolveAiBackend, aiBackendView, cliAuthState } from './src/ai/configure.js';
+import { createPrRegistry } from './src/run/dedup.js';
+import { SecretStore } from './src/config/secrets.js';
+import { renderReport } from './src/report/mail.js';
+import { sendReportMail } from './src/report/smtp.js';
+import { cronMatches } from './src/service/cron.js';
+import { runComponentOnce } from './src/service/run-component.js';
+import { runComponentTests } from './src/service/test-runner.js';
+import { simpleGit } from 'simple-git';
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+// Datenverzeichnis (Komponenten/Settings/Secrets/Logs/Testpläne). Per AISPP_DATA_DIR umlenkbar,
+// damit QA/Tests NIE die echte Nutzer-Konfiguration unter <root>/data berühren (T-58).
+const DATA_DIR = process.env.AISPP_DATA_DIR || path.join(__dirname, 'data');
+// B-34: Playwright-Browser aus einem Ordner NEBEN dem Projekt nutzen, falls vorhanden (…\pw-browsers).
+// Grund: der Standard-Cache (LOCALAPPDATA\ms-playwright) kann auf dem System fehlen/unsichtbar sein —
+// ein real sichtbarer, projekt-naher Ordner ist robust. Opt-in rein über Ordner-Existenz (kein Hardcoding);
+// eine bereits gesetzte PLAYWRIGHT_BROWSERS_PATH-Variable hat Vorrang. Muss VOR jedem Playwright-Import
+// gesetzt sein (Playwright wird überall nur dynamisch geladen; Kind-Prozesse erben die Variable).
+try {
+  const pwBrowsers = path.join(__dirname, '..', 'pw-browsers');
+  if (!process.env.PLAYWRIGHT_BROWSERS_PATH && fs.existsSync(pwBrowsers)) process.env.PLAYWRIGHT_BROWSERS_PATH = pwBrowsers;
+} catch { /* egal */ }
+// Build-Marker: muss mit APP_BUILD in public/app.html übereinstimmen. Bei Backend-Änderungen erhöhen.
+// Das Frontend vergleicht beide und warnt, wenn der laufende Dienst veraltet ist (Neustart nötig).
+const BUILD = '26.07.11';
+const C = { reset: '\x1b[0m', bold: '\x1b[1m', dim: '\x1b[2m', green: '\x1b[32m', yellow: '\x1b[33m', red: '\x1b[31m', cyan: '\x1b[36m' };
+const c = (col, s) => `${C[col]}${s}${C.reset}`;
+
+function printScan(result) {
+  console.log(c('bold', `\n  Plugin Maintenance — Scan: ${result.repoDir}\n`));
+  if (result.artifacts.length === 0) {
+    console.log(c('yellow', '  No APEX plugins/template components detected.\n'));
+    return;
+  }
+  for (const a of result.artifacts) {
+    const statusCol = a.status === 'ok' ? 'green' : a.status === 'extraktion-unsicher' ? 'red' : 'yellow';
+    console.log(`  ${c('bold', a.name)} ${c('dim', `(${a.type})`)}  ${c(statusCol, a.status ?? 'ok')}`);
+    console.log(`    Format: ${a.format}   Test path: ${a.testPath ?? c('yellow', 'to clarify')}`);
+    console.log(`    Assets: js=${a.assets.js} css=${a.assets.css} inline=${a.assets.inline} urls=${a.assets.referencedUrls}`);
+    if (a.entryPoints.length) console.log(c('dim', `    Entry points: ${a.entryPoints.join(', ')}`));
+    for (const comp of a.components) console.log(c('dim', `    Lib: ${comp.name}@${comp.version} (${comp.detectedBy})`));
+    for (const u of a.updates) if (u.outdated) console.log(c('yellow', `    ⬆ Update: ${u.name} ${u.current} → ${u.latest}`));
+    for (const r of a.risks) console.log(c('red', `    ${r.label} ${r.name}: ${r.reasons.join('; ')}`));
+    for (const f of a.static.retire.findings) console.log(c('red', `    ⚠ Vulnerability: ${f.lib}@${f.version} (${f.vuln}, fixed from ${f.fixedFrom})`));
+    if (!a.static.lint.ok) console.log(c('red', `    Lint: ${a.static.lint.findings.map((f) => f.message).join('; ')}`));
+  }
+  const t = result.triage.inconsistency;
+  console.log(c('cyan', `\n  Metric: ${t.text}`));
+  if (result.triage.triageList.length) {
+    console.log(c('yellow', `  Needs decision: ${result.triage.triageList.map((x) => x.name).join(', ')}`));
+  }
+  console.log('');
+  console.log(c('bold', '  Report preview:'));
+  console.log(result.report.body.split('\n').map((l) => '    ' + l).join('\n'));
+  console.log('');
+}
+
+function cmdScan(repoPath) {
+  if (!repoPath) return fail('Please provide a repo path:  node start.js scan <path>');
+  if (!fs.existsSync(repoPath)) return fail(`Path not found: ${repoPath}`);
+  const result = scanRepo(repoPath);
+  printScan(result);
+}
+
+function cmdServe(portArg) {
+  const port = Number(portArg) || 4317;
+  const settings = createSettings();
+  // Einstellungen persistent (F-21/F-18): bleiben über Neustart erhalten
+  const settingsFile = path.join(DATA_DIR, 'settings.json');
+  try { if (fs.existsSync(settingsFile)) Object.assign(settings, JSON.parse(fs.readFileSync(settingsFile, 'utf8'))); } catch {}
+  // Vom Nutzer gewünscht: Auto-Repair und Push sind dauerhaft an (keine Settings-Toggles mehr).
+  // Outward-facing: der Upload-Button fragt weiterhin vor dem Push nach (Bestätigung im Klick).
+  settings.autoRepair = true;
+  settings.allowPush = true;
+  const saveSettings = () => {
+    try { fs.mkdirSync(path.dirname(settingsFile), { recursive: true }); fs.writeFileSync(settingsFile, JSON.stringify(settings, null, 2)); } catch {}
+  };
+
+  const history = createHistory();
+  const store = createComponentStore({ file: path.join(DATA_DIR, 'components.json') });
+  const record = (entry) => recordRun(history, entry);
+
+  // B-58: Crash-Recovery beim Start. Ist ein Dienst mitten in einem Pflegelauf gestorben, blieb ein
+  // Run-Marker (.maintenance/run.json) samt persistierter Backups zurück. Diese Läufe sauber ABSCHLIESSEN,
+  // indem der halb-aktualisierte Stand aus den Backups zurückgerollt wird — kein halb-verifizierter Rest.
+  for (const c of store.list()) {
+    try {
+      if (!c.path || !fs.existsSync(c.path)) continue;
+      const rec = recoverInterruptedRun(c.path);
+      if (rec.recovered) console.log(`[recovery] ${c.name}: interrupted run rolled back (${rec.restored} restored, ${rec.removed} removed)`);
+    } catch { /* best effort */ }
+  }
+
+  // Prüfprotokoll-Archiv je Komponente (F-22) — bleibt auch erhalten, wenn die GUI zu war
+  const logDir = path.join(DATA_DIR, 'logs');
+  const compLogDir = (component) => path.join(logDir, slugify(component.name));
+  const writeLog = (component, text) => {
+    try { const d = compLogDir(component); fs.mkdirSync(d, { recursive: true }); fs.writeFileSync(path.join(d, `${Date.now()}.log`), text); } catch {}
+  };
+  // Testplan (.feature) INS PLUGIN-VERZEICHNIS unter .maintenance/tests/ (analog Baseline/Coded-Tests) →
+  // wird beim Upload mitcommittet. Fallback nach DATA_DIR/testplans, wenn (noch) kein Repo-Pfad da ist.
+  const testplanDir = path.join(DATA_DIR, 'testplans');
+  // Klarer Kopf: kennzeichnet die Datei als Unit-/Charakterisierungs-Testplan, NICHT als Anforderungs-Vertrag.
+  const UNITTEST_HEADER = [
+    '# Auto-generierter UNIT-/Charakterisierungs-Testplan (je Funktion: Positiv/Negativ/Pfad/Grenzwerte,',
+    '# gegen die AKTUELLE Implementierung / Golden Master). Wird pro Implementierung neu erzeugt.',
+    '# Das ist NICHT der Anforderungs-Vertrag — Schnittstelle (APEX-Parameter/JSON) + "works as before"-Soll',
+    '# stehen in:  ../acceptance.feature',
+    '', '',
+  ].join('\n');
+  const onTestPlan = (component, text) => {
+    try {
+      const body = UNITTEST_HEADER + String(text ?? '');
+      const slug = slugify(component.name);
+      if (component?.path && fs.existsSync(component.path)) {
+        const d = path.join(component.path, '.maintenance', 'tests');
+        fs.mkdirSync(d, { recursive: true });
+        fs.writeFileSync(path.join(d, `${slug}.unit-tests.feature`), body);
+        try { fs.rmSync(path.join(d, `${slug}.feature`), { force: true }); } catch { /* alt aufräumen */ } // verwirrende Altdatei entfernen
+      } else {
+        fs.mkdirSync(testplanDir, { recursive: true });
+        fs.writeFileSync(path.join(testplanDir, `${slug}.unit-tests.feature`), body);
+        try { fs.rmSync(path.join(testplanDir, `${slug}.feature`), { force: true }); } catch { /* alt aufräumen */ }
+      }
+    } catch { /* Datei-Fehler nicht eskalieren */ }
+  };
+  // SBOM (CycloneDX) je Plugin persistent ablegen — auch headless verfügbar (T-75)
+  const sbomDir = path.join(DATA_DIR, 'sbom');
+  const onSbom = (component, sbom) => {
+    try { fs.mkdirSync(sbomDir, { recursive: true }); fs.writeFileSync(path.join(sbomDir, `${slugify(component.name)}.cdx.json`), JSON.stringify(sbom, null, 2)); } catch {}
+  };
+  // Charakterisierungs-Baseline INS PLUGIN-VERZEICHNIS ablegen (F-28/T-92/T-99): Teil des Pflege-Nachweises,
+  // wird beim Upload mitcommittet. Fallback nach DATA_DIR/baseline nur, wenn (noch) kein Repo-Pfad da ist.
+  const baselineDir = path.join(DATA_DIR, 'baseline');
+  const onBaseline = (component, baseline) => {
+    try {
+      if (component?.path && fs.existsSync(component.path)) {
+        const d = path.join(component.path, '.maintenance');
+        fs.mkdirSync(d, { recursive: true });
+        fs.writeFileSync(path.join(d, 'baseline.json'), JSON.stringify(baseline, null, 2));
+      } else {
+        fs.mkdirSync(baselineDir, { recursive: true });
+        fs.writeFileSync(path.join(baselineDir, `${slugify(component.name)}.json`), JSON.stringify(baseline, null, 2));
+      }
+    } catch { /* Datei-Fehler nicht eskalieren */ }
+  };
+  // F-29: laufende Operationen je Komponente serverseitig merken (clone/maintain/migrate/…),
+  // damit die GUI auch nach Reload / bei woanders gestartetem Lauf „läuft gerade" anzeigen kann.
+  const RUNNING = new Set();
+  // F-29+: aktueller Schritt je laufender Komponente (z.B. „Mock: Analyse…") → GUI zeigt, WAS gerade passiert.
+  const STEP = new Map();
+  const setStep = (id, step) => { if (id) STEP.set(id, step); };
+  // B-59: Abbruch. CANCELLED markiert Komponenten, deren Lauf abgebrochen werden soll — die Pipeline
+  // prüft das kooperativ zwischen den Phasen; zusätzlich werden die laufenden Kindprozesse (claude/Playwright)
+  // gekillt, damit die Arbeit WIRKLICH stoppt (nicht nur das Flag). isCancelled() ist der Prüf-Hook.
+  const CANCELLED = new Set();
+  const isCancelled = (id) => CANCELLED.has(id);
+  // Auto-Mock je Plugin (F-28/T-97/T-99): self-contained Testseite + generierte Tests INS REPO schreiben
+  // (unter <repo>/.maintenance/), damit sie beim Upload mitcommittet werden; von dort statisch ausliefern.
+  // KI-first (T-101): die KI schreibt aus der Analyse einen plugin-spezifischen Mock; ohne KI Fallback
+  // auf das statische Template. Kosten begrenzen: einmal je Plugin bauen (force bei assign-repo),
+  // sonst wiederverwenden (Full maintenance baut nur, wenn noch keiner existiert) — gleicher Harness vor/nach Migration.
+  const buildMockFor = async (component, opts = {}) => {
+    try {
+      if (!component?.path || !fs.existsSync(component.path)) return null;
+      const sl = slugify(component.name);
+      const mockUrl = `http://localhost:${port}/mock/${sl}/index.html`;
+      const mockDir = path.join(component.path, '.maintenance', 'mock');
+      const fpPath = path.join(mockDir, '.mock-fingerprint.json');
+      const exists = fs.existsSync(path.join(mockDir, 'index.html'));
+      const ai = resolveAiBackend(settings, secretStore);
+      const cur0 = store.get(component.id) || {};
+      // Alten/statischen Mock auf den KI-Mock hochstufen, sobald ein KI-Backend da ist (einmalig).
+      const upgrade = ai.kind !== 'stub' && cur0.mockMode !== 'ai';
+      // Versionierte KI-Untersuchung: nur bei UNBEKANNTER Version bauen. Stimmt der eingecheckte Mock-Fingerprint
+      // (Plugin-Code + Vertrag + Libs/CSS + Spec-Version) mit dem aktuellen Stand überein → KI sparen, wiederverwenden.
+      const fp = mockInputFingerprint(component.path);
+      let fpFile = null;
+      try { fpFile = JSON.parse(fs.readFileSync(fpPath, 'utf8')); } catch { fpFile = null; }
+      // Nur ECHTE KI-Mocks gelten als bekannt; static-Fallbacks immer neu versuchen. B-37: ein Mock mit
+      // ROTEN Self-Checks (failed>0) wird NICHT gecacht — sonst wäre der rote Zustand terminal und die
+      // Refine-Schleife bekäme nie wieder die Chance zu korrigieren (jede Pflege versucht es erneut).
+      let known = exists && fp && fpFile?.fp === fp && fpFile?.mode === 'ai' && (fpFile?.failed ?? 0) === 0;
+      // B-27: dem Fingerprint NICHT blind vertrauen — der eingecheckte Mock muss den Self-Test-Harness wirklich
+      // enthalten. Ein degradierter/statischer Mock (z.B. nach Rollback ohne KI) gilt sonst fälschlich als grün.
+      if (known) { try { const html = fs.readFileSync(path.join(mockDir, 'index.html'), 'utf8'); if (!/__views|__selftested|__features/.test(html)) { known = false; try { fs.rmSync(fpPath, { force: true }); } catch { /* egal */ } } } catch { known = false; } }
+      if (exists && known && !upgrade) {
+        if (opts.force) writeLog(component, '[mock] known version (fingerprint match) — AI investigation skipped, reusing the checked-in mock');
+        // Self-Test-Bilanz + Modus aus der Fingerprint-Datei wiederherstellen (Badge/Anzeige stimmt auch beim Cache-Treffer).
+        const sc = (fpFile && typeof fpFile.total === 'number') ? { views: fpFile.views ?? null, total: fpFile.total, failed: fpFile.failed ?? 0 } : (cur0.mockSelfCheck || null);
+        store.update(component.id, { mockUrl, mockFingerprint: fp, mockMode: fpFile?.mode || cur0.mockMode || 'ai', mockSelfCheck: sc, ...(cur0.uiTestUrl ? {} : { uiTestUrl: mockUrl }) });
+        return mockUrl;
+      }
+      setStep(component.id, 'Mock: investigating plugin…');
+      const gen = await generateAiMock(component.path, { ai, name: component.name, onStep: (s) => setStep(component.id, `Mock: ${s}`) }); // KI schreibt; Fallback statisch
+      writeMock(mockDir, component.path, gen); // committet (git add .)
+      // Selbstkorrektur-Schleife: Self-Tests headless laufen lassen; rote (Fehl-Charakterisierungen) lässt die KI
+      // generisch nachbessern (Ist-Werte statt geratener Konstanten) → bis grün. Für JEDES Plugin, ohne Handarbeit.
+      try {
+        setStep(component.id, 'Mock: checking self-tests…');
+        const ref = await refineMock(gen, {
+          ai, url: mockUrl, name: component.name,
+          write: (html) => writeMock(mockDir, component.path, { ...gen, html }),
+          log: (m) => { writeLog(component, `[mock-selfcheck] ${m}`); setStep(component.id, `Mock: ${m}`); },
+        });
+        if (ref.after) {
+          gen.html = ref.html;
+          // „failed" zählt ALLE verbliebenen Probleme (rote Checks + falsch-grüne Dependency-/Leer-Render-Fälle)
+          gen.selfCheck = { views: ref.after.views, total: ref.after.total, failed: (ref.failed || ref.after.failed || []).length };
+          // T-116: Akzeptanz-Vertrag (technologieunabhängiges Soll) aus der grünen Charakterisierung festhalten
+          // → Grundlage für eine spätere slice-weise Neuentwicklung (F-30/T-117).
+          try { const contract = acceptanceFromSelfTest(ref.after, { name: component.name, at: new Date().toISOString(), interface: pluginInterface(component.path) }); if (!contract.error) writeAcceptance(component.path, contract); } catch { /* best effort */ }
+        }
+      } catch (e) { writeLog(component, `[mock-selfcheck] skipped: ${e?.message ?? e}`); }
+      const testsDir = path.join(component.path, '.maintenance', 'tests');
+      fs.mkdirSync(testsDir, { recursive: true });
+      fs.writeFileSync(path.join(testsDir, gen.spec.name), gen.spec.content);
+      // Fingerprint neben dem (eingecheckten) Mock ablegen → künftige Builds bekannter Versionen sparen die KI.
+      // Fingerprint NUR für echte KI-Mocks schreiben — einen static-Fallback (KI nicht verfügbar) nicht cachen,
+      // sonst bliebe ein Fehlschlag „bekannt". So wird bei verfügbarer KI automatisch neu gebaut.
+      try { if (fp && gen.mode === 'ai') fs.writeFileSync(fpPath, JSON.stringify({ fp, spec: MOCK_SPEC_VERSION, mode: gen.mode, views: gen.selfCheck?.views ?? null, total: gen.selfCheck?.total ?? null, failed: gen.selfCheck?.failed ?? null }, null, 2)); else if (gen.mode !== 'ai') { try { fs.rmSync(fpPath, { force: true }); } catch { /* egal */ } } } catch { /* best effort */ }
+      const cur = store.get(component.id) || {};
+      const patch = { mockUrl, mockMode: gen.mode, mockNote: gen.fallbackReason || null, mockFingerprint: fp || null, mockSelfCheck: gen.selfCheck || null, codedTests: [...(cur.codedTests || []).filter((t) => t.name !== gen.spec.name), gen.spec] };
+      if (!cur.uiTestUrl) patch.uiTestUrl = mockUrl; // Default-Ziel, falls der Nutzer keine eigene URL gesetzt hat
+      store.update(component.id, patch);
+      return mockUrl;
+    } catch { return null; }
+  };
+  // Report aus dem aktuellen Stand aller Komponenten bauen
+  const buildReport = () => {
+    const comps = store.list();
+    // Friendly-URL der plugin-eigenen APEX-Testseite (aus dem Page-Register apexPageId + Ziel-Konfig).
+    const at = settings.apexTarget || {};
+    const apexUrlFor = (x) => {
+      if (!x.apexPageId || !at.baseUrl || !at.workspace) return null;
+      const base = String(at.baseUrl).replace(/\/$/, '');
+      return at.alias ? `${base}/r/${String(at.workspace).toLowerCase()}/${at.alias}/${x.apexPageId}` : `${base}/f?p=${at.appId}:${x.apexPageId}`;
+    };
+    const updated = comps.filter((x) => x.lastChange).map((x) => ({ artifact: x.name, change: x.lastChange.summary, testResult: x.status, gitLink: x.source || '', reviewUrl: x.reviewUrl || null, rebuilt: !!x.rebuilt, mockUrl: x.mockUrl || null, apexUrl: apexUrlFor(x) }));
+    const risks = comps.filter((x) => x.libWarning).map((x) => ({ name: x.name, label: '⚠ Libs', reasons: [`${x.libWarning.vulnerable || 0} verwundbar, ${x.libWarning.unmaintained || 0} nicht gepflegt`] }));
+    const failures = comps.filter((x) => ['zu klären', 'review-blockiert'].includes(x.status)).map((x) => ({ artifact: x.name, reason: x.status }));
+    // T-94: neu gebaute/migrierte Komponenten gesondert ausweisen
+    const rebuilt = comps.filter((x) => x.rebuilt).map((x) => ({ artifact: x.name, to: x.rebuiltTo || 'latest', at: x.rebuiltAt || null, reviewUrl: x.reviewUrl || null }));
+    // T-95: Lizenz-Auffälligkeiten (copyleft/unbekannt) über alle Libs
+    const licenses = [];
+    // T-156: Lizenzänderungen (installiert→latest) über alle Libs — rechtlich wichtig, immer melden.
+    const licenseChanges = [];
+    for (const x of comps) for (const l of x.libs || []) {
+      const c = l.licenseInfo; if (c && c.level === 'warn') licenses.push({ name: `${x.name}/${l.name}`, id: c.id, reason: c.reason });
+      if (l.licenseChange) licenseChanges.push({ plugin: x.name, name: l.name, ...l.licenseChange });
+    }
+    // riskante Lizenzwechsel zuerst
+    licenseChanges.sort((a, b) => (b.riskier ? 1 : 0) - (a.riskier ? 1 : 0));
+    return renderReport({ updated, risks, failures, rebuilt, licenses, licenseChanges });
+  };
+
+  // Geplanter Lauf je Repo: neu anbinden (fetch+detect) → analysieren → lastChange/Status + History
+  const scheduler = createScheduler({
+    runJob: async (repo) => {
+      const cfg = settings.repos.find((r) => r.name === repo);
+      if (!cfg) return;
+      try {
+        await syncRepo(cfg, { workDir: settings.workDir, store });
+      } catch (err) {
+        record({ id: `run-${repo}-${history.runs.length + 1}`, status: 'red', failures: [{ artifact: repo, reason: String(err?.message ?? err) }], repo });
+        return;
+      }
+      // Vollautomatische Pflege = dieselbe Orchestrierung wie der manuelle „Full maintenance now"-Button
+      // (T-66): inkl. Mock + verifizierter Lib-Migration (B-17). Job committet/pusht bei grün (Push nur allowPush).
+      for (const c of store.list().filter((x) => x.repo === repo)) {
+        try {
+          await fullMaintain(c, { autoUpload: true });
+        } catch (err) {
+          record({ id: `maint-${repo}-${history.runs.length + 1}`, status: 'red', failures: [{ artifact: c.name, reason: String(err?.message ?? err) }], repo });
+        }
+      }
+    },
+  });
+
+  // Verschlüsselter Secret-Speicher (T-12) für interne Repo-Zugangsdaten (F-21)
+  const masterKey = process.env.AISPP_MASTER_KEY || 'dev-insecure-key';
+  if (masterKey === 'dev-insecure-key') console.log(c('yellow', '  Note: AISPP_MASTER_KEY not set — secrets are encrypted with an insecure dev key.'));
+  const secretsFile = path.join(DATA_DIR, 'secrets.json');
+  let initialBlobs = {};
+  try { if (fs.existsSync(secretsFile)) initialBlobs = JSON.parse(fs.readFileSync(secretsFile, 'utf8')).blobs ?? {}; } catch {}
+  const secretStore = new SecretStore(masterKey, initialBlobs); // persistente Secrets (nur Chiffrate)
+  const saveSecrets = () => {
+    try { fs.mkdirSync(path.dirname(secretsFile), { recursive: true }); fs.writeFileSync(secretsFile, JSON.stringify(secretStore.toJSON(), null, 2)); } catch {}
+  };
+
+  // Auto-Update (F-20): Session-PR-Registry + lokaler Branch-Push
+  const prRegistry = createPrRegistry();
+  const localGitPush = (repoDir) => async ({ branch }) => {
+    const git = simpleGit({ baseDir: repoDir });
+    try { await git.addConfig('user.email', 'aisp@local'); await git.addConfig('user.name', 'Plugin Maintenance'); } catch {}
+    try { await git.checkoutLocalBranch(branch); } catch { try { await git.checkout(branch); } catch {} }
+    try { await git.add('.'); await git.commit(`chore(aisp): update via ${branch}`); } catch {}
+    return { branch };
+  };
+
+  // Upload (T-76): neuer Branch + Commit + optional Push; PR-Link aus der Quelle.
+  const gitFor = (dir) => {
+    const git = simpleGit({ baseDir: dir });
+    return {
+      status: async () => { try { return (await git.status()).files.map((f) => f.path); } catch { return []; } },
+      branchCommit: async (b, m) => {
+        try { await git.addConfig('user.email', 'aisp@local'); await git.addConfig('user.name', 'Plugin Maintenance'); } catch {}
+        try { await git.checkoutLocalBranch(b); } catch { try { await git.checkout(b); } catch {} }
+        await git.add('.'); await git.commit(m);
+      },
+      // Push des Fix-Branches ans Remote (origin = Fork des Nutzers). T-148: zwei Auth-Wege.
+      // 1) PAT hinterlegt ('git-token') → Token NUR jetzt in eine Einmal-URL einsetzen (landet nie in
+      //    .git/config); Fehlertexte werden token-redigiert. 2) Kein Token → an 'origin' (Git Credential
+      //    Manager liefert die Credentials). Ohne beides scheitert der Push → uploadFix meldet pushed:false.
+      push: async (b) => {
+        let token = null; try { token = secretStore.get('git-token'); } catch { /* kein Token */ }
+        if (token) {
+          const remotes = await git.getRemotes(true).catch(() => []);
+          const originUrl = remotes.find((r) => r.name === 'origin')?.refs?.push || remotes[0]?.refs?.push;
+          const authUrl = authenticatedPushUrl(originUrl, token, settings.gitUser);
+          if (authUrl) {
+            try { await git.push([authUrl, b]); return; }
+            catch (e) { throw new Error(redactToken(String(e?.message ?? e), token)); }
+          }
+        }
+        await git.push(['-u', 'origin', b]);
+      },
+    };
+  };
+  const stampNow = () => new Date().toISOString().replace(/[-:T.]/g, '').slice(0, 14);
+  // SICHERHEIT (T-76): tatsächlich gepusht wird NUR, wenn der Nutzer es in den Einstellungen erlaubt hat.
+  // Ohne Erlaubnis bleibt es bei einem lokalen Branch+Commit (pushed:false).
+  const uploadFor = (push) => async (comp) => uploadFix(comp, { git: gitFor(comp.path), push: !!(push && settings.allowPush), stamp: stampNow() });
+
+  // T-124 — Native-Funktionieren-Guard für den Selbst-Fix: prüft das beobachtbare Verhalten gegen den
+  // Akzeptanz-Vertrag (runMockSelfTests + compareAcceptance). Ohne Vertrag/Mock (Guard kann nicht laufen)
+  // → skipped (blockiert NICHT, statt einen gültigen Fix fälschlich zurückzurollen).
+  const verifyNativeFor = (component) => async () => {
+    const c = store.get(component.id) || component;
+    const contract = readAcceptance(c.path);
+    if (!contract || !(contract.criteria?.length)) return { pass: true, skipped: true, reason: 'kein Akzeptanz-Vertrag' };
+    try {
+      const st = await runMockSelfTests(`http://localhost:${port}/mock/${slugify(c.name)}/index.html`, { timeoutMs: 14000 });
+      if (!st || st.ran !== true) return { pass: true, skipped: true, reason: 'Mock-Self-Test lief nicht (kein Playwright/Mock)' };
+      return compareAcceptance(contract, st);
+    } catch (e) { return { pass: true, skipped: true, reason: String(e?.message ?? e) }; }
+  };
+
+  // Vollständige Pflege-Orchestrierung (T-66) — EINE Quelle für den Button UND den autonomen Lauf
+  // (Scheduler/Cron), damit das Tool standalone wirklich pflegt: Mock sicherstellen → maintainComponent
+  // (check/safe-updates/autofix/re-test) → bei breaking Libs: Baseline gegen den Mock + verifizierte
+  // Migration (redevelopComponent, B-17 tauscht die Libs real) → adopt „wie zuvor" / sonst Rollback.
+  const fullMaintain = async (component, opts = {}) => {
+    const id = component.id;
+    CANCELLED.delete(id); // B-59: frischer Lauf startet nicht als „abgebrochen"
+    RUNNING.add(id); // F-29: auch autonome Läufe (Scheduler/Cron) zeigen den „running…"-Indikator in der GUI
+    const bail = () => { if (isCancelled(id)) throw new Error('__CANCELLED__'); }; // kooperativer Abbruch-Punkt
+    try {
+    const ai = resolveAiBackend(settings, secretStore);
+    const hasPlaywright = fs.existsSync(path.join(__dirname, 'node_modules', '@playwright', 'test'));
+    const specsDir = path.join(DATA_DIR, 'ui-tests', slugify(component.name));
+    await buildMockFor(store.get(id)); // Auto-Mock sicherstellen (Default-UI-Test-Ziel)
+    bail(); // B-59
+    const maintainOpts = { ai, updateDeps: { push: localGitPush(component.path), registry: prRegistry, recordRun: record }, logSink: writeLog, onTestPlan, onSbom, recordRun: record, verifyNative: verifyNativeFor(store.get(id)) };
+    // T-153: tiefes Vorher/Nachher-Gate im regulären Lauf — Baseline (vorher) einfrieren, nach Änderungen den
+    // Mock „nachher" bauen und die UI-Szenarien gegen die Baseline vergleichen; Regression → Rollback.
+    // B-70: „Nachher"-Mock nur die vendored Libs auf den aktualisierten Repo-Stand re-synchronisieren (gleiche
+    // Szenarien) statt KI-Neubau; rebuildMock bleibt als Fallback, falls noch kein Mock-Verzeichnis existiert.
+    Object.assign(maintainOpts, { worksAsBefore: true, captureBaseline, compareToBaseline, runDetailed: runUiTestsDetailed, hasPlaywright, specsDir, rebuildMock: async () => { await buildMockFor(store.get(id)); }, refreshMockLibs: async () => { const c = store.get(id); const mockDir = path.join(c.path, '.maintenance', 'mock'); if (!fs.existsSync(path.join(mockDir, 'index.html'))) { await buildMockFor(c); } else { refreshMockLibs(mockDir, c.path); } } });
+    if (opts.autoUpload) { maintainOpts.autoUpload = true; maintainOpts.upload = uploadFor(true); } // Job: bei grün auto-commit (Push nur bei allowPush)
+    const r = await maintainComponent(store, store.get(id), maintainOpts);
+    bail(); // B-59
+    const breaking = (r.steps || []).filter((s) => s.step === 'migrate' && s.skipped);
+    // T-163: Ersatz/Nachbau UNMAINTAINED Libs (migrate-Schritte mit `replace`) ist ein großer, riskanter
+    // Eingriff und läuft NICHT still im Full-/geplanten Lauf — er braucht EXPLIZITE Extra-Zustimmung:
+    // pro Lauf (opts.consentReplace, z.B. GUI-„Approve & replace") ODER Opt-in (Setting/Komponente).
+    // Ohne Zustimmung wird der Vorschlag nur GEMELDET (interface-erhaltend, „wie zuvor"-verifiziert),
+    // nicht ausgeführt. Sichere/Major-Only-Migrationen (ohne `replace`) bleiben ungegated.
+    const replaceConsent = opts.consentReplace === true || settings.autoReplaceUnmaintained === true || !!store.get(id).allowUnmaintainedReplace;
+    const cg = replaceConsentGate(r.steps, { consent: replaceConsent });
+    if (cg.needsConsent) {
+      r.migration = {
+        skipped: true, consentRequired: true, proposals: cg.proposals,
+        reason: `Replacing/rebuilding unmaintained ${cg.proposals.map((p) => p.lib).join(', ')} needs your approval — interface-preserving (${cg.proposals.map((p) => (p.strategy === 'replace' ? `→ ${p.to}` : 'MIT self-build')).join(', ')}), verified as before. Approve to proceed.`,
+      };
+    } else if (breaking.length && r.skipped !== true) {
+      if (!hasPlaywright) r.migration = { skipped: true, reason: 'Playwright not installed — needed for the verified migration (Tests tab → Install Playwright)' };
+      else if (ai.kind === 'stub') r.migration = { skipped: true, reason: 'No AI backend — needed for the migration (Settings → Test connection)' };
+      else {
+        let comp = store.get(id);
+        if (!comp.baseline || !(comp.baseline.green > 0)) { await captureBaseline(store, comp, { specsDir, hasPlaywright, onBaseline }); comp = store.get(id); }
+        if (comp.baseline && comp.baseline.green > 0) {
+          r.migration = await redevelopComponent(store, store.get(id), { ai, specsDir, hasPlaywright, reviewFix: dualReviewFix, upload: uploadFor(true), acceptanceContract: readAcceptance(store.get(id)?.path), runMockSelfTests, mockUrl: `http://localhost:${port}/mock/${slugify(store.get(id).name)}/index.html` });
+          const fresh = store.get(id); r.after = fresh.status; r.rebuilt = !!fresh.rebuilt;
+        } else {
+          r.migration = { skipped: true, reason: comp.baseline ? 'Mock baseline not green — migration cannot be verified “as before” (the mock does not load the plugin cleanly)' : 'No baseline could be captured' };
+        }
+      }
+    }
+    // B-19: nach erfolgreichem Adopt die Erkennung auffrischen, damit Libs/Status/Badges die NEUEN
+    // (getauschten) Versionen zeigen und „vulnerable/outdated" verschwindet (rebuilt-Flag bleibt).
+    if (r.rebuilt) {
+      try { runComponentOnce(store, store.get(id), { scan: scanRepo, logSink: writeLog, onTestPlan, onSbom }); } catch { /* egal */ }
+      try { const enr = await checkLibrariesOnline(store.get(id).libs || []); store.update(id, { libs: enr, libWarning: libWarningFrom(enr) }); } catch { /* offline → später */ }
+    }
+    // Teil der Pflege (F-31): das GEPFLEGTE Plugin real in die echte APEX-App einspielen und die Seite
+    // prüfen — „alles macht die Maintenance". Nur wenn ein APEX-Ziel konfiguriert ist (sonst übersprungen).
+    // Generisch: eigene Seite je Plugin aus dem Register; die Seite wird im Page Designer aufgebaut (B-30).
+    bail(); // B-59: vor dem (langen) APEX-Deploy nochmal auf Abbruch prüfen
+    try {
+      const t = settings.apexTarget || {}; let pass; try { pass = secretStore.get('apex-pass'); } catch { /* kein Passwort */ }
+      const exportFile = component.path ? findPluginExport(component.path) : null;
+      if (t.baseUrl && t.workspace && t.loginUser && pass && t.appId && exportFile && opts.apexLive !== false) {
+        let pageId = store.get(id).apexPageId;
+        if (!pageId) {
+          const used = new Set(store.list().map((x) => x.apexPageId).filter(Boolean));
+          let n = Number(t.nextPageId) || 20000; while (used.has(n)) n += 1; pageId = n;
+          store.update(id, { apexPageId: pageId });
+          settings.apexTarget = { ...t, nextPageId: pageId + 1 }; try { saveSettings(); } catch { /* egal */ }
+        }
+        setStep(id, `APEX: deploy & verify (page ${pageId})…`);
+        const al = await deployAndTest({ exportFile, pageId, target: { baseUrl: t.baseUrl, workspace: t.workspace, user: t.loginUser, pass, appId: Number(t.appId), alias: t.alias, workspaceId: t.workspaceId, owner: t.owner, release: t.release } });
+        try { store.addReview(id, { kind: 'apex-live', pass: al.ok, rendered: !!al.render?.rendered, apexError: al.render?.apexError || null, url: al.render?.url || null, plugin: al.plugin, pageId }); } catch { /* egal */ }
+        r.apexLive = { ok: al.ok, rendered: !!al.render?.rendered, url: al.render?.url || null, pageId, plugin: al.plugin };
+        (r.steps = r.steps || []).push({ step: 'apex-live', ok: al.ok, rendered: !!al.render?.rendered, url: al.render?.url || null });
+        writeLog(component, `[apex-live] page ${pageId}: ${al.ok ? 'rendered ✓' : 'not confirmed'} (${al.render?.url || ''})`);
+      }
+    } catch (e) { writeLog(component, `[apex-live] skipped: ${e?.message ?? e}`); }
+    return r;
+    } catch (e) {
+      // B-59: Abbruch (durch Kindprozess-Kill ausgelöste Rejection ODER kooperativer bail()) → die bereits
+      // angewandten Änderungen aus den persistierten Backups zurückrollen und ehrlich melden.
+      if (isCancelled(id) || String(e?.message || '').includes('__CANCELLED__')) {
+        try { const rec = recoverInterruptedRun(component.path); writeLog(component, `[cancel] cancelled — ${rec.recovered ? `rolled back (${rec.restored} restored, ${rec.removed} removed)` : 'nothing to roll back'}`); } catch { /* egal */ }
+        try { store.update(id, { mockNote: 'Lauf abgebrochen — Kindprozesse beendet, Änderungen zurückgerollt' }); } catch { /* egal */ }
+        return { cancelled: true, component: component.name };
+      }
+      throw e;
+    } finally { CANCELLED.delete(id); RUNNING.delete(id); }
+  };
+
+  // API-Kontexte (T-32/T-34, F-18, F-19)
+  const apiCtx = { store, gather: defaultGather, opener: {}, scan: scanRepo, logSink: writeLog, onTestPlan, onSbom };
+  const metaCtx = {
+    settings,
+    store,
+    scan: scanRepo,
+    recordRun: record,
+    logSink: writeLog,
+    onTestPlan,
+    onSbom,
+    syncRepo: (repoConfig) => syncRepo(repoConfig, { workDir: settings.workDir, store }),
+  };
+
+  const server = http.createServer(async (req, res) => {
+    const url = new URL(req.url, `http://localhost:${port}`);
+    const p = url.pathname;
+
+    // Helfer fuer /api/components/:id/<action>-Routen: id parsen, Komponente holen, 404 + try/catch→500 zentral.
+    const withComponent = async (fn) => {
+      const id = p.split('/')[3];
+      const c = store.get(id);
+      if (!c) return json(res, { error: 'not found' }, 404);
+      try { return await fn(c, id); }
+      catch (err) { return json(res, { error: String(err?.message ?? err) }, 500); }
+    };
+    // Wie withComponent, markiert die Komponente aber als „läuft gerade" (F-29) für lange Operationen
+    // (clone/maintain/migrate/autofix/baseline/ui-tests) → GUI-Spinner auch nach Reload / extern gestartet.
+    const withComponentRunning = async (fn) => {
+      const id = p.split('/')[3];
+      const c = store.get(id);
+      if (!c) return json(res, { error: 'not found' }, 404);
+      RUNNING.add(id);
+      try { return await fn(c, id); }
+      catch (err) { return json(res, { error: String(err?.message ?? err) }, 500); }
+      finally { RUNNING.delete(id); STEP.delete(id); }
+    };
+
+    // Web-GUI + Doku
+    if (p === '/' || p === '/app.html') return serveFile(res, path.join(__dirname, 'public', 'app.html'), 'text/html');
+
+    // Auto-Mock-Seiten statisch ausliefern (F-28/T-97/T-99): /mock/<slug>/... → <repo>/.maintenance/mock/...
+    if (p.startsWith('/mock/')) {
+      const rest = decodeURIComponent(p.slice('/mock/'.length));
+      const sl = rest.split('/')[0];
+      const sub = rest.slice(sl.length + 1) || 'index.html';
+      const comp = store.list().find((x) => slugify(x.name) === sl);
+      if (!comp?.path) { res.writeHead(404, { 'Content-Type': 'text/plain' }); return res.end('mock not found'); }
+      const base = path.normalize(path.join(comp.path, '.maintenance', 'mock'));
+      const target = path.normalize(path.join(base, sub || 'index.html'));
+      if (!target.startsWith(base)) { res.writeHead(403); return res.end('forbidden'); }
+      if (!fs.existsSync(target)) { res.writeHead(404, { 'Content-Type': 'text/plain' }); return res.end('mock not found'); }
+      const ext = path.extname(target).toLowerCase();
+      const ct = ext === '.html' ? 'text/html' : ext === '.js' ? 'text/javascript' : ext === '.css' ? 'text/css' : 'application/octet-stream';
+      res.writeHead(200, { 'Content-Type': `${ct}; charset=utf-8` });
+      return res.end(fs.readFileSync(target));
+    }
+    if (p === '/readme.html') return serveFile(res, path.join(__dirname, 'readme.html'), 'text/html');
+
+    // Health/Build-Marker: das Frontend vergleicht ihn mit seinem APP_BUILD und warnt bei Abweichung
+    // F-29: welche Komponenten gerade einen langen Lauf haben (clone/maintain/migrate/…) → GUI-Spinner
+    if (p === '/api/running') return json(res, { running: [...RUNNING], steps: Object.fromEntries(STEP), cancelling: [...CANCELLED], lastScheduledRunAt, scheduledRunning });
+
+    // B-59: Laufenden Lauf ABBRECHEN. Markiert die Komponente als abgebrochen (kooperativer Bail zwischen den
+    // Phasen) UND killt die laufenden Kindprozesse (claude/Playwright) → die Arbeit stoppt wirklich. Der Lauf
+    // rollt seine bereits angewandten Änderungen aus den persistierten Backups zurück (run-guard).
+    if (p.startsWith('/api/components/') && p.endsWith('/cancel') && req.method === 'POST') {
+      const id = p.split('/')[3];
+      const c = store.get(id);
+      if (!c) return json(res, { error: 'not found' }, 404);
+      if (!RUNNING.has(id)) return json(res, { cancelled: false, reason: 'kein laufender Lauf' });
+      CANCELLED.add(id);
+      const killed = abortAiChildren() + abortUiChildren();
+      setStep(id, 'Cancelling… (child processes terminated, rollback)');
+      return json(res, { cancelled: true, killed });
+    }
+
+    if (p === '/api/health') return json(res, { ok: true, build: BUILD, hasPlaywright: fs.existsSync(path.join(__dirname, 'node_modules', '@playwright', 'test')), aiReady: resolveAiBackend(settings, secretStore).kind !== 'stub', features: ['vendored-libs', 'sbom', 'deep-tests', 'maintain', 'web-libcheck', 'ui-tests', 'pr-upload', 'lib-update', 'auto-repair', 'characterization', 'redev', 'licenses'] });
+
+    // Playwright aus der App installieren (F-28/T-96): npm i -D @playwright/test + Browser → async
+    if (p === '/api/playwright/install' && req.method === 'POST') {
+      try {
+        const sh = process.platform === 'win32';
+        const run = (cmd, args) => new Promise((resolve) => {
+          const ch = childSpawn(cmd, args, { cwd: __dirname, shell: sh });
+          let out = '';
+          ch.stdout?.on('data', (d) => { out += d; });
+          ch.stderr?.on('data', (d) => { out += d; });
+          ch.on('error', (e) => resolve({ code: -1, out: out + String(e?.message ?? e) }));
+          ch.on('close', (code) => resolve({ code: code ?? -1, out }));
+        });
+        const step1 = await run('npm', ['i', '-D', '@playwright/test']);
+        const step2 = step1.code === 0 ? await run('npx', ['playwright', 'install', 'chromium']) : { code: -1, out: 'skipped (npm install failed)' };
+        const ok = step1.code === 0 && step2.code === 0;
+        return json(res, { ok, hasPlaywright: fs.existsSync(path.join(__dirname, 'node_modules', '@playwright', 'test')), log: (step1.out + '\n' + step2.out).slice(-8000) }, ok ? 200 : 500);
+      } catch (err) { return json(res, { ok: false, error: String(err?.message ?? err) }, 500); }
+    }
+
+    // KI-Backend: Verbindung testen / Key hinterlegen
+    if (p === '/api/ai/test' && req.method === 'POST') {
+      try {
+        const be = resolveAiBackend(settings, secretStore);
+        const r = be.testConnection ? await be.testConnection() : { ok: true, note: be.kind };
+        return json(res, { kind: be.kind, ...r });
+      } catch (err) { return json(res, { ok: false, error: String(err?.message ?? err) }, 200); }
+    }
+    // B-62/GUI: Login-Zustand des CLI-Backends (nur Ablaufdaten, keine Secrets) → Anzeige in den Settings.
+    if (p === '/api/ai/auth' && req.method === 'GET') {
+      const cfg = settings.aiBackend ?? { kind: 'stub' };
+      if (cfg.kind !== 'cli') return json(res, { kind: cfg.kind, applicable: false });
+      let hasApiKey = false; try { hasApiKey = !!(cfg.secretRef && secretStore.get(cfg.secretRef)); } catch { /* kein Key */ }
+      return json(res, { kind: 'cli', applicable: true, ...cliAuthState({ hasApiKey }) });
+    }
+    // Öffnet auf dem Desktop ein Terminal mit der konfigurierten claude-CLI für /login (der OAuth-Link ist
+    // dynamisch und entsteht erst im claude-Prozess — deshalb Terminal statt Direktlink). Nur sinnvoll, wenn
+    // der Dienst in der Nutzer-Sitzung läuft (Start.cmd) — sonst erscheint kein Fenster (Hinweis in der GUI).
+    if (p === '/api/ai/login' && req.method === 'POST') {
+      try {
+        const { resolveCliCommand } = await import('./src/ai/backend.js');
+        const cmd = resolveCliCommand((settings.aiBackend ?? {}).command || 'claude');
+        const { spawn } = await import('node:child_process');
+        if (process.platform === 'win32') {
+          spawn('cmd', ['/c', 'start', 'claude login', 'cmd', '/k', `"${cmd}" /login`], { detached: true, stdio: 'ignore', shell: true }).unref();
+        } else {
+          spawn('sh', ['-c', `x-terminal-emulator -e '${cmd} /login' || open -a Terminal '${cmd}'`], { detached: true, stdio: 'ignore' }).unref();
+        }
+        return json(res, { ok: true, command: cmd, note: 'Terminal opened — confirm the browser login there (enter /login if needed).' });
+      } catch (e) { return json(res, { ok: false, error: String(e?.message ?? e) }, 500); }
+    }
+    if (p === '/api/ai/key' && req.method === 'POST') {
+      const body = await readBody(req);
+      if (!body?.key) return json(res, { error: 'key missing' }, 400);
+      secretStore.set('ai-key', body.key);
+      settings.aiBackend = { ...(settings.aiBackend ?? { kind: 'provider' }), secretRef: 'ai-key' };
+      saveSecrets(); saveSettings();
+      return json(res, { ok: true, aiBackend: aiBackendView(settings) });
+    }
+
+    // T-148 — Git Personal Access Token verschlüsselt hinterlegen/entfernen (hoster-unabhängig: GitHub,
+    // GitLab, Bitbucket, Azure, Gitea/self-hosted). Der Token wird NIE zurückgegeben; nur „gesetzt/nicht
+    // gesetzt" ist sichtbar. Optionaler, NICHT geheimer Benutzername (settings.gitUser) für Hoster, die
+    // user:token brauchen. { clear:true } löscht Token (und Benutzernamen).
+    if (p === '/api/git/token' && req.method === 'POST') {
+      const body = await readBody(req);
+      if (body?.clear) { secretStore.delete('git-token'); saveSecrets(); settings.gitUser = undefined; saveSettings(); return json(res, { ok: true, gitTokenSet: false, gitUser: null }); }
+      if (body?.user != null) { settings.gitUser = String(body.user).trim() || undefined; saveSettings(); }
+      if (body?.token) { secretStore.set('git-token', String(body.token).trim()); saveSecrets(); }
+      return json(res, { ok: true, gitTokenSet: secretStore.has('git-token'), gitUser: settings.gitUser ?? null });
+    }
+
+    // SMTP-Passwort verschlüsselt hinterlegen
+    if (p === '/api/smtp/pass' && req.method === 'POST') {
+      const body = await readBody(req);
+      if (!body?.pass) return json(res, { error: 'pass missing' }, 400);
+      secretStore.set('smtp-pass', body.pass); saveSecrets();
+      return json(res, { ok: true });
+    }
+
+    // T-134/T-135 — APEX-Ziel-Konfiguration (Passwort NUR verschlüsselt im SecretStore 'apex-pass').
+    const apexPassSet = () => { try { return !!secretStore.get('apex-pass'); } catch { return false; } };
+    if (p === '/api/apex-target' && req.method === 'PUT') {
+      const body = await readBody(req);
+      setApexTarget(settings, body || {});
+      if (body?.pass) { secretStore.set('apex-pass', body.pass); saveSecrets(); }
+      saveSettings();
+      return json(res, { ok: true, apexTarget: settings.apexTarget, passSet: apexPassSet() });
+    }
+    if (p === '/api/apex-target/test' && req.method === 'POST') {
+      const t = settings.apexTarget || {}; let pass; try { pass = secretStore.get('apex-pass'); } catch {}
+      if (!t.baseUrl || !t.workspace || !t.loginUser || !pass) return json(res, { ok: false, error: 'APEX connection incomplete — set base URL/workspace/user/password.' }, 200);
+      const chromium = await loadChromium();
+      if (!chromium) return json(res, { ok: false, error: 'Playwright not installed.' }, 200);
+      const browser = await chromium.launch({ headless: true });
+      try { const page = await browser.newPage(); const r = await uiLogin(page, { baseUrl: t.baseUrl, workspace: t.workspace, user: t.loginUser, pass }); return json(res, { ok: r.ok, error: r.error, url: r.url }); }
+      catch (e) { return json(res, { ok: false, error: String(e?.message ?? e) }, 200); }
+      finally { await browser.close(); }
+    }
+    // T-165 — Detect: App-Liste + Workspace-ID/Owner direkt aus der Ziel-Instanz holen (Login →
+    // SQL Commands → Builder-Kacheln). Speichert workspaceId/owner immer; appId nur bei eindeutigem
+    // Treffer (Guardrail: nie automatisch eine App wählen). Bei echtem App-Wechsel werden die
+    // veralteten Seiten-Register zurückgesetzt (Szenario „Systemwechsel").
+    if (p === '/api/apex-target/detect' && req.method === 'POST') {
+      const body = await readBody(req).catch(() => ({}));
+      const t = settings.apexTarget || {}; let pass; try { pass = secretStore.get('apex-pass'); } catch {}
+      if (!t.baseUrl || !t.workspace || !t.loginUser || !pass) return json(res, { ok: false, error: 'APEX connection incomplete — set base URL/workspace/user/password first (password stays stored).' }, 200);
+      const chromium = await loadChromium();
+      if (!chromium) return json(res, { ok: false, error: 'Playwright not installed.' }, 200);
+      const browser = await chromium.launch({ headless: true });
+      try {
+        const page = await browser.newPage();
+        const r = await detectApexTarget(
+          { baseUrl: t.baseUrl, workspace: t.workspace, loginUser: t.loginUser, pass, appHint: body?.appHint ?? t.appId ?? t.alias },
+          { login: (cfg) => uiLogin(page, cfg), listApps: () => uiListApps(page, { baseUrl: t.baseUrl }), runSql: (sql) => uiRunSql(page, sql, { baseUrl: t.baseUrl }) },
+        );
+        if (r.ok) {
+          const oldAppId = t.appId;
+          settings.apexTarget = { ...t, workspaceId: r.workspaceId, owner: r.owner, ...(r.appId ? { appId: r.appId } : {}) };
+          const plan = pageRegisterResetPlan(store.list(), oldAppId, r.appId);
+          for (const id of plan.reset) { try { store.update(id, { apexPageId: null }); } catch { /* egal */ } }
+          if (plan.reset.length) settings.apexTarget.nextPageId = 20000;
+          saveSettings();
+          r.pageRegistersReset = plan.reset.length;
+          r.saved = { workspaceId: r.workspaceId, owner: r.owner, appId: settings.apexTarget.appId ?? null };
+        }
+        return json(res, r, 200);
+      } catch (e) { return json(res, { ok: false, error: String(e?.message ?? e) }, 200); }
+      finally { await browser.close(); }
+    }
+    // Report jetzt senden — nur wenn SMTP & Empfänger konfiguriert sind
+    if (p === '/api/report/send' && req.method === 'POST') {
+      if (!settings.smtp?.host || !settings.recipients?.length) {
+        return json(res, { ok: false, configured: false, error: 'Email not configured — set SMTP host and recipients in settings.' }, 200);
+      }
+      try {
+        const report = buildReport();
+        let pass; try { pass = secretStore.get('smtp-pass'); } catch {}
+        const r = await sendReportMail(report, { smtp: settings.smtp, pass, recipients: settings.recipients });
+        return json(res, { ok: true, ...r });
+      } catch (err) { return json(res, { ok: false, error: String(err?.message ?? err) }, 200); }
+    }
+
+    // Autonomes Review & Fix (nutzt konfiguriertes KI-Backend)
+    if (p.startsWith('/api/components/') && p.endsWith('/autoreview') && req.method === 'POST') return withComponentRunning(async (c) => {
+      const ai = resolveAiBackend(settings, secretStore);
+      await buildMockFor(c); // Native-Guard braucht den Mock als Mess-Ziel
+      const r = await autoReviewFix(store, c, { ai, verifyNative: verifyNativeFor(c) });
+      return json(res, r, r?.error ? 400 : 200);
+    });
+
+    // Protokoll-Archiv: Liste bzw. einzelne Logdatei (auch von Läufen ohne offene GUI)
+    if (p.startsWith('/api/components/') && /\/logs(\/|$)/.test(p) && req.method === 'GET') {
+      const parts = p.split('/'); const id = parts[3]; const name = parts[5];
+      const cc = store.get(id);
+      if (!cc) return json(res, { error: 'not found' }, 404);
+      const d = compLogDir(cc);
+      if (name) {
+        const f = path.join(d, path.basename(decodeURIComponent(name)));
+        if (!fs.existsSync(f)) return json(res, { error: 'not found' }, 404);
+        res.writeHead(200, { 'Content-Type': 'text/plain; charset=utf-8' });
+        return res.end(fs.readFileSync(f));
+      }
+      let files = [];
+      try { files = fs.readdirSync(d).filter((x) => x.endsWith('.log')).sort().reverse(); } catch {}
+      return json(res, files.map((fn) => ({ name: fn, at: new Date(Number(fn.replace('.log', '')) || 0).toISOString() })));
+    }
+
+    // Testplan neu erzeugen (Baseline überschreiben — „erst wenn ich erweitere")
+    if (p.startsWith('/api/components/') && p.endsWith('/testplan') && req.method === 'POST') return withComponent(async (cc) => {
+      const r = runComponentOnce(store, cc, { scan: scanRepo, logSink: writeLog, onTestPlan, onSbom, regenerateTestPlan: true });
+      return json(res, { ok: true, testPlanChanged: r.testPlanChanged });
+    });
+
+    // Repo einem Plugin zuordnen (F-21) → async
+    if (p.startsWith('/api/components/') && p.endsWith('/assign-repo') && req.method === 'POST') return withComponentRunning(async (c, id) => {
+      const body = await readBody(req);
+      const r = await assignRepoToComponent(store, id, body || {}, { workDir: settings.workDir, secretStore });
+      saveSecrets(); // ggf. neu hinterlegtes Token verschlüsselt persistieren
+      if (!r?.error) {
+        // Libraries/Typ/Format SOFORT erkennen (read-only) — sonst bleibt die LIBRARIES-Spalte nach dem Import
+        // leer bis zum nächsten Check. Gleiche Aufrufe wie die Post-Update-Auffrischung → konsistente Anzeige.
+        try { runComponentOnce(store, store.get(id), { scan: scanRepo, logSink: writeLog, onTestPlan, onSbom }); } catch { /* Erkennung best effort */ }
+        try {
+          const enr = await checkLibrariesOnline(store.get(id).libs || []); store.update(id, { libs: enr, libWarning: libWarningFrom(enr) });
+          runComponentOnce(store, store.get(id), { scan: scanRepo, logSink: writeLog, onTestPlan, onSbom }); // nach Web-Check neu zusammenfassen → Status/SUMMARY konsistent zu „outdated"
+        } catch { /* offline → Web-Aktualität später */ }
+        const mu = await buildMockFor(store.get(id), { force: true }); if (mu) r.mockUrl = mu; // KI-Mock nach Clone (T-97/T-101)
+        r.libs = (store.get(id).libs || []).length;
+      }
+      return json(res, r, r?.error ? 400 : 200);
+    });
+
+    // Auto-Update je Komponente (F-20) → async, vor dem synchronen Handler
+    if (p.startsWith('/api/components/') && p.endsWith('/update') && req.method === 'POST') return withComponentRunning(async (c, id) => {
+      const body = await readBody(req);
+      // 0) Aktualität sicherstellen (latest/outdated), damit vendored-Updates erkannt werden
+      try { const enr = await checkLibrariesOnline(store.get(id).libs || []); store.update(id, { libs: enr }); } catch { /* offline → weiter */ }
+      // 1) URL-basierte Updates (CDN-Refs gegen Vuln-DB). SICHERHEIT: Push nur bei settings.allowPush (T-76)
+      const r = await autoUpdateComponent(store, store.get(id), { push: settings.allowPush ? localGitPush(c.path) : undefined, registry: prRegistry, recordRun: record });
+      // 2) Vendored-Datei-Updates: safe immer; breaking nur mit force (Nutzer bestätigt, Backup vorhanden)
+      const vend = await applyVendoredUpdates(c.path, store.get(id).libs || [], { force: !!body?.force });
+      if (vend.results.some((x) => x.applied)) {
+        runComponentOnce(store, store.get(id), { scan: scanRepo, logSink: writeLog, onTestPlan, onSbom }); // neu erkennen nach Swap
+        try { const enr2 = await checkLibrariesOnline(store.get(id).libs || []); store.update(id, { libs: enr2 }); } catch { /* offline */ }
+      }
+      const { branchRegistry, ...out } = r;
+      return json(res, { ...out, vendored: vend.results, forced: !!body?.force, backups: [...vend.backups.keys()].length });
+    });
+
+    // Bibliotheks-Aktualität aus dem Web prüfen (T-59) → async
+    if (p.startsWith('/api/components/') && p.endsWith('/libraries/check') && req.method === 'POST') return withComponent(async (c, id) => {
+      const enriched = await checkLibrariesOnline(c.libs || []);
+      store.update(id, { libs: enriched });
+      return json(res, { ok: true, libs: enriched });
+    });
+
+    // Upload: Änderungen als neuer Branch + Commit + (optional) Push, PR-Link zurück (T-76) → async
+    if (p.startsWith('/api/components/') && p.endsWith('/upload') && req.method === 'POST') return withComponent(async (c, id) => {
+      const r = await uploadFor(true)(c); // push nur, wenn settings.allowPush
+      if (r.ok) store.update(id, { reviewUrl: r.prUrl ?? null, reviewBranch: r.branch ?? null });
+      return json(res, { ...r, pushAllowed: !!settings.allowPush });
+    });
+
+    // Coded-UI-Tests (Playwright) live ausführen (T-73) — nur GUI-getriggert, NICHT im Job → async
+    if (p.startsWith('/api/components/') && p.endsWith('/ui-tests') && req.method === 'POST') return withComponentRunning(async (c, id) => {
+      const body = await readBody(req);
+      const url = (body?.url || c.uiTestUrl || '').trim();
+      if (url && url !== c.uiTestUrl) store.update(id, { uiTestUrl: url });
+      const hasPlaywright = fs.existsSync(path.join(__dirname, 'node_modules', '@playwright', 'test'));
+      const r = await runUiTests(store.get(id), { pluginUrl: url, specsDir: path.join(DATA_DIR, 'ui-tests', slugify(c.name)), hasPlaywright });
+      return json(res, r);
+    });
+
+    // T-147 — Fehler-Report (Text + Screenshots) → KI-Analyse → DAUERHAFTER Regressionstest → Rework.
+    // Der Test läuft ab jetzt bei jedem UI-Test-/Pflege-Lauf mit (codedTests) und bleibt nach dem Fix
+    // als Regressionsschutz. rework=false unterdrückt den automatischen Pflegelauf (nur Test anlegen).
+    if (p.startsWith('/api/components/') && p.endsWith('/feedback') && req.method === 'POST') return withComponentRunning(async (c, id) => {
+      const body = await readBody(req);
+      if (!c.path || !fs.existsSync(c.path)) return json(res, { ok: false, error: 'Kein Repo zugeordnet — erst „Assign repo".' }, 200);
+      const fb = saveFeedback(c.path, body || {});
+      if (fb.error) return json(res, { ok: false, error: fb.error }, 400);
+      const ai = resolveAiBackend(settings, secretStore);
+      setStep(id, 'Feedback: analyzing issue & deriving regression test…');
+      const mockUrl = c.uiTestUrl || `http://localhost:${port}/mock/${slugify(c.name)}/index.html`;
+      const t = await createFeedbackTest(store, c, fb, { ai, mockUrl });
+      if (t.error) return json(res, { ok: false, error: t.error, feedback: fb.dir }, 200);
+      // Reproduktion: Suite einmal ausführen — rot = Fehler im Mock nachgestellt; grün = dort nicht reproduzierbar.
+      setStep(id, 'Feedback: running test (reproduction)…');
+      const hasPlaywright = fs.existsSync(path.join(__dirname, 'node_modules', '@playwright', 'test'));
+      const run = await runUiTests(store.get(id), { pluginUrl: mockUrl, specsDir: path.join(DATA_DIR, 'ui-tests', slugify(c.name)), hasPlaywright });
+      const reproduced = run.ran ? !run.ok : null;
+      writeLog(c, `[feedback] Report ${fb.dir} → Regressionstest ${t.spec.name} — ${run.ran ? (reproduced ? 'Fehler reproduziert (rot)' : 'im Mock aktuell grün') : run.reason}`);
+      // Rework anstoßen (voller Pflegezyklus, läuft asynchron weiter; Fortschritt wie gewohnt in der GUI).
+      let reworkStarted = false;
+      if (body?.rework !== false) { fullMaintain(store.get(id), {}).catch(() => {}); reworkStarted = true; }
+      return json(res, { ok: true, feedback: fb.dir, spec: t.spec.name, run: { ran: run.ran, ok: run.ok, passed: run.passed, failed: run.failed, reason: run.reason }, reproduced, reworkStarted });
+    });
+
+    // Charakterisierungs-Baseline aufnehmen (F-28/T-92): Ist-Verhalten als Spec festnageln → async
+    if (p.startsWith('/api/components/') && p.endsWith('/baseline') && req.method === 'POST') return withComponentRunning(async (c, id) => {
+      const body = await readBody(req);
+      const url = (body?.url || c.uiTestUrl || '').trim();
+      if (url && url !== c.uiTestUrl) store.update(id, { uiTestUrl: url });
+      const hasPlaywright = fs.existsSync(path.join(__dirname, 'node_modules', '@playwright', 'test'));
+      const b = await captureBaseline(store, store.get(id), { pluginUrl: url, specsDir: path.join(DATA_DIR, 'ui-tests', slugify(c.name)), hasPlaywright, onBaseline });
+      return json(res, b);
+    });
+
+    // Re-Dev/Migration gegen die Spec (F-28/T-93): KI migriert → UI-Gate → Übernahme nur „grün wie zuvor" → async
+    if (p.startsWith('/api/components/') && p.endsWith('/redevelop') && req.method === 'POST') return withComponentRunning(async (c) => {
+      const ai = resolveAiBackend(settings, secretStore);
+      const hasPlaywright = fs.existsSync(path.join(__dirname, 'node_modules', '@playwright', 'test'));
+      const r = await redevelopComponent(store, c, {
+        ai,
+        pluginUrl: c.uiTestUrl,
+        specsDir: path.join(DATA_DIR, 'ui-tests', slugify(c.name)),
+        hasPlaywright,
+        reviewFix: dualReviewFix, // T-119/2: 2 unabhängige Review-Voten + Rework vor dem works-as-before-Gate
+        // T-122: works-as-before-Gate über den Akzeptanz-Vertrag, falls vorhanden (Plugins ohne Playwright-Baseline)
+        acceptanceContract: readAcceptance(c.path),
+        runMockSelfTests,
+        mockUrl: `http://localhost:${port}/mock/${slugify(c.name)}/index.html`,
+        upload: uploadFor(true), // Push nur bei settings.allowPush (T-76)
+      });
+      return json(res, r, r?.error ? 400 : 200);
+    });
+
+    // F-30/T-118 — Tote-Lib-Neuentwicklung: slice-weise gegen den Akzeptanz-Vertrag neu bauen (tech-frei,
+    // lizenz-gegatet), je Slice KI-Implementierung + Mock-Selbsttest; Übernahme nur „grün wie zuvor", sonst Rollback.
+    if (p.startsWith('/api/components/') && p.endsWith('/redevelop-dead-lib') && req.method === 'POST') return withComponentRunning(async (c, id) => {
+      const ai = resolveAiBackend(settings, secretStore);
+      if (!ai || ai.kind === 'stub') return json(res, { error: 'Kein KI-Backend (Einstellungen → KI).' }, 400);
+      const dir = c.path;
+      if (!dir || !fs.existsSync(dir)) return json(res, { error: 'Kein Repo zugeordnet.' }, 400);
+      const sl = slugify(c.name);
+      const mockUrl = `http://localhost:${port}/mock/${sl}/index.html`;
+      const contract = readAcceptance(dir);
+      const backups = new Map();
+      // Eine Slice (= Sicht) implementieren: KI baut die Funktionalität tech-frei/lizenzrein neu, re-injiziert
+      // in das primäre Plugin-Asset. Backups je Datei → vollständiger Rollback bei Misserfolg.
+      const implementSlice = async (slice, ctx) => {
+        setStep(id, `Redev slice “${slice.view}”`);
+        const asset = inspectAssets(dir).find((a) => a.origin);
+        if (!asset) return;
+        let out = '';
+        try { out = String(await ai.complete(buildSliceRebuildPrompt(slice, contract, { name: c.name, deadLib: ctx.deadLib }), {})); } catch { return; }
+        out = out.replace(/^```[a-z]*\n?|```$/g, '').trim();
+        if (!out || !parseOk(out) || out === asset.code.trim()) return;
+        const tgt = asset.origin.type === 'file' ? path.join(dir, asset.origin.path) : path.join(dir, asset.origin.sqlFile);
+        if (!backups.has(tgt) && fs.existsSync(tgt)) backups.set(tgt, fs.readFileSync(tgt, 'utf8'));
+        reinjectAsset(asset.origin, out, { rootDir: dir });
+      };
+      const runSelfTests = async () => { await buildMockFor(store.get(id), { force: true }); return runMockSelfTests(mockUrl, { timeoutMs: 14000 }); };
+      const rollbackAll = async () => { for (const [t, content] of backups) { try { fs.writeFileSync(t, content); } catch { /* ignore */ } } try { await buildMockFor(store.get(id), { force: true }); } catch { /* ignore */ } };
+      const r = await redevelopDeadLib(store, store.get(id), {
+        ai, contract, implementSlice, runSelfTests, rollbackAll,
+        log: (m) => { writeLog(c, `[redev-dead-lib] ${m}`); setStep(id, `Redev: ${m}`); },
+      });
+      return json(res, r, r?.error ? 400 : 200);
+    });
+
+    // F-30/T-120 — Akzeptanzkriterien exportieren: ?format=json|feature|devhub. Liest acceptance.json
+    // oder leitet sie LIVE aus dem Mock-Selbsttest ab (kein KI nötig). devhub-tauglich (Gherkin) + Datei.
+    if (p.startsWith('/api/components/') && p.endsWith('/acceptance') && req.method === 'GET') return withComponent(async (c) => {
+      const fmt = (url.searchParams.get('format') || 'json').toLowerCase();
+      let contract = readAcceptance(c.path);
+      if (!contract || !(contract.criteria || []).length) {
+        const sl0 = slugify(c.name); const mockUrl = `http://localhost:${port}/mock/${sl0}/index.html`;
+        try { const st = await runMockSelfTests(mockUrl, { timeoutMs: 14000 }); if (st.ran) { contract = acceptanceFromSelfTest(st, { name: c.name, at: new Date().toISOString(), interface: pluginInterface(c.path) }); if (!contract.error) writeAcceptance(c.path, contract); } } catch { /* kein Mock/Playwright */ }
+      }
+      if (!contract || contract.error || !(contract.criteria || []).length) return json(res, { error: 'No acceptance contract — build a green mock first (import plugin / “Open mock”).' }, 400);
+      // T-126: Schnittstelle beim Export sicherstellen — fehlt sie, aus dem Repo nachrüsten; sonst
+      // re-normalisieren (idempotent → entdoppelt auch ältere, doppelt deklarierte Verträge).
+      try {
+        if (!contract.interface) { const iff = pluginInterface(c.path); if (iff.attributes?.length) { contract = { ...contract, interface: normalizeInterface(iff) }; writeAcceptance(c.path, contract); } }
+        else { const norm = normalizeInterface(contract.interface); if (norm.count !== contract.interface.count) { contract = { ...contract, interface: norm }; writeAcceptance(c.path, contract); } }
+      } catch { /* best effort */ }
+      const fn = slugify(c.name);
+      if (fmt === 'feature') { res.writeHead(200, { 'Content-Type': 'text/plain; charset=utf-8', 'Content-Disposition': `attachment; filename="${fn}.acceptance.feature"` }); return res.end(acceptanceFeatureFile(contract, { name: c.name })); }
+      if (fmt === 'devhub') return json(res, acceptanceToDevhub(contract, { name: c.name }));
+      res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8', 'Content-Disposition': `attachment; filename="${fn}.acceptance.json"` }); return res.end(JSON.stringify(contract, null, 2));
+    });
+
+    // T-127 — Requirements/Akzeptanz-Vertrag GEZIELT neu anstoßen (frisch aus dem Mock-Self-Test
+    // abgeleitet, inkl. Schnittstelle). Schreibt nur .maintenance/acceptance.json, kein Push.
+    // T-135 — In echte APEX-App einspielen & live testen (analyse-getrieben, headless Render-Smoke-Test).
+    if (p.startsWith('/api/components/') && p.endsWith('/apex-live') && req.method === 'POST') return withComponentRunning(async (c) => {
+      const t = settings.apexTarget || {}; let pass; try { pass = secretStore.get('apex-pass'); } catch {}
+      if (!t.baseUrl || !t.workspace || !t.loginUser || !pass || !t.appId) return json(res, { ok: false, error: 'APEX connection/app incomplete — set in settings (APEX target) and test the connection.' }, 200);
+      const exportFile = findPluginExport(c.path);
+      if (!exportFile) return json(res, { ok: false, error: 'No plugin export SQL found in the repo (assign a repo?).' }, 200);
+      const body = await readBody(req).catch(() => ({}));
+      // Pro-Plugin-Seiten-Register: jedes Plugin bekommt eine EIGENE Testseite, die für dasselbe Plugin
+      // wiederverwendet wird (kein Überschreiben fremder/reservierter Seiten). Neue Seiten fortlaufend
+      // ab 20000 — bewusst WEIT oberhalb der App-eigenen Seiten (nie 9999 o.ä. überschreiben).
+      let pageId = c.apexPageId;
+      if (!pageId) {
+        const used = new Set(store.list().map((x) => x.apexPageId).filter(Boolean));
+        let next = Number(t.nextPageId) || 20000;
+        while (used.has(next)) next += 1;
+        pageId = next;
+        try { store.update(c.id, { apexPageId: pageId }); } catch { /* egal */ }
+        try { settings.apexTarget = { ...(settings.apexTarget || {}), nextPageId: pageId + 1 }; saveSettings(); } catch { /* egal */ }
+      }
+      setStep(c.id, `APEX: set up & test (page ${pageId})…`);
+      const r = await deployAndTest({ exportFile, pageId, sourceSql: body?.sourceSql, target: { baseUrl: t.baseUrl, workspace: t.workspace, user: t.loginUser, pass, appId: Number(t.appId), alias: t.alias, workspaceId: t.workspaceId, owner: t.owner, release: t.release } });
+      try { store.addReview(c.id, { kind: 'apex-live', pass: r.ok, rendered: !!r.render?.rendered, apexError: r.render?.apexError || null, url: r.render?.url || null, plugin: r.plugin, pageId }); } catch { /* egal */ }
+      // Passwort/Verbindung nie ins Ergebnis spiegeln (deployAndTest gibt es ohnehin nicht zurück).
+      return json(res, r, 200);
+    });
+
+    // T-143 — Plugin VOLLSTÄNDIG löschen (Purge): aus dem Tool, aus der Test-APEX-App (eigene Seite +
+    // eigenes Plug-in) UND von der Platte (nur verwaltete Pfade). Bewusst destruktiv → Namens-Bestätigung
+    // Pflicht (confirm === exakter Name). APEX-Cleanup ist best-effort (fehlt die Verbindung → nur Platte+Tool).
+    if (p.startsWith('/api/components/') && p.endsWith('/purge') && req.method === 'POST') return withComponent(async (c, id) => {
+      const body = await readBody(req).catch(() => ({}));
+      if (!body || String(body.confirm || '') !== c.name) {
+        return json(res, { ok: false, error: 'Confirmation does not match — type the exact plugin name to delete.' }, 400);
+      }
+      const t = settings.apexTarget || {}; let pass; try { pass = secretStore.get('apex-pass'); } catch { /* kein Passwort */ }
+      const apexCleanup = (t.baseUrl && t.workspace && t.loginUser && pass && t.appId) ? async (comp) => {
+        const exportFile = comp.path ? findPluginExport(comp.path) : null;
+        let displayName = null;
+        try { if (exportFile) displayName = buildSetupManifest(fs.readFileSync(exportFile, 'utf8')).plugin.displayName; } catch { /* Analyse optional */ }
+        const chromium = await loadChromium(__dirname);
+        if (!chromium) return { ok: false, error: 'Playwright not installed — APEX cleanup skipped.' };
+        const browser = await chromium.launch({ headless: true });
+        try {
+          const pg = await browser.newPage();
+          const login = await uiLogin(pg, { baseUrl: t.baseUrl, workspace: t.workspace, user: t.loginUser, pass });
+          if (!login.ok) return { ok: false, error: 'APEX-Login fehlgeschlagen — Seite/Plug-in nicht entfernt.' };
+          const out = { ok: true };
+          if (comp.apexPageId) out.page = await uiDeletePage(pg, { appId: Number(t.appId), pageId: comp.apexPageId });
+          if (displayName) out.plugin = await uiDeletePlugin(pg, { appId: Number(t.appId), displayName });
+          return out;
+        } finally { await browser.close(); }
+      } : null;
+
+      const result = await purgeComponent(store, id, {
+        apexCleanup, dataDir: DATA_DIR, workDir: settings.workDir, slugify,
+        rm: (pp) => fs.rmSync(pp, { recursive: true, force: true }),
+        exists: (pp) => fs.existsSync(pp),
+      });
+      writeLog(c, `[purge] plugin deleted — APEX: ${result.apex ? (result.apex.ok ? 'removed' : result.apex.error) : 'skipped (no connection)'}; disk: ${result.removed.length} path(s)`);
+      return json(res, result, 200);
+    });
+
+    // T-144 — Einfacher DATEI-IMPORT (Alternative zu Git): Plugin aus hochgeladenen Dateien anlegen.
+    // Body {name?, files:[{name,content}]} → schreibt in ein verwaltetes Verzeichnis + legt Komponente an.
+    if (p === '/api/import-file' && req.method === 'POST') {
+      const body = await readBody(req).catch(() => null);
+      const r = importFromFiles(store, body || {}, {
+        workDir: settings.workDir,
+        mkdir: (pp) => fs.mkdirSync(pp, { recursive: true }),
+        writeFile: (pp, c) => fs.writeFileSync(pp, c),
+      });
+      if (r.error) return json(res, r, 400);
+      // B-74: wie beim Repo-Zuordnen (B-22) SOFORT scannen — sonst bleiben Libraries/Testplan bis zum
+      // ersten Check leer und der Import wirkt wie „Software nicht erkannt". Web-Check + Mock best effort.
+      const id = r.component.id;
+      try { runComponentOnce(store, store.get(id), { scan: scanRepo, logSink: writeLog, onTestPlan, onSbom }); } catch { /* Erkennung best effort */ }
+      try {
+        const enr = await checkLibrariesOnline(store.get(id).libs || []); store.update(id, { libs: enr, libWarning: libWarningFrom(enr) });
+        runComponentOnce(store, store.get(id), { scan: scanRepo, logSink: writeLog, onTestPlan, onSbom });
+      } catch { /* offline → Web-Aktualität später */ }
+      try { const mu = await buildMockFor(store.get(id), { force: true }); if (mu) r.mockUrl = mu; } catch { /* Mock optional */ }
+      r.component = store.get(id);
+      return json(res, r, 201);
+    }
+
+    // Setup-Manifest („Rezept") pro Plugin: alles zum Einrichten der Testseite, rein aus der Analyse.
+    // Wird auch als .maintenance/apex-setup.json abgelegt (für eine quasi-statische Einrichtung).
+    if (p.startsWith('/api/components/') && p.endsWith('/apex-setup') && req.method === 'GET') {
+      const id = p.split('/')[3];
+      const c = store.get(id);
+      if (!c) return json(res, { error: 'not found' }, 404);
+      const exportFile = c.path ? findPluginExport(c.path) : null;
+      if (!exportFile) return json(res, { error: 'Keine Plugin-Export-SQL im Repo gefunden (Repo zuordnen?).' }, 400);
+      try {
+        const sqlText = fs.readFileSync(exportFile, 'utf8');
+        const manifest = buildSetupManifest(sqlText);
+        try { const dir = path.join(c.path, '.maintenance'); fs.mkdirSync(dir, { recursive: true }); fs.writeFileSync(path.join(dir, 'apex-setup.json'), JSON.stringify(manifest, null, 2)); } catch { /* egal */ }
+        return json(res, manifest, 200);
+      } catch (e) { return json(res, { error: String(e?.message ?? e) }, 500); }
+    }
+
+    if (p.startsWith('/api/components/') && p.endsWith('/rebuild-requirements') && req.method === 'POST') return withComponentRunning(async (c, id) => {
+      const sl = slugify(c.name); const mockUrl = `http://localhost:${port}/mock/${sl}/index.html`;
+      const derive = async () => {
+        const st = await runMockSelfTests(mockUrl, { timeoutMs: 20000 });
+        if (!st || st.ran !== true) return { st, contract: null };
+        const contract = acceptanceFromSelfTest(st, { name: c.name, at: new Date().toISOString(), interface: pluginInterface(c.path) });
+        return { st, contract: contract.error ? null : contract };
+      };
+      // 1) Günstig: aus dem vorhandenen Mock ableiten.
+      setStep(id, 'Requirements: ensuring mock…');
+      if (!(await buildMockFor(store.get(id)))) return json(res, { ok: false, error: 'Cannot build a mock (repo/plugin missing) — requirements not derivable.' }, 400);
+      setStep(id, 'Requirements: mock self-test…');
+      let { st, contract } = await derive();
+      // 2) Ergibt der vorhandene Mock kein grünes Soll → VOLLER KI-Neuaufbau des Mocks (das eigentliche „neu bauen").
+      if (!contract || contract.total === 0) {
+        setStep(id, 'Requirements: full AI rebuild of the mock (may take a while)…');
+        await buildMockFor(store.get(id), { force: true });
+        setStep(id, 'Requirements: mock self-test (after rebuild)…');
+        ({ st, contract } = await derive());
+      }
+      // 3) NON-DESTRUKTIV: nur einen Vertrag MIT grünen Kriterien schreiben; sonst den vorhandenen behalten.
+      if (!contract || contract.total === 0) {
+        const kept = readAcceptance(c.path);
+        return json(res, { ok: false, selfFailed: true, keptPrevious: !!(kept && (kept.criteria || []).length), error: 'Fresh characterization produced NO green baseline — the mock does not load the plugin cleanly. The previous contract is kept unchanged; a full AI rebuild did not turn it green either.' }, 200);
+      }
+      writeAcceptance(c.path, contract);
+      try { store.update(id, { mockSelfCheck: { views: st.views ?? null, total: st.total ?? contract.total, failed: (st.problems || []).length } }); } catch { /* egal */ }
+      return json(res, { ok: true, total: contract.total, views: contract.views, interfaceCount: contract.interface?.count ?? 0, capturedAt: contract.capturedAt });
+    });
+
+    // SBOM (CycloneDX) der Komponente — für Review/Visualisierung (T-69) → GET
+    if (p.startsWith('/api/components/') && p.endsWith('/sbom') && req.method === 'GET') return withComponent(async (c) => {
+      const sbom = buildSbom(c.name, (c.libs || []).map((l) => ({ name: l.name, version: l.version, detectedBy: l.detectedBy || 'erkannt', evidence: l.source || l.evidence || '' })));
+      // Status/Quelle als zusätzliche Properties anreichern (für Review-Auswertung)
+      sbom.components.forEach((comp, i) => {
+        const l = (c.libs || [])[i];
+        if (l) comp.properties.push({ name: 'status', value: l.status || 'unbekannt' }, ...(l.source ? [{ name: 'source', value: l.source }] : []), ...(l.latest ? [{ name: 'latest', value: l.latest }] : []));
+      });
+      return json(res, sbom);
+    });
+
+    // Alles automatisch beheben (T-61) → async
+    if (p.startsWith('/api/components/') && p.endsWith('/autofix') && req.method === 'POST') return withComponentRunning(async (c) => {
+      const ai = resolveAiBackend(settings, secretStore);
+      await buildMockFor(c); // Native-Guard (T-124) braucht den Mock als Mess-Ziel
+      const r = await autoFixComponent(store, c, {
+        ai,
+        updateDeps: { push: localGitPush(c.path), registry: prRegistry, recordRun: record },
+        verifyNative: verifyNativeFor(c),
+        logSink: writeLog,
+      });
+      return json(res, r, r?.error ? 400 : 200);
+    });
+
+    // Vollständige Pflege (manuell = automatisch) — eine Orchestrierung (T-66) → async
+    if (p.startsWith('/api/components/') && p.endsWith('/maintain') && req.method === 'POST') return withComponent(async (c, id) => {
+      const body = await readBody(req).catch(() => ({}));
+      // T-163: { consentReplace:true } = explizite Extra-Zustimmung, unmaintained Libs in DIESEM Lauf zu
+      // ersetzen/nachzubauen (GUI-„Approve & replace"). Ohne das nur Vorschlag (consentRequired).
+      const r = await fullMaintain(store.get(id), { consentReplace: body?.consentReplace === true }); // fullMaintain managt RUNNING selbst
+      return json(res, r, r?.error ? 400 : 200);
+    });
+
+    // Bibliothek manuell hinzufügen (T-67) → async
+    if (p.startsWith('/api/components/') && p.endsWith('/libraries') && req.method === 'POST') return withComponent(async (c, id) => {
+      const body = await readBody(req);
+      if (!body?.name) return json(res, { error: 'Name missing' }, 400);
+      const lib = { name: String(body.name), version: String(body.version || ''), status: 'unbekannt', detectedBy: 'manuell', source: body.source || null };
+      const libs = [...(c.libs || []), lib];
+      store.update(id, { libs });
+      return json(res, { ok: true, libs });
+    });
+
+    // Komponenten-Verwaltung (T-34) → synchroner REST-Handler
+    if (p.startsWith('/api/components')) {
+      const body = ['POST', 'PUT', 'PATCH', 'DELETE'].includes(req.method) ? await readBody(req) : null;
+      try {
+        const { status, body: out } = apiHandler(req.method, p, body, apiCtx);
+        return json(res, out, status);
+      } catch (err) {
+        return json(res, { error: String(err?.message ?? err) }, 500);
+      }
+    }
+
+    // Arbeitsverzeichnis & Repo-Anbindung (F-18) + Lauf (F-19) → async Handler
+    if (p === '/api/settings' || p.startsWith('/api/repos') || p === '/api/run' || p === '/api/libraries') {
+      const body = req.method !== 'GET' ? await readBody(req) : null;
+      try {
+        const { status, body: out } = await metaApiHandler(req.method, p, body, metaCtx);
+        if (req.method !== 'GET' && (p === '/api/settings' || p.startsWith('/api/repos'))) saveSettings();
+        // T-134: ob das APEX-Passwort verschlüsselt hinterlegt ist (nie das Passwort selbst) → GUI-Anzeige „(stored)".
+        if (p === '/api/settings' && req.method === 'GET' && out && typeof out === 'object') { let ps = false; try { ps = !!secretStore.get('apex-pass'); } catch {} out.apexPassSet = ps; out.gitTokenSet = secretStore.has('git-token'); out.gitUser = settings.gitUser ?? null; }
+        return json(res, out, status);
+      } catch (err) {
+        return json(res, { error: String(err?.message ?? err) }, 500);
+      }
+    }
+
+    // Status/Diagnose
+    if (p === '/api/dashboard') return json(res, { repos: settings.repos, runs: listRuns(history) });
+    if (p === '/api/scan') {
+      const repoPath = url.searchParams.get('path');
+      if (!repoPath || !fs.existsSync(repoPath)) return json(res, { error: 'path missing/invalid' }, 400);
+      return json(res, scanRepo(repoPath));
+    }
+    if (p === '/api/trigger') {
+      const r = scheduler.submit(url.searchParams.get('repo'), { now: undefined, trigger: 'manual' });
+      return json(res, r.done ? { accepted: true } : r);
+    }
+
+    res.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8' });
+    res.end('Not found');
+  });
+
+  server.listen(port, () => {
+    console.log(c('bold', `\n  Plugin Maintenance — Web-GUI: http://localhost:${port}`));
+    console.log(c('dim', '  GUI: /   ·   Docs: /readme.html'));
+    console.log(c('dim', '  API: /api/components (CRUD, /:id/notes, /:id/review, /:id/open) · /api/scan?path= · /api/dashboard'));
+    console.log(c('dim', '  Stop with Ctrl+C.\n'));
+  });
+
+  // Zeitplan: jede Minute prüfen, ob der automatische Lauf fällig ist (Cron, settings.schedule).
+  // STANDALONE-Pflege: der geplante Lauf macht die VOLLE Pflege (fullMaintain inkl. verifizierter
+  // Lib-Migration) für jede verwaltete Komponente — nicht nur scannen — und mailt danach den Report.
+  let lastTick = '';
+  let scheduledRunning = false;
+  let lastScheduledRunAt = null; // Zeitstempel des letzten abgeschlossenen automatischen Laufs (für die GUI-Header-Region)
+  setInterval(() => {
+    try {
+      if (!settings.scheduleEnabled || !settings.schedule) return;
+      const now = new Date();
+      const stamp = now.toISOString().slice(0, 16);
+      if (stamp === lastTick || !cronMatches(settings.schedule, now)) return;
+      lastTick = stamp;
+      if (scheduledRunning) return; // vorheriger geplanter Lauf noch aktiv → überspringen
+      scheduledRunning = true;
+      console.log(c('dim', `  [${now.toLocaleString('en-GB')}] scheduled maintenance run in progress …`));
+      (async () => {
+        try {
+          for (const comp of store.list()) {
+            if (!comp.path || !fs.existsSync(comp.path)) continue; // nur angebundene Komponenten
+            try { await fullMaintain(comp, { autoUpload: true }); }
+            catch (err) { record({ id: `sched-${comp.id}-${history.runs.length + 1}`, status: 'red', failures: [{ artifact: comp.name, reason: String(err?.message ?? err) }] }); }
+          }
+          if (settings.recipients?.length && settings.smtp?.host) {
+            let pass; try { pass = secretStore.get('smtp-pass'); } catch {}
+            await sendReportMail(buildReport(), { smtp: settings.smtp, pass, recipients: settings.recipients }).catch(() => {});
+          }
+        } finally { scheduledRunning = false; lastScheduledRunAt = new Date().toISOString(); }
+      })();
+    } catch { scheduledRunning = false; }
+  }, 60000);
+}
+
+function serveFile(res, file, type) {
+  if (!fs.existsSync(file)) {
+    res.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8' });
+    return res.end('readme.html not generated yet');
+  }
+  res.writeHead(200, { 'Content-Type': `${type}; charset=utf-8` });
+  res.end(fs.readFileSync(file));
+}
+function json(res, obj, code = 200) {
+  res.writeHead(code, { 'Content-Type': 'application/json; charset=utf-8' });
+  res.end(JSON.stringify(obj, null, 2));
+}
+function readBody(req) {
+  return new Promise((resolve) => {
+    let data = '';
+    req.on('data', (c) => (data += c));
+    req.on('end', () => {
+      if (!data) return resolve(null);
+      try { resolve(JSON.parse(data)); } catch { resolve(null); }
+    });
+  });
+}
+// node start.js test [name] — Tests für ALLE verwalteten Plugins/Template-Komponenten (nicht die App)
+function cmdTest(filter) {
+  const store = createComponentStore({ file: path.join(DATA_DIR, 'components.json') });
+  let comps = store.list();
+  if (filter) comps = comps.filter((x) => x.name.toLowerCase().includes(String(filter).toLowerCase()));
+  if (comps.length === 0) {
+    console.log(c('yellow', `\n  No ${filter ? `matching ` : ''}managed plugins/template components found.\n`));
+    return;
+  }
+  console.log(c('bold', `\n  Plugin Maintenance — tests for ${comps.length} managed component(s)\n`));
+  const { results, green, red, skipped, ok } = runComponentTests(comps, { scan: scanRepo });
+  for (const r of results) {
+    if (r.verdict === 'skipped') {
+      console.log(`  ${c('yellow', '● skipped')} ${c('bold', r.name)} ${c('dim', `(${r.reason})`)}`);
+      continue;
+    }
+    const tag = r.verdict === 'red' ? c('red', '● red') : c('green', '● green');
+    console.log(`  ${tag} ${c('bold', r.name)} ${c('dim', `[${r.format ?? '—'}]`)} — ${r.scenarios} scenario(s), Security ${r.security}, Code ${r.quality}, Vulnerabilities ${r.vulnerabilities}`);
+    for (const f of r.failures) console.log(c('red', `      ✗ ${f.artifact}: ${f.reason}`));
+  }
+  console.log(c('bold', `\n  Result: ${c('green', green + ' green')}, ${c(red ? 'red' : 'dim', red + ' red')}, ${skipped} skipped\n`));
+  process.exitCode = ok ? 0 : 1;
+}
+
+function fail(msg) {
+  console.error(c('red', `\n  ${msg}\n`));
+  process.exitCode = 1;
+}
+function help() {
+  console.log(`
+  ${c('bold', 'Plugin Maintenance')}
+
+  node start.js scan <repo-path>     One-off read-only maintenance run (analysis/SBOM/risk/triage)
+  node start.js test [name]           Run tests for ALL managed plugins/template components
+  node start.js serve [port]          Service: scheduler + mini web GUI (default port 4317)
+  node start.js help                  This help
+`);
+}
+
+const [cmd, arg] = process.argv.slice(2);
+switch (cmd) {
+  case 'scan': cmdScan(arg); break;
+  case 'test': cmdTest(arg); break;
+  case 'serve': cmdServe(arg); break;
+  case 'help': case undefined: help(); break;
+  default: fail(`Unknown command: ${cmd}`); help();
+}
