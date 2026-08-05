@@ -230,7 +230,7 @@
     <label>Directory or Git URL <span class="muted small">(optional — a local folder WITHOUT Git works too: it is copied into the workspace, your original stays untouched)</span></label><input id="mPath" placeholder="https://github.com/org/plugin  ·  D:\ais\MyPlugin (folder, no Git needed)">
     <div id="mFilesRow">
       <div class="small muted" style="margin:10px 0 2px">— or, if you don't use Git —</div>
-      <label>Import files <span class="muted small">(.sql required · + optional JS/CSS/JSON)</span></label>
+      <label>Import files <span class="muted small">(hold <b>Ctrl/Shift</b> to select MULTIPLE files · .sql required for a new plugin; re-import with the same name to add more files · for a WHOLE folder use the Directory field above)</span></label>
       <input id="mFiles" type="file" multiple accept=".sql,.js,.css,.json,.md,.txt">
     </div>
     <div class="foot">
@@ -355,7 +355,7 @@
       <div class="muted small" style="margin-bottom:8px">For deploying into a real APEX app + render smoke test. Use a test app/instance only. The password is stored encrypted, never logged.</div>
       <label>Base URL (ORDS)</label><input id="apxBaseUrl" placeholder="https://host/ords">
       <div class="row2"><div><label>Workspace</label><input id="apxWorkspace" placeholder="MYWORKSPACE"></div><div><label>App-ID</label><input id="apxAppId" placeholder="200000"></div></div>
-      <div class="row2"><div><label>App-Alias (Friendly-URL)</label><input id="apxAlias" placeholder="test"></div><div><label>Login-User (DB-User)</label><input id="apxUser" placeholder="app_user"></div></div>
+      <div class="row2"><div><label>App-Alias (Friendly-URL)</label><input id="apxAlias" placeholder="test"></div><div><label>Login user <span class="muted small">(your APEX workspace sign-in username — labeled “Database Username” on the APEX login page)</span></label><input id="apxUser" placeholder="e.g. meetup"></div></div>
       <label>Password <span id="apxPassState" class="muted small"></span></label><input id="apxPass" type="password" placeholder="stored encrypted">
       <div class="row2"><div><label>Workspace-ID</label><input id="apxWsId" placeholder="from app export"></div><div><label>Parsing schema (owner)</label><input id="apxOwner" placeholder="WKSP_MYWORKSPACE"></div></div>
       <div class="inline" style="margin-top:8px"><button onclick="testApexConn()">🔌 Test connection</button><button class="ghost" onclick="detectApex()" title="Log in to the target instance and fetch workspace ID, owner and the app list automatically — no more copying IDs from export files">🔍 Detect IDs from APEX</button><span id="apxConnOut" class="muted small"></span></div>
@@ -1220,15 +1220,19 @@ async function saveComponent(){
   const mf=$('mFiles');
   const fl = (!id && mf && mf.files) ? [...mf.files] : [];
   if(fl.length){
-    if(!fl.some(f=>/\.sql$/i.test(f.name))) return toast('A plugin export (.sql) is required');
-    toast('Importing…');
+    // B-76: der Import scannt + baut den Mock SYNCHRON (B-74) — ohne Overlay wirkte das minutenlang
+    // eingefroren und die Liste blieb „ohne Refresh". Overlay wie beim Klon-/Ordner-Zweig; load() IMMER.
+    // (.sql-Pflicht prüft der Server — beim Nachreichen zu einem bestehenden Import ist keine .sql nötig.)
+    const iname = $('mName').value.trim() || (fl.find(f=>/\.sql$/i.test(f.name))?.name.replace(/\.sql$/i,'')) || '';
+    closeModal();
+    busyOverlay(true, `Importing ${iname||'plugin'}… (scan + mock build — this can take a few minutes)`);
     try{
       const files = await Promise.all(fl.map(f => f.text().then(content => ({ name: f.name, content }))));
       const r = await api('POST','/api/import-file', { name: $('mName').value.trim(), files });
-      closeModal(); await load();
       toast(`Imported “${r.component.name}” (${(r.files||[]).length} file(s))`);
       if(r.component&&r.component.id) openDetail(r.component.id);
-    }catch(e){ toast('Error: '+(e.message||e)); }
+    }catch(e){ toast('Import error: '+(e.message||e)); }
+    finally{ busyOverlay(false); await load(); }   // Liste aktualisiert IMMER — auch nach Fehlern
     return;
   }
   // Herkunft 2 — Git-URL ODER lokaler Ordner (T-166: Ordner ohne Git wird ins Workspace KOPIERT —

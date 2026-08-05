@@ -12,12 +12,16 @@
  * Resultat: src/service/import-file.js
  */
 
+import fs from 'node:fs';
 import path from 'node:path';
 import { repoCheckoutDir, repoComponent } from './workspace.js';
 import { slug } from '../util/slug.js';
 
 const SQL_RE = /\.sql$/i;
 const ALLOWED = /\.(sql|js|css|json|md|txt)$/i; // Plugin-Export + typische Asset-/Doku-Dateien
+// B-76: liegt im Zielverzeichnis schon ein Export (früherer Import), dürfen weitere Dateien OHNE .sql
+// nachgereicht werden — die .sql-Pflicht gilt nur für ein NEUES Plugin.
+const defaultHasExistingSql = (dir) => { try { return fs.readdirSync(dir).some((f) => SQL_RE.test(f)); } catch { return false; } };
 
 /**
  * @param {object} store  Komponenten-Store (list/add/update)
@@ -34,13 +38,14 @@ export function importFromFiles(store, payload, deps = {}) {
     if (path.basename(f.name) !== f.name || /[/\\]/.test(f.name) || !ALLOWED.test(f.name)) return { error: `Invalid or disallowed file name: ${f.name}` };
   }
   const sqlFile = files.find((f) => SQL_RE.test(f.name));
-  if (!sqlFile) return { error: 'No plugin export included — at least one .sql file is required.' };
-
-  const name = (payload.name && payload.name.trim()) || path.basename(sqlFile.name).replace(SQL_RE, '');
+  const name = (payload.name && payload.name.trim()) || (sqlFile ? path.basename(sqlFile.name).replace(SQL_RE, '') : '');
   if (!name) return { error: 'No name derivable.' };
   if (!deps.workDir) return { error: 'Working directory not configured.' };
 
   const dir = repoCheckoutDir(deps.workDir, slug(name));
+  // B-76: ohne .sql nur erlaubt, wenn dieser Import-Ordner bereits einen Export enthält (Nachreichen).
+  const hasExistingSql = (deps.hasExistingSql ?? defaultHasExistingSql)(dir);
+  if (!sqlFile && !hasExistingSql) return { error: 'No plugin export included — at least one .sql file is required (re-import with the SAME name to add files to an existing import).' };
   deps.mkdir(dir);
   for (const f of files) deps.writeFile(path.join(dir, path.basename(f.name)), f.content);
 

@@ -56,9 +56,22 @@ describe('T-144 importFromFiles — Plugin aus Dateien (kein Git)', () => {
     expect(b.component.id).toBe(a.component.id);
   });
 
-  it('ohne .sql → Fehler (Plugin-Export nötig)', () => {
-    const r = importFromFiles(makeStore(), { files: [{ name: 'plugin.js', content: 'x' }] }, realDeps());
+  it('ohne .sql → Fehler bei NEUEM Plugin (Plugin-Export nötig)', () => {
+    const r = importFromFiles(makeStore(), { name: 'Neu', files: [{ name: 'plugin.js', content: 'x' }] }, realDeps());
     expect(r.error).toMatch(/\.sql/);
+    // ohne .sql UND ohne Namen ist nichts ableitbar
+    expect(importFromFiles(makeStore(), { files: [{ name: 'plugin.js', content: 'x' }] }, realDeps()).error).toMatch(/name/i);
+  });
+
+  it('B-76: Nachreichen OHNE .sql erlaubt, wenn der Import-Ordner schon einen Export enthält', () => {
+    const store = makeStore();
+    const deps = realDeps();
+    importFromFiles(store, { name: 'Leaflet', files: [{ name: 'x.sql', content: REGION_SQL }] }, deps);
+    const r = importFromFiles(store, { name: 'Leaflet', files: [{ name: 'leaflet.js', content: '/* Leaflet 1.7.1 */' }] }, deps);
+    expect(r.ok).toBe(true);
+    expect(fs.existsSync(path.join(r.component.path, 'leaflet.js'))).toBe(true);   // nachgereicht
+    expect(fs.existsSync(path.join(r.component.path, 'x.sql'))).toBe(true);        // Export bleibt
+    expect(store._items()).toHaveLength(1);                                        // kein Duplikat
   });
 
   it('ohne Dateien → Fehler', () => {
