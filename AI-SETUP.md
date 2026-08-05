@@ -75,7 +75,7 @@ Open **⚙ Settings**; it has tabs. Fill them in this order:
 
 ### APEX target (optional — only for "deploy & live test")
 Use a **test app / test instance only** (see Guardrails). Preferred flow:
-1. Enter only **Base URL (ORDS)** (`https://<host>/ords`), **Workspace**, **Login-User** and **Password**. **(ask the human for these + which app is the dedicated TEST app)**
+1. Enter only **Base URL (ORDS)** (`https://<host>/ords`), **Workspace**, **Workspace user** (a developer or admin account of that workspace — the APEX sign-in username) and **Password**. **(ask the human for these + which app is the dedicated TEST app)**
 2. Click **🔍 Detect IDs from APEX** — the tool signs in, fills **Workspace-ID** and **Owner (parsing schema)** automatically and lists the workspace's apps. Pick the dedicated **test app** from the list (never a real/production app; if none exists, have the human create an empty "Plugin Test" app first, then Detect again).
 3. Click **🔌 Test connection**; expect *Login ok (App Builder reached)*.
 

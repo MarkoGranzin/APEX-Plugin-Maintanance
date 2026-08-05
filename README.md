@@ -156,7 +156,8 @@ Settings are grouped into tabs:
 - **APEX target** — connection to the APEX app used for live deploy & test‑page setup.
 
 **APEX target — you only need URL, workspace and login.** Enter *Base URL* (`https://<host>/ords`),
-*Workspace*, *Login user* and *Password*, then click **🔍 Detect IDs from APEX**: the tool signs
+*Workspace*, *Workspace user* (a developer or admin account of that workspace — the username
+from the APEX sign‑in page) and *Password*, then click **🔍 Detect IDs from APEX**: the tool signs
 in to the target instance, fills **Workspace‑ID** and **Owner (parsing schema)** automatically
 and lists the workspace's apps so you can pick the target **test app** (it never picks one for
 you — create a dedicated empty test app first if the workspace has none; the tool builds its
