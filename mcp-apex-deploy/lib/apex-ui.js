@@ -8,6 +8,7 @@
  * Resultat: mcp-apex-deploy/lib/apex-ui.js
  */
 
+import os from 'node:os';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 
@@ -98,17 +99,48 @@ export async function uiListApps(page, o = {}) {
  */
 export async function uiRunSql(page, sql, o = {}) {
   if (!o.baseUrl) return { ok: false, error: 'baseUrl missing.' };
-  await page.goto(`${String(o.baseUrl).replace(/\/$/, '')}/r/apex/sql-commands`, { waitUntil: 'domcontentloaded', timeout: 30000 }).catch(() => {});
-  await page.waitForLoadState('networkidle', { timeout: 15000 }).catch(() => {});
-  await page.waitForTimeout(2000);
-  // Editor fokussieren (CodeMirror/Monaco/plain textarea — je nach APEX-Version) und SQL eintippen.
-  const editor = page.locator('.CodeMirror, .monaco-editor, #apexir_CODE, textarea').first();
-  if (!(await editor.count())) return { ok: false, error: 'SQL Commands editor not found (navigation differs).' };
+  const base = String(o.baseUrl).replace(/\/$/, '');
+  // B-77: Editor je nach APEX-Version — 24.x nutzt CodeMirror 6 (.cm-editor/.cm-content).
+  const EDITOR = '.cm-editor .cm-content, .cm-content, .cm-editor, .CodeMirror, .monaco-editor, #apexir_CODE, textarea';
+  const settle = async (ms = 2000) => { await page.waitForLoadState('networkidle', { timeout: 15000 }).catch(() => {}); await page.waitForTimeout(ms); };
+  const findEditor = async () => { const e = page.locator(EDITOR).first(); return (await e.count()) ? e : null; };
+  const clickFirst = async (locs) => { for (const l of locs) { const c = l.first(); if (await c.count()) { await c.click({ force: true }).catch(() => {}); await settle(1200); return true; } } return false; };
+
+  // 1) Direkt-URL (je nach Version/Instanz vorhanden).
+  await page.goto(`${base}/r/apex/sql-commands`, { waitUntil: 'domcontentloaded', timeout: 30000 }).catch(() => {});
+  await settle();
+  let editor = await findEditor();
+
+  // 2) B-77-Fallback: wie ein echter Nutzer — Workspace-Home → Menü/Kachel „SQL Workshop" → „SQL Commands".
+  if (!editor) {
+    await page.goto(`${base}/r/apex/workspace/home`, { waitUntil: 'domcontentloaded', timeout: 30000 }).catch(() => {});
+    await settle();
+    await clickFirst([
+      page.getByRole('button', { name: /sql workshop/i }),
+      page.getByRole('link', { name: /sql workshop/i }),
+      page.getByText(/^\s*SQL Workshop\s*$/i),
+    ]);
+    await clickFirst([
+      page.getByRole('menuitem', { name: /sql commands/i }),
+      page.getByRole('link', { name: /sql commands/i }),
+      page.getByText(/SQL Commands/i),
+    ]);
+    editor = await findEditor();
+  }
+
+  if (!editor) {
+    // Diagnose statt Rätselraten: wo sind wir gelandet? + Screenshot für die Fehlersuche.
+    let shot = null;
+    try { shot = path.join(os.tmpdir(), 'apex-sqlcommands.png'); await page.screenshot({ path: shot }); } catch { shot = null; }
+    const title = await page.title().catch(() => '');
+    return { ok: false, error: `SQL Commands editor not found (landed on "${title}" @ ${page.url()})${shot ? ` — screenshot: ${shot}` : ''}` };
+  }
+
   await editor.click({ force: true }).catch(() => {});
   await page.keyboard.press(process.platform === 'darwin' ? 'Meta+a' : 'Control+a').catch(() => {});
   await page.keyboard.insertText(sql).catch(async () => { await page.keyboard.type(sql, { delay: 5 }); });
   // Ausführen: Run-Button, sonst Ctrl+Enter.
-  const run = page.getByRole('button', { name: /^run/i });
+  const run = page.getByRole('button', { name: /^run\b/i });
   if (await run.count()) await run.first().click().catch(() => {});
   else await page.keyboard.press('Control+Enter').catch(() => {});
   await page.waitForLoadState('networkidle', { timeout: 20000 }).catch(() => {});
