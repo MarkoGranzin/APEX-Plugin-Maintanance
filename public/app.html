@@ -448,7 +448,9 @@ function mockBadge(c){
   if(c.mockMode==='ai'){
     const sc=c.mockSelfCheck;
     if(sc && typeof sc.total==='number'){
-      const pass=sc.total-(sc.failed||0);
+      // failed zählt seit B-37 ALLE Probleme (auch Zusatzbefunde wie Konsole-Fehler/404) und kann daher
+      // GRÖSSER als total sein — die Passed-Anzeige nie negativ werden lassen (Browser-E2E-Fund: „-2/143").
+      const pass=Math.max(0, sc.total-(sc.failed||0));
       // B-37: rote Self-Checks sind HANDLUNGSBEDARF, kein „ok" — rot zeigen; die nächste Pflege korrigiert weiter (kein Cache für rote Mocks).
       return ` <span class="badge" title="AI mock self-tests${sc.views?` · ${sc.views} views`:''}${sc.failed?` · ${sc.failed} red — die nächste Pflege untersucht/korrigiert den Mock erneut`:''}" style="color:${sc.failed?'#f85149':'#3fb950'};border-color:${sc.failed?'#f8514966':'#3fb95066'}">🧪 ${pass}/${sc.total}</span>`;
     }
