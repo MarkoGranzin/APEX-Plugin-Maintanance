@@ -30,13 +30,27 @@ const defaultHasExistingSql = (dir) => { try { return fs.readdirSync(dir).some((
  * @returns {{ok:true, component:object, dir:string, files:string[]} | {error:string}}
  */
 export function importFromFiles(store, payload, deps = {}) {
-  const files = (payload?.files || []).filter((f) => f && typeof f.name === 'string' && typeof f.content === 'string');
-  if (!files.length) return { error: 'No files provided.' };
-  // Nur sichere Dateinamen (kein Verzeichnis-Traversal, nur erlaubte Endungen).
-  for (const f of files) {
-    // Kein Verzeichnis-Anteil erlaubt (basename === name) → kein Traversal; nur erlaubte Endungen.
-    if (path.basename(f.name) !== f.name || /[/\\]/.test(f.name) || !ALLOWED.test(f.name)) return { error: `Invalid or disallowed file name: ${f.name}` };
+  const raw = (payload?.files || []).filter((f) => f && typeof f.name === 'string' && typeof f.content === 'string');
+  if (!raw.length) return { error: 'No files provided.' };
+  // T-168: RELATIVE Pfade sind erlaubt (Ordner-Picker lädt die Struktur hoch) — aber nur SICHERE:
+  // keine absoluten Pfade/Laufwerke, keine ..-Segmente; Nicht-Laufzeit-Ordner werden übersprungen.
+  const SKIP_DIRS = /(^|\/)(node_modules|\.git|\.maintenance)(\/|$)/i;
+  const safeRel = (name) => {
+    const n = String(name).replace(/\\/g, '/');
+    if (!n || n.startsWith('/') || /^[a-zA-Z]:/.test(n)) return null;
+    const parts = n.split('/').filter((p) => p && p !== '.');
+    if (!parts.length || parts.some((p) => p === '..')) return null;
+    return parts.join('/');
+  };
+  const files = [];
+  for (const f of raw) {
+    const rel = safeRel(f.name);
+    if (rel === null) return { error: `Invalid or disallowed file name: ${f.name}` };
+    if (SKIP_DIRS.test(rel)) continue; // node_modules/.git still still überspringen (kein Fehler)
+    if (!ALLOWED.test(rel)) return { error: `Invalid or disallowed file name: ${f.name}` };
+    files.push({ name: rel, content: f.content });
   }
+  if (!files.length) return { error: 'No files provided.' };
   const sqlFile = files.find((f) => SQL_RE.test(f.name));
   const name = (payload.name && payload.name.trim()) || (sqlFile ? path.basename(sqlFile.name).replace(SQL_RE, '') : '');
   if (!name) return { error: 'No name derivable.' };
@@ -47,7 +61,11 @@ export function importFromFiles(store, payload, deps = {}) {
   const hasExistingSql = (deps.hasExistingSql ?? defaultHasExistingSql)(dir);
   if (!sqlFile && !hasExistingSql) return { error: 'No plugin export included — at least one .sql file is required (re-import with the SAME name to add files to an existing import).' };
   deps.mkdir(dir);
-  for (const f of files) deps.writeFile(path.join(dir, path.basename(f.name)), f.content);
+  for (const f of files) {
+    const target = path.join(dir, ...f.name.split('/')); // sichere relative Struktur (T-168)
+    deps.mkdir(path.dirname(target));
+    deps.writeFile(target, f.content);
+  }
 
   // Typ/Format/Status wie bei einem Repo-Checkout aus dem Verzeichnis erkennen.
   const rc = repoComponent(dir, name);

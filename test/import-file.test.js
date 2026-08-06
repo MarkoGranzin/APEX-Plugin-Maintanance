@@ -79,6 +79,30 @@ describe('T-144 importFromFiles — Plugin aus Dateien (kein Git)', () => {
     expect(r.error).toMatch(/No files/);
   });
 
+  it('T-168: Ordner-Upload mit relativer Struktur wird 1:1 abgelegt', () => {
+    const store = makeStore();
+    const r = importFromFiles(store, {
+      name: 'Leaflet OSM',
+      files: [
+        { name: 'region_type_plugin_x.sql', content: REGION_SQL },
+        { name: 'js/lib/leaflet/leaflet.js', content: '/* Leaflet 1.7.1 */' },
+        { name: 'css/style.css', content: '.map{}' },
+        { name: 'node_modules/x/index.js', content: 'skip' }, // still übersprungen, kein Fehler
+      ],
+    }, realDeps());
+    expect(r.ok).toBe(true);
+    expect(fs.existsSync(path.join(r.component.path, 'js', 'lib', 'leaflet', 'leaflet.js'))).toBe(true);
+    expect(fs.existsSync(path.join(r.component.path, 'css', 'style.css'))).toBe(true);
+    expect(fs.existsSync(path.join(r.component.path, 'node_modules'))).toBe(false);
+  });
+
+  it('T-168: absolute Pfade/Laufwerke/..-Segmente bleiben blockiert', () => {
+    for (const bad of ['/abs/x.js', 'C:/x.js', 'a/../b.js', '..\\evil.sql']) {
+      const r = importFromFiles(makeStore(), { name: 'X', files: [{ name: bad, content: 'x' }] }, realDeps());
+      expect(r.error, bad).toMatch(/file name/i);
+    }
+  });
+
   it('Pfad-Traversal / fremde Endung → abgelehnt', () => {
     expect(importFromFiles(makeStore(), { files: [{ name: '../evil.sql', content: 'x' }] }, realDeps()).error).toMatch(/file name/i);
     expect(importFromFiles(makeStore(), { files: [{ name: 'plugin.exe', content: 'x' }] }, realDeps()).error).toMatch(/file name|\.sql/i);

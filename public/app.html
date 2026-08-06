@@ -230,7 +230,9 @@
     <label>Directory or Git URL <span class="muted small">(optional — a local folder WITHOUT Git works too: it is copied into the workspace, your original stays untouched)</span></label><input id="mPath" placeholder="https://github.com/org/plugin  ·  D:\ais\MyPlugin (folder, no Git needed)">
     <div id="mFilesRow">
       <div class="small muted" style="margin:10px 0 2px">— or, if you don't use Git —</div>
-      <label>Import files <span class="muted small">(hold <b>Ctrl/Shift</b> to select MULTIPLE files · .sql required for a new plugin; re-import with the same name to add more files · for a WHOLE folder use the Directory field above)</span></label>
+      <label>Import a whole FOLDER <span class="muted small">(pick the plugin directory — structure incl. lib/ is kept; name is prefilled from the folder)</span></label>
+      <input id="mFolder" type="file" webkitdirectory onchange="folderPicked()">
+      <label style="margin-top:8px">…or single files <span class="muted small">(hold <b>Ctrl/Shift</b> for multiple · .sql required for a new plugin; re-import with the same name to add files)</span></label>
       <input id="mFiles" type="file" multiple accept=".sql,.js,.css,.json,.md,.txt">
     </div>
     <div class="foot">
@@ -1211,25 +1213,42 @@ function openEdit(c){
   // Datei-Import nur beim Anlegen anbieten (beim Bearbeiten sinnlos).
   const fr=$('mFilesRow'); if(fr) fr.style.display = editing ? 'none' : 'block';
   const mf=$('mFiles'); if(mf) mf.value='';
+  const mfo=$('mFolder'); if(mfo) mfo.value='';
   $('modalBg').classList.add('open');
 }
 function closeModal(){ $('modalBg').classList.remove('open'); }
+// T-168: erlaubte Text-Endungen für den Ordner-Upload; Nicht-Laufzeit-Ordner + Maps überspringen.
+const IMP_OK = /\.(sql|js|css|json|md|txt)$/i;
+const IMP_SKIP = /(^|\/)(node_modules|\.git|\.maintenance)(\/|$)|\.map$/i;
+// Ordner gewählt → Plugin-Name aus dem Ordnernamen vorbelegen (falls leer).
+function folderPicked(){
+  const mfo=$('mFolder');
+  const first=(mfo&&mfo.files&&mfo.files[0])? mfo.files[0].webkitRelativePath : '';
+  const top=first.split('/')[0]||'';
+  if(top && !$('mName').value.trim()) $('mName').value=top;
+}
 async function saveComponent(){
   const id=$('mId').value;
-  // Herkunft 1 — Datei-Import (kein Git): sind beim Anlegen Dateien gewählt, diese hochladen.
-  const mf=$('mFiles');
-  const fl = (!id && mf && mf.files) ? [...mf.files] : [];
+  // Herkunft 1 — Datei-Import (kein Git): Ordner-Picker (T-168) oder Einzeldateien hochladen.
+  const mf=$('mFiles'), mfo=$('mFolder');
+  const folder = (!id && mfo && mfo.files) ? [...mfo.files] : [];
+  const fl = folder.length ? folder : ((!id && mf && mf.files) ? [...mf.files] : []);
   if(fl.length){
     // B-76: der Import scannt + baut den Mock SYNCHRON (B-74) — ohne Overlay wirkte das minutenlang
     // eingefroren und die Liste blieb „ohne Refresh". Overlay wie beim Klon-/Ordner-Zweig; load() IMMER.
     // (.sql-Pflicht prüft der Server — beim Nachreichen zu einem bestehenden Import ist keine .sql nötig.)
-    const iname = $('mName').value.trim() || (fl.find(f=>/\.sql$/i.test(f.name))?.name.replace(/\.sql$/i,'')) || '';
+    // T-168: beim Ordner-Upload die relative Struktur behalten (Top-Ordner strippen), Müll filtern.
+    const relName = (f) => folder.length ? (f.webkitRelativePath||f.name).split('/').slice(1).join('/') : f.name;
+    const pick = fl.map(f=>({ f, rel: relName(f) })).filter(x => x.rel && IMP_OK.test(x.rel) && !IMP_SKIP.test(x.rel));
+    const skipped = fl.length - pick.length;
+    if(!pick.length) return toast('No importable files (allowed: .sql/.js/.css/.json/.md/.txt)');
+    const iname = $('mName').value.trim() || (pick.find(x=>/\.sql$/i.test(x.rel))?.rel.split('/').pop().replace(/\.sql$/i,'')) || '';
     closeModal();
-    busyOverlay(true, `Importing ${iname||'plugin'}… (scan + mock build — this can take a few minutes)`);
+    busyOverlay(true, `Importing ${iname||'plugin'} (${pick.length} file(s))… (scan + mock build — this can take a few minutes)`);
     try{
-      const files = await Promise.all(fl.map(f => f.text().then(content => ({ name: f.name, content }))));
+      const files = await Promise.all(pick.map(x => x.f.text().then(content => ({ name: x.rel, content }))));
       const r = await api('POST','/api/import-file', { name: $('mName').value.trim(), files });
-      toast(`Imported “${r.component.name}” (${(r.files||[]).length} file(s))`);
+      toast(`Imported “${r.component.name}” (${(r.files||[]).length} file(s)${skipped?`, ${skipped} skipped`:''})`);
       if(r.component&&r.component.id) openDetail(r.component.id);
     }catch(e){ toast('Import error: '+(e.message||e)); }
     finally{ busyOverlay(false); await load(); }   // Liste aktualisiert IMMER — auch nach Fehlern
