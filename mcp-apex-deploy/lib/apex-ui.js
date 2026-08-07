@@ -72,7 +72,10 @@ export async function uiLogin(page, cfg = {}) {
  */
 export async function uiListApps(page, o = {}) {
   if (o.baseUrl) {
-    await page.goto(`${String(o.baseUrl).replace(/\/$/, '')}/r/apex/app-builder/home`, { waitUntil: 'domcontentloaded', timeout: 30000 }).catch(() => {});
+    // B-77: APEX bindet die Login-Session an die session-ID in der URL — ein hartes goto OHNE sie
+    // landet auf der Sign-In-Seite. Session aus der aktuellen (eingeloggten) URL mitnehmen.
+    const sid = (page.url().match(/[?&]session=(\d+)/) || [])[1];
+    await page.goto(`${String(o.baseUrl).replace(/\/$/, '')}/r/apex/app-builder/home${sid ? `?session=${sid}` : ''}`, { waitUntil: 'domcontentloaded', timeout: 30000 }).catch(() => {});
     await page.waitForLoadState('networkidle', { timeout: 15000 }).catch(() => {});
     await page.waitForTimeout(1500);
   }
@@ -101,31 +104,38 @@ export async function uiRunSql(page, sql, o = {}) {
   if (!o.baseUrl) return { ok: false, error: 'baseUrl missing.' };
   const base = String(o.baseUrl).replace(/\/$/, '');
   // B-77: Editor je nach APEX-Version — 24.x nutzt CodeMirror 6 (.cm-editor/.cm-content).
-  const EDITOR = '.cm-editor .cm-content, .cm-content, .cm-editor, .CodeMirror, .monaco-editor, #apexir_CODE, textarea';
+  // NUR SICHTBARE Kandidaten: unsichtbare Hilfs-Textareas fingen sonst den Fokus, der Editor blieb leer.
+  const EDITOR = '.cm-editor .cm-content:visible, .cm-content:visible, .CodeMirror:visible, .monaco-editor:visible, #apexir_CODE:visible, textarea:visible';
   const settle = async (ms = 2000) => { await page.waitForLoadState('networkidle', { timeout: 15000 }).catch(() => {}); await page.waitForTimeout(ms); };
   const findEditor = async () => { const e = page.locator(EDITOR).first(); return (await e.count()) ? e : null; };
   const clickFirst = async (locs) => { for (const l of locs) { const c = l.first(); if (await c.count()) { await c.click({ force: true }).catch(() => {}); await settle(1200); return true; } } return false; };
 
-  // 1) Direkt-URL (je nach Version/Instanz vorhanden).
-  await page.goto(`${base}/r/apex/sql-commands`, { waitUntil: 'domcontentloaded', timeout: 30000 }).catch(() => {});
-  await settle();
+  // B-77 (Live-Befund): Ein hartes goto verwirft die APEX-Session (Sign-In-Redirect) — die Session hängt
+  // an der session-ID in der URL. Daher: (1) per KLICK aus der aktuellen, EINGELOGGTEN Seite navigieren
+  // (Projekt-Regel seit B-30/T-141), (2) erst dann Direkt-URLs — immer MIT session-Parameter.
+  const sid = (page.url().match(/[?&]session=(\d+)/) || [])[1];
+
+  // 1) Klick-Navigation: Menü „SQL Workshop" → „SQL Commands" (Session bleibt erhalten).
+  await clickFirst([
+    page.getByRole('button', { name: /sql workshop/i }),
+    page.getByRole('link', { name: /sql workshop/i }),
+    page.getByText(/^\s*SQL Workshop\s*$/i),
+  ]);
+  await clickFirst([
+    page.getByRole('menuitem', { name: /sql commands/i }),
+    page.getByRole('link', { name: /sql commands/i }),
+    page.getByText(/SQL Commands/i),
+  ]);
   let editor = await findEditor();
 
-  // 2) B-77-Fallback: wie ein echter Nutzer — Workspace-Home → Menü/Kachel „SQL Workshop" → „SQL Commands".
-  if (!editor) {
-    await page.goto(`${base}/r/apex/workspace/home`, { waitUntil: 'domcontentloaded', timeout: 30000 }).catch(() => {});
-    await settle();
-    await clickFirst([
-      page.getByRole('button', { name: /sql workshop/i }),
-      page.getByRole('link', { name: /sql workshop/i }),
-      page.getByText(/^\s*SQL Workshop\s*$/i),
-    ]);
-    await clickFirst([
-      page.getByRole('menuitem', { name: /sql commands/i }),
-      page.getByRole('link', { name: /sql commands/i }),
-      page.getByText(/SQL Commands/i),
-    ]);
-    editor = await findEditor();
+  // 2) Direkt-URLs mit Session als Fallback.
+  if (!editor && sid) {
+    for (const u of [`${base}/r/apex/sql-commands?session=${sid}`, `${base}/r/apex/workspace/sql-commands?session=${sid}`]) {
+      await page.goto(u, { waitUntil: 'domcontentloaded', timeout: 30000 }).catch(() => {});
+      await settle();
+      editor = await findEditor();
+      if (editor) break;
+    }
   }
 
   if (!editor) {
@@ -136,16 +146,40 @@ export async function uiRunSql(page, sql, o = {}) {
     return { ok: false, error: `SQL Commands editor not found (landed on "${title}" @ ${page.url()})${shot ? ` — screenshot: ${shot}` : ''}` };
   }
 
-  await editor.click({ force: true }).catch(() => {});
+  await editor.click().catch(() => {});
   await page.keyboard.press(process.platform === 'darwin' ? 'Meta+a' : 'Control+a').catch(() => {});
-  await page.keyboard.insertText(sql).catch(async () => { await page.keyboard.type(sql, { delay: 5 }); });
+  await page.keyboard.type(sql, { delay: 3 }).catch(() => {});
+  // Verifizieren, dass der Text WIRKLICH im Editor steht (Live-Befund: unsichtbares Element fing den
+  // Fokus, der Editor blieb leer und Run lief ins Leere) — sonst ehrlich abbrechen mit Screenshot.
+  const typed = await editor.innerText().catch(() => '') || await editor.inputValue().catch(() => '');
+  if (!/AISPP|apex_workspaces|select/i.test(typed)) {
+    let shot = null;
+    try { shot = path.join(os.tmpdir(), 'apex-sqlcommands.png'); await page.screenshot({ path: shot }); } catch { shot = null; }
+    return { ok: false, error: `SQL Commands editor did not accept input${shot ? ` — screenshot: ${shot}` : ''}` };
+  }
   // Ausführen: Run-Button, sonst Ctrl+Enter.
   const run = page.getByRole('button', { name: /^run\b/i });
   if (await run.count()) await run.first().click().catch(() => {});
   else await page.keyboard.press('Control+Enter').catch(() => {});
   await page.waitForLoadState('networkidle', { timeout: 20000 }).catch(() => {});
-  await page.waitForTimeout(2500);
-  const text = await page.locator('body').innerText().catch(() => '');
+  // B-77: Das Ergebnis rendert je nach Version in einem IFRAME und braucht Zeit — Haupt-Body + alle
+  // Frames einsammeln und pollen, bis ein Ergebnis-Signal auftaucht (Marker des Aufrufers, Zeilen-Fazit
+  // oder ORA-Fehler). Bei unklarem Ausgang: Diagnose-Screenshot in den Temp-Ordner.
+  const grab = async () => {
+    let t = await page.locator('body').innerText().catch(() => '');
+    for (const f of page.frames()) {
+      if (f === page.mainFrame()) continue;
+      t += '\n' + (await f.locator('body').innerText().catch(() => ''));
+    }
+    return t;
+  };
+  let text = '';
+  for (let i = 0; i < 10; i++) {
+    await page.waitForTimeout(1500);
+    text = await grab();
+    if (/AISPP\|/.test(text) || /rows? (selected|returned)|ORA-\d+/i.test(text)) break;
+  }
+  if (!/AISPP\|/.test(text)) { try { await page.screenshot({ path: path.join(os.tmpdir(), 'apex-sqlresult.png') }); } catch { /* Diagnose optional */ } }
   return { ok: true, text };
 }
 
