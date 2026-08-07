@@ -77,6 +77,66 @@ async function defaultFetchFile(pkg, version, deps = {}) {
   return await res.text();
 }
 
+/** B-78: lädt eine BENANNTE Datei einer npm-Version (dist/<base>, Fallback /<base>). null bei 404. */
+async function defaultFetchNamedFile(pkg, version, base, deps = {}) {
+  const fetchFn = deps.fetch ?? globalThis.fetch;
+  if (!fetchFn) return null;
+  for (const p of [`dist/${base}`, base]) {
+    try {
+      const res = await fetchFn(`https://cdn.jsdelivr.net/npm/${encodeURIComponent(pkg)}@${encodeURIComponent(version)}/${p}`);
+      if (res.ok) return await res.text();
+    } catch { /* nächster Kandidat */ }
+  }
+  return null;
+}
+
+// B-78: liegt die Lib als CHECKOUT-Unterordner vor (lib/<checkout>/…)? → Pfad bis inkl. Checkout-Ordner.
+const CHECKOUT_RE = /^(.*?(?:^|\/)(?:lib|libs|vendor|vendors|third[-_]?party)\/[^/]+)\//i;
+const normToken = (s) => String(s).toLowerCase().replace(/[^a-z0-9]/g, '');
+
+/**
+ * B-78 — Begleitdateien einer CHECKOUT-Lib versionsgleich mitziehen: das Plugin liefert oft nicht die
+ * Default-Datei aus, sondern -src-/CSS-Varianten (leaflet.markercluster-src.js, leaflet.css) — bleiben
+ * die alt, re-embedded die .sql die ALTE Version und der Re-Scan meldet ehrlich weiter „veraltet".
+ * Konservativ: nur im selben Verzeichnis wie die Hauptdatei, nur .js/.css (keine .map), und nur wenn der
+ * Dateiname erkennbar zur Lib gehört (Namens-Token) — fremde Libs in flachen lib/-Ordnern bleiben unberührt.
+ * Zusätzlich wird die package.json des Checkouts auf die neue Version gesetzt (B-71 liest sie zuerst).
+ */
+async function updateCheckoutCompanions(dir, lib, mainRel, backups, deps = {}) {
+  const m = mainRel.replace(/\\/g, '/').match(CHECKOUT_RE);
+  if (!m) return { companions: [], pkgJson: false }; // flache lib/-Datei → keine Begleit-Logik
+  const checkout = m[1];
+  const fetchNamed = deps.fetchNamedFile ?? ((pkg, ver, base) => defaultFetchNamedFile(pkg, ver, base, deps));
+  const pkg = npmPackageName(lib.name);
+  // Namens-Token: voller Name + letztes Segment (leaflet.markercluster → auch „markercluster" matcht MarkerCluster.css).
+  const tokens = [normToken(lib.name), normToken(lib.name.split(/[.\-_]/).pop())].filter((t) => t && t.length >= 4);
+  const mainDirAbs = path.dirname(path.join(dir, mainRel));
+  const mainBase = path.basename(mainRel);
+  const companions = [];
+  let entries = [];
+  try { entries = fs.readdirSync(mainDirAbs, { withFileTypes: true }); } catch { entries = []; }
+  for (const e of entries) {
+    if (!e.isFile() || e.name === mainBase) continue;
+    if (!/\.(js|css)$/i.test(e.name) || /\.map$/i.test(e.name)) continue;
+    if (!tokens.some((t) => normToken(e.name).includes(t))) continue; // gehört nicht erkennbar zur Lib
+    const content = await fetchNamed(pkg, lib.latest, e.name);
+    if (content == null) { companions.push({ file: e.name, applied: false, reason: 'not in CDN package' }); continue; }
+    const abs = path.join(mainDirAbs, e.name);
+    if (!backups.has(abs)) { try { backups.set(abs, fs.readFileSync(abs, 'utf8')); } catch { /* neu */ } }
+    fs.writeFileSync(abs, content);
+    companions.push({ file: e.name, applied: true });
+  }
+  // package.json des Checkouts: Version auf latest — sonst liest der Re-Scan (B-71) weiter die alte.
+  let pkgJson = false;
+  const pj = path.join(dir, ...checkout.split('/'), 'package.json');
+  try {
+    const txt = fs.readFileSync(pj, 'utf8');
+    const upd = txt.replace(/("version"\s*:\s*")v?[\d.]+(")/, `$1${lib.latest}$2`);
+    if (upd !== txt) { if (!backups.has(pj)) backups.set(pj, txt); fs.writeFileSync(pj, upd); pkgJson = true; }
+  } catch { /* kein package.json → nichts zu tun */ }
+  return { companions, pkgJson };
+}
+
 /**
  * Spielt sichere Updates ein; meldet breaking. Liefert Ergebnisse + Backups (für Rollback).
  * @param {string} dir  Repo-Verzeichnis
@@ -125,7 +185,9 @@ export async function applyVendoredUpdates(dir, libs, deps = {}) {
         backups.set(outAbs, null); // Rollback: die neu angelegte Datei wieder entfernen
         refsUpdated = rewriteReferences(dir, base, renamedTo, backups, deps);
       }
-      results.push({ name: lib.name, from: lib.version, to: lib.latest, applied: true, breaking: cls === 'breaking', file: outRel, ...(renamedTo ? { renamedFrom: base, renamedTo, refsUpdated } : {}) });
+      // B-78: Checkout-Begleitdateien (-src.js/.css) versionsgleich mitziehen + package.json auf latest.
+      const comp = await updateCheckoutCompanions(dir, lib, outRel, backups, deps);
+      results.push({ name: lib.name, from: lib.version, to: lib.latest, applied: true, breaking: cls === 'breaking', file: outRel, ...(renamedTo ? { renamedFrom: base, renamedTo, refsUpdated } : {}), ...(comp.companions.length ? { companions: comp.companions } : {}), ...(comp.pkgJson ? { pkgJson: true } : {}) });
     } catch (e) {
       results.push({ name: lib.name, from: lib.version, to: lib.latest, applied: false, reason: 'download/write failed: ' + (e?.message ?? e) });
     }

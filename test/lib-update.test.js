@@ -38,6 +38,39 @@ describe('T-79 applyVendoredUpdates', () => {
     expect(fs.readFileSync(path.join(dir, 'lib', 'jquery.min.js'), 'utf8')).toMatch(/v1\.2\.3/);
   });
 
+  it('B-78: Checkout-Update zieht Begleitdateien (-src.js/.css) mit + setzt package.json — .map & Fremdes bleiben', async () => {
+    // Checkout-Struktur wie der Leaflet-Fall
+    fs.mkdirSync(path.join(dir, 'js', 'lib', 'Leaflet.markercluster-master', 'dist'), { recursive: true });
+    const base = path.join(dir, 'js', 'lib', 'Leaflet.markercluster-master');
+    fs.writeFileSync(path.join(base, 'package.json'), '{ "name": "leaflet.markercluster", "version": "1.4.1" }');
+    fs.writeFileSync(path.join(base, 'dist', 'leaflet.markercluster.js'), '/* mc 1.4.1 */');
+    fs.writeFileSync(path.join(base, 'dist', 'leaflet.markercluster-src.js'), '/* mc-src 1.4.1 */');
+    fs.writeFileSync(path.join(base, 'dist', 'MarkerCluster.css'), '/* css 1.4.1 */');
+    fs.writeFileSync(path.join(base, 'dist', 'leaflet.markercluster.js.map'), '{"old":"map"}');
+    const fetchFile = async () => '/* mc 1.5.3 */';
+    const fetchNamedFile = async (pkg, ver, b) => (b === 'MarkerCluster.css' || b === 'leaflet.markercluster-src.js') ? `/* ${b}@${ver} */` : null;
+    const r = await applyVendoredUpdates(dir, [{ name: 'leaflet.markercluster', version: '1.4.1', outdated: true, latest: '1.5.3' }], { fetchFile, fetchNamedFile });
+    const res = r.results.find((x) => x.name === 'leaflet.markercluster');
+    expect(res.applied).toBe(true);
+    expect(fs.readFileSync(path.join(base, 'dist', 'leaflet.markercluster-src.js'), 'utf8')).toContain('@1.5.3'); // Begleit-JS neu
+    expect(fs.readFileSync(path.join(base, 'dist', 'MarkerCluster.css'), 'utf8')).toContain('@1.5.3');           // Begleit-CSS neu
+    expect(fs.readFileSync(path.join(base, 'dist', 'leaflet.markercluster.js.map'), 'utf8')).toContain('old');   // .map unberührt
+    expect(fs.readFileSync(path.join(base, 'package.json'), 'utf8')).toContain('"1.5.3"');                        // Version gebumpt
+    // Rollback stellt ALLES wieder her (inkl. Begleitdateien + package.json)
+    rollbackUpdates(r.backups);
+    expect(fs.readFileSync(path.join(base, 'dist', 'MarkerCluster.css'), 'utf8')).toContain('1.4.1');
+    expect(fs.readFileSync(path.join(base, 'package.json'), 'utf8')).toContain('"1.4.1"');
+  });
+
+  it('B-78: FLACHE lib/-Ordner bekommen KEINE Begleit-Logik — Nachbar-Libs bleiben unangetastet', async () => {
+    fs.writeFileSync(path.join(dir, 'lib', 'mxClient.js'), '/* fremd, bleib weg */');
+    const fetchFile = async (pkg, ver) => `/*! jQuery v${ver} */`;
+    const fetchNamedFile = async () => { throw new Error('darf im flachen Fall NICHT aufgerufen werden'); };
+    const r = await applyVendoredUpdates(dir, [{ name: 'jquery', version: '1.2.3', outdated: true, latest: '1.5.0' }], { fetchFile, fetchNamedFile });
+    expect(r.results[0].applied).toBe(true);
+    expect(fs.readFileSync(path.join(dir, 'lib', 'mxClient.js'), 'utf8')).toContain('bleib weg');
+  });
+
   it('breaking wird NICHT getauscht (ohne force), nur markiert', async () => {
     const fetchFile = async () => 'should-not-be-written';
     const r = await applyVendoredUpdates(dir, [{ name: 'jquery', version: '1.2.3', outdated: true, latest: '4.0.0' }], { fetchFile });
